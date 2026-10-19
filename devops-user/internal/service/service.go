@@ -9,14 +9,71 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"github.com/stanley760/devops/devops-infra/errs"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/stanley760/devops/devops-user/internal/auth"
 	"github.com/stanley760/devops/devops-user/internal/dao"
 	"github.com/stanley760/devops/devops-user/internal/loginlock"
 	"github.com/stanley760/devops/devops-user/internal/model"
 )
+
+// authCounter 业务指标：登录/注册尝试计数（auth_login / auth_register → auth_*_total）。
+// 标签均为有界集：result=success|failure，code=失败业务码（成功恒 200）。
+// 惰性创建：首次调用时全局 MeterProvider 已由 observability.Init 装配完毕；
+// 未初始化（单测/探针）自动落到 noop 仪表。指标故障不影响业务返回。
+var (
+	authLoginCounter = sync.OnceValue(func() metric.Int64Counter {
+		c, err := otel.Meter("github.com/stanley760/devops/devops-user/service").Int64Counter(
+			"auth_login",
+			metric.WithDescription("登录尝试计数；result=success|failure，code 为失败业务码（成功=200）"),
+		)
+		if err != nil {
+			otel.Handle(err)
+		}
+		return c
+	})
+	authRegisterCounter = sync.OnceValue(func() metric.Int64Counter {
+		c, err := otel.Meter("github.com/stanley760/devops/devops-user/service").Int64Counter(
+			"auth_register",
+			metric.WithDescription("注册尝试计数；result=success|failure，code 为失败业务码（成功=200）"),
+		)
+		if err != nil {
+			otel.Handle(err)
+		}
+		return c
+	})
+)
+
+// authResultAttr 认证结果标签值。
+func authResultAttr(err error) attribute.KeyValue {
+	if err != nil {
+		return attribute.String("result", "failure")
+	}
+	return attribute.String("result", "success")
+}
+
+// authCodeAttr 失败原因码：BizError 携带的有界业务码，非 BizError 按 500 归类。
+// 失败的具体细节（密码错误/用户不存在/锁定等）走访问日志，不进指标标签控制基数。
+func authCodeAttr(err error) attribute.KeyValue {
+	return attribute.Int("code", authErrCode(err))
+}
+
+// authErrCode 认证结果业务码（成功 200；失败取 BizError 的 4xx/5xx，非业务错误按 500）。
+func authErrCode(err error) int {
+	if err == nil {
+		return errs.CodeOK
+	}
+	var be *errs.BizError
+	if errors.As(err, &be) && be.Code >= 400 && be.Code <= 599 {
+		return be.Code
+	}
+	return errs.CodeInternal
+}
 
 // 业务错误（服务内定义，handler 感知不到）。
 //
@@ -64,7 +121,15 @@ type RegisterInput struct {
 type TokenPair = auth.TokenPair
 
 // Register 创建账号并直接签发 access token（省去注册后立即再登录一次）。
+// 业务指标：无论成败记一次 auth_register_total{result, code}，指标故障不影响注册。
 func (s *Auth) Register(ctx context.Context, in RegisterInput) (TokenPair, error) {
+	pair, err := s.register(ctx, in)
+	authRegisterCounter().Add(ctx, 1, metric.WithAttributes(authResultAttr(err), authCodeAttr(err)))
+	return pair, err
+}
+
+// register 注册主流程。
+func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error) {
 	if !usernamePattern.MatchString(in.Username) {
 		return TokenPair{}, errs.New(errs.CodeParam,
 			"用户名须以字母开头，3-32 位字母数字下划线")
@@ -118,7 +183,16 @@ func (s *Auth) Register(ctx context.Context, in RegisterInput) (TokenPair, error
 //   - 账号已封禁**不计**失败——不是用户输错，是账号状态问题，
 //     计入会导致误封正常用户的IP 计数。
 //   - 成功后清空该账号计数；IP 计数不清，否则正常用户偶发输错就永久触发 IP 限流。
+//
+// 业务指标：无论成败记一次 auth_login_total{result, code}，指标故障不影响登录。
 func (s *Auth) Login(ctx context.Context, clientIP, username, password string) (TokenPair, error) {
+	pair, err := s.login(ctx, clientIP, username, password)
+	authLoginCounter().Add(ctx, 1, metric.WithAttributes(authResultAttr(err), authCodeAttr(err)))
+	return pair, err
+}
+
+// login 登录主流程。
+func (s *Auth) login(ctx context.Context, clientIP, username, password string) (TokenPair, error) {
 	if err := s.checkLimit(ctx, clientIP, username); err != nil {
 		return TokenPair{}, err
 	}

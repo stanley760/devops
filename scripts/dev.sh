@@ -51,6 +51,7 @@ start_services() {
   # devops-system 依赖 devops-id 发号，等它先就绪
   sleep 3
   start_service devops-system devops-system
+  start_service devops-user devops-user
   echo ""
   echo "首次运行或 schema 变更后，请先执行建表与种子初始化：sh deploy/dev.sh migrate"
   echo "首次使用前需复制 .env.example 为 .env 并填入局域网 IP（NACOS_REGISTER_IP）。"
@@ -211,6 +212,7 @@ case "$COMMAND" in
     ;;
   stop)
     # 停止本地业务服务（容器不受影响）
+    stop_service devops-user
     stop_service devops-system
     stop_service devops-id
     ;;
