@@ -329,6 +329,9 @@ var serverCmd = &cobra.Command{
 		readiness := []httpinfra.ReadinessCheck{
 			{Name: "mysql", Check: client.Default().Ping},
 			{Name: "redis", Check: store.Ping},
+			// 发号服务是写路径硬依赖（主键非自增）：devops-id 不可用时注册等插入
+			// 会 fail-fast，readyz 必须反映，编排侧才能提前摘流。
+			{Name: "devops-id", Check: idc.Ping},
 		}
 		register := router.NewRegister(cfg.APIDoc, authM, router.Modules{
 			Auth:    router.NewAuthRoutes(authSvc, kit),

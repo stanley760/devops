@@ -97,6 +97,11 @@ var (
 // 唯一索引保证并发下不会重名（竞态由 dao.CreateUser 兜底）。
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{2,31}$`)
 
+// validGender 性别取值：0未知 1男 2女（与 devops-system 的 t_system_users 同约定）。
+// 在 service 收口校验：API 层的 huma minimum/maximum 只挡直连 HTTP 的调用，
+// 换别的入口（如三方自动建号）时此处仍兜底，避免脏值入库。
+func validGender(g int8) bool { return g >= 0 && g <= 2 }
+
 // Auth 认证用例（注册 / 登录 / 登出）。
 type Auth struct {
 	authM   *auth.Manager
@@ -115,6 +120,7 @@ type RegisterInput struct {
 	Nickname string
 	Email    string
 	Mobile   string
+	Gender   int8
 }
 
 // TokenPair 双 token 签发结果（转发 auth.TokenPair，避免重复定义）。
@@ -137,6 +143,9 @@ func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error
 	if len(in.Password) < 8 {
 		return TokenPair{}, errs.New(errs.CodeParam, "密码至少 8 位")
 	}
+	if !validGender(in.Gender) {
+		return TokenPair{}, errs.New(errs.CodeParam, "性别取值不合法（0未知 1男 2女）")
+	}
 
 	// 提前拦截以给出友好文案；并发竞态下仍以唯一索引为准。
 	taken, err := dao.IsUsernameTaken(ctx, in.Username)
@@ -158,6 +167,7 @@ func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error
 		Username: in.Username,
 		Password: hash,
 		Nickname: in.Nickname,
+		Gender:   in.Gender,
 	}
 	if in.Email != "" {
 		u.Email = &in.Email
@@ -324,6 +334,7 @@ type UpdateInput struct {
 	Nickname *string
 	Email    *string
 	Mobile   *string
+	Gender   *int8
 	Avatar   *string
 }
 
@@ -343,6 +354,12 @@ func (s *Profile) Update(ctx context.Context, claims *auth.AccessClaims, in Upda
 	}
 	if in.Mobile != nil {
 		fields["mobile"] = model.NormalizePtr(in.Mobile)
+	}
+	if in.Gender != nil {
+		if !validGender(*in.Gender) {
+			return model.PublicProfile{}, errs.New(errs.CodeParam, "性别取值不合法（0未知 1男 2女）")
+		}
+		fields["gender"] = *in.Gender
 	}
 	if in.Avatar != nil {
 		fields["avatar"] = model.NormalizePtr(in.Avatar)

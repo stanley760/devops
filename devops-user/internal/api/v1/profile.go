@@ -52,7 +52,10 @@ type updateBody struct {
 	Nickname *string `json:"nickname" required:"false" doc:"昵称，不传则不修改" maxLength:"32"`
 	Email    *string `json:"email" required:"false" doc:"邮箱，不传则不修改"`
 	Mobile   *string `json:"mobile" required:"false" doc:"手机号，不传则不修改"`
-	Avatar   *string `json:"avatar" required:"false" doc:"头像地址，不传则不修改"`
+	// Gender 用指针：nil = 不修改，0 = 改回「未知」——两者语义不同，
+	// 非指针会让客户端无法把性别改回未知。
+	Gender *int8   `json:"gender" required:"false" doc:"性别 0未知 1男 2女，不传则不修改" minimum:"0" maximum:"2"`
+	Avatar *string `json:"avatar" required:"false" doc:"头像地址，不传则不修改"`
 }
 
 // Update PUT /user/api/v1/profile —— 修改当前用户资料。
@@ -63,6 +66,7 @@ func (h *ProfileHandler) Update(ctx context.Context, in *struct {
 		Nickname: in.Body.Nickname,
 		Email:    in.Body.Email,
 		Mobile:   in.Body.Mobile,
+		Gender:   in.Body.Gender,
 		Avatar:   in.Body.Avatar,
 	})
 	if err != nil {

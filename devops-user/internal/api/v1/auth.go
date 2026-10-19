@@ -44,6 +44,8 @@ type registerBody struct {
 	Nickname string `json:"nickname" required:"false" doc:"昵称，留空则同登录名" maxLength:"32"`
 	Email    string `json:"email" required:"false" doc:"邮箱" example:"alice@example.com"`
 	Mobile   string `json:"mobile" required:"false" doc:"手机号"`
+	// Gender 0未知 1男 2女。零值即「未知」，故可选字段用非指针即可表达「不填」。
+	Gender int8 `json:"gender" required:"false" doc:"性别 0未知 1男 2女" minimum:"0" maximum:"2" example:"1"`
 }
 
 // authOutput 认证响应体。
@@ -61,6 +63,7 @@ func (h *AuthHandler) Register(ctx context.Context, in *struct {
 		Nickname: in.Body.Nickname,
 		Email:    in.Body.Email,
 		Mobile:   in.Body.Mobile,
+		Gender:   in.Body.Gender,
 	})
 	if err != nil {
 		return nil, errs.ToHumaError(err)

@@ -55,6 +55,9 @@ type User struct {
 	// 否则第二个未绑定邮箱的用户会与第一个的空串冲突。
 	Email  *string `gorm:"size:100;uniqueIndex:uk_email" json:"email" doc:"邮箱"`
 	Mobile *string `gorm:"size:20;uniqueIndex:uk_mobile" json:"mobile" doc:"手机号"`
+	// Gender 0未知 1男 2女，与 devops-system 的 t_system_users 同约定。
+	// 用 int8 而非自定义类型：两个服务的前后端可共用同一套取值与文案。
+	Gender int8    `gorm:"not null;default:0" json:"gender" doc:"性别 0未知 1男 2女"`
 	Avatar *string `gorm:"size:512" json:"avatar" doc:"头像地址"`
 
 	Disabled bool `gorm:"not null;default:false" json:"disabled" doc:"是否已封禁"`
@@ -70,6 +73,7 @@ type PublicProfile struct {
 	Nickname  string `json:"nickname" doc:"昵称"`
 	Email     string `json:"email" doc:"邮箱"`
 	Mobile    string `json:"mobile" doc:"手机号"`
+	Gender    int8   `json:"gender" doc:"性别 0未知 1男 2女"`
 	Avatar    string `json:"avatar" doc:"头像地址"`
 	CreatedAt int64  `json:"created_at" doc:"注册时间（Unix 毫秒）"`
 }
@@ -86,6 +90,7 @@ func (u *User) ToPublic() PublicProfile {
 		Nickname:  u.Nickname,
 		Email:     deref(u.Email),
 		Mobile:    deref(u.Mobile),
+		Gender:    u.Gender,
 		Avatar:    deref(u.Avatar),
 		CreatedAt: u.CreateTime.UnixMilli(),
 	}

@@ -59,7 +59,8 @@ start_services() {
 
 # —— watch：监测本地业务服务（存活+就绪）。存活失败自动重启（退避+熔断），就绪失败仅告警 ——
 # 端点为 dev 配置硬编码：devops-id 存活探针走 metrics :9991（若关闭 metrics 会被误判死亡，
-# 由熔断兜底）；devops-system /readyz 内含 mysql/redis/devops-id 三项依赖检查。
+# 由熔断兜底）；devops-system /readyz 内含 mysql/redis/devops-id 三项依赖检查；
+# devops-user 存活走 /healthz，/readyz 内含 mysql/redis/devops-id 三项依赖检查。
 
 WATCH_INTERVAL=10  # 轮询间隔（秒）
 WATCH_BACKOFF=60   # 单服务重启退避（秒）
@@ -67,6 +68,8 @@ WATCH_BREAKER=5    # 连续重启熔断阈值（次）
 ID_ALIVE_URL="http://127.0.0.1:9991/metrics"
 SYS_ALIVE_URL="http://127.0.0.1:9999/healthz"
 SYS_READY_URL="http://127.0.0.1:9999/readyz"
+USR_ALIVE_URL="http://127.0.0.1:10000/healthz"
+USR_READY_URL="http://127.0.0.1:10000/readyz"
 
 # HTTP 探针：输出状态码（连接失败为 000 或空）；$2 提供时把响应体写入该文件。
 # curl 失败经 || true 吞掉退出码，避免 set -e 杀掉监测循环。
@@ -76,6 +79,35 @@ probe_code() {
   else
     curl -s -m 3 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true
   fi
+}
+
+# 探测「存活 + 就绪」型服务：$1=存活URL $2=就绪URL $3=就绪响应落盘文件。
+# 结果写入 probe_state（UP/DOWN/UNREADY）与 probe_detail（未就绪明细），由调用方即时取走。
+probe_http() {
+  probe_state="DOWN"; probe_detail=""
+  if [ "$(probe_code "$1")" = "200" ]; then
+    probe_state="UP"
+    if [ "$(probe_code "$2" "$3")" != "200" ]; then
+      probe_state="UNREADY"
+      probe_detail=$(grep -o '"unready":\[[^]]*\]' "$3" 2>/dev/null || true)
+      if [ -z "$probe_detail" ]; then probe_detail='"unready":[?]'; fi
+    fi
+  fi
+}
+
+# 重启依赖 devops-id 的服务前先等它恢复（最长 30s）：devops-id 未就绪时
+# 重启消费方也立刻不健康，只会白白烧掉退避与熔断计数。
+wait_for_id() {
+  if [ "$(probe_code "$ID_ALIVE_URL")" = "200" ]; then
+    return
+  fi
+  echo "  等待 devops-id 恢复后再重启 $1（最长 30s）..."
+  waited=0
+  while [ "$waited" -lt 30 ]; do
+    sleep 3
+    waited=$((waited + 3))
+    if [ "$(probe_code "$ID_ALIVE_URL")" = "200" ]; then break; fi
+  done
 }
 
 # 读单服务上次重启时间戳（持久化在 .dev-logs，watch 重启后退避仍生效）；非法内容按 0
@@ -111,29 +143,26 @@ watch_services() {
   if ! command -v go >/dev/null 2>&1; then
     echo "警告: 当前 shell 找不到 go，监测到故障将无法自动重启（Git Bash 下需先 export PATH 再运行）"
   fi
-  echo "监测 devops-id（$ID_ALIVE_URL）与 devops-system（$SYS_ALIVE_URL + $SYS_READY_URL）"
+  echo "监测 devops-id（$ID_ALIVE_URL）、devops-system（$SYS_ALIVE_URL + $SYS_READY_URL）"
+  echo "与 devops-user（$USR_ALIVE_URL + $USR_READY_URL）"
   echo "每 ${WATCH_INTERVAL}s 轮询；存活失败自动重启（退避 ${WATCH_BACKOFF}s，连续 ${WATCH_BREAKER} 次熔断）；就绪失败仅告警。Ctrl-C 退出。"
   echo ""
   trap 'echo ""; echo "监测已退出（服务不受影响）"; exit 0' INT TERM
 
   id_state="INIT"; id_breaker=0; id_tripped=0; id_last=$(read_last_restart devops-id)
   sys_state="INIT"; sys_breaker=0; sys_tripped=0; sys_last=$(read_last_restart devops-system)
+  usr_state="INIT"; usr_breaker=0; usr_tripped=0; usr_last=$(read_last_restart devops-user)
   cycle=0
 
   while :; do
     cycle=$((cycle + 1))
 
-    # 探测：devops-id 仅存活；devops-system 存活 + 就绪
+    # 探测：devops-id 仅存活；devops-system / devops-user 存活 + 就绪
     if [ "$(probe_code "$ID_ALIVE_URL")" = "200" ]; then id_new="UP"; else id_new="DOWN"; fi
-    sys_new="DOWN"; sys_detail=""
-    if [ "$(probe_code "$SYS_ALIVE_URL")" = "200" ]; then
-      sys_new="UP"
-      if [ "$(probe_code "$SYS_READY_URL" "$LOG_DIR/watch-readyz.body")" != "200" ]; then
-        sys_new="UNREADY"
-        sys_detail=$(grep -o '"unready":\[[^]]*\]' "$LOG_DIR/watch-readyz.body" 2>/dev/null || true)
-        if [ -z "$sys_detail" ]; then sys_detail='"unready":[?]'; fi
-      fi
-    fi
+    probe_http "$SYS_ALIVE_URL" "$SYS_READY_URL" "$LOG_DIR/watch-readyz-sys.body"
+    sys_new="$probe_state"; sys_detail="$probe_detail"
+    probe_http "$USR_ALIVE_URL" "$USR_READY_URL" "$LOG_DIR/watch-readyz-usr.body"
+    usr_new="$probe_state"; usr_detail="$probe_detail"
 
     # 状态变化即时打印；恢复 UP 复位熔断计数并解除熔断
     if [ "$id_new" != "$id_state" ]; then
@@ -146,10 +175,15 @@ watch_services() {
       sys_state="$sys_new"
     fi
     if [ "$sys_new" = "UP" ]; then sys_breaker=0; sys_tripped=0; fi
+    if [ "$usr_new" != "$usr_state" ]; then
+      print_state devops-user "$usr_new" "$usr_detail"
+      usr_state="$usr_new"
+    fi
+    if [ "$usr_new" = "UP" ]; then usr_breaker=0; usr_tripped=0; fi
 
     # 心跳：每 6 轮（约 60s）一行
     if [ $((cycle % 6)) -eq 0 ]; then
-      echo "[$(date '+%H:%M:%S')] 心跳: devops-id=$id_state devops-system=$sys_state"
+      echo "[$(date '+%H:%M:%S')] 心跳: devops-id=$id_state devops-system=$sys_state devops-user=$usr_state"
     fi
 
     # 自动重启（仅存活失败触发；就绪失败是容器/依赖问题，重启 Go 服务无意义）
@@ -168,22 +202,28 @@ watch_services() {
     if [ "$sys_new" = "DOWN" ] && [ "$sys_tripped" -ne 1 ]; then
       now=$(date +%s)
       if [ $((now - sys_last)) -ge "$WATCH_BACKOFF" ]; then
-        # 两服务同时死亡：先等 devops-id 恢复（最长 30s）再重启 devops-system
-        if [ "$id_new" = "DOWN" ]; then
-          echo "  等待 devops-id 恢复后再重启 devops-system（最长 30s）..."
-          waited=0
-          while [ "$waited" -lt 30 ]; do
-            sleep 3
-            waited=$((waited + 3))
-            if [ "$(probe_code "$ID_ALIVE_URL")" = "200" ]; then break; fi
-          done
-        fi
+        # 两服务同时死亡：先等 devops-id 恢复再重启 devops-system（消费方就绪依赖发号）
+        wait_for_id devops-system
         watch_restart devops-system devops-system
         sys_last=$(date +%s)
         sys_breaker=$((sys_breaker + 1))
         if [ "$sys_breaker" -ge "$WATCH_BREAKER" ]; then
           sys_tripped=1
           echo "[$(date '+%H:%M:%S')] devops-system 连续 ${WATCH_BREAKER} 次重启仍不健康，停止自动重启，请人工检查"
+        fi
+      fi
+    fi
+    if [ "$usr_new" = "DOWN" ] && [ "$usr_tripped" -ne 1 ]; then
+      now=$(date +%s)
+      if [ $((now - usr_last)) -ge "$WATCH_BACKOFF" ]; then
+        # 同理：devops-id 死亡时不急着重启 devops-user，先等发号服务回来
+        wait_for_id devops-user
+        watch_restart devops-user devops-user
+        usr_last=$(date +%s)
+        usr_breaker=$((usr_breaker + 1))
+        if [ "$usr_breaker" -ge "$WATCH_BREAKER" ]; then
+          usr_tripped=1
+          echo "[$(date '+%H:%M:%S')] devops-user 连续 ${WATCH_BREAKER} 次重启仍不健康，停止自动重启，请人工检查"
         fi
       fi
     fi
