@@ -1,4 +1,4 @@
-# 构建上下文为仓库根（go.work 需要三个模块），排除无关内容
+# 构建上下文为仓库根（Dockerfile 只 COPY 被构建的那一个模块），排除无关内容
 .git
 .idea
 .vscode

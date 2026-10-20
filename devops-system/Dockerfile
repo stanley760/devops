@@ -1,33 +1,31 @@
 # devops-system 用户权限系统镜像（多阶段构建：静态编译 + alpine 运行时）。
 #
-# 构建上下文必须是仓库根：go.work 工作区使本模块引用 devops-infra，
+# 构建上下文为仓库根。镜像内以 GOWORK=off 构建：只复制本模块源码，
+# 兄弟模块（devops-common / devops-id / devops-infra）由 go.mod 的 require
+# 从代理拉取，与外部使用者的真实拉取路径一致，因此这些版本必须已发布。
 #   docker build -f devops-system/Dockerfile -t devops-system:dev .
 #
 # 镜像内配置仅为占位（config/config.yaml），实际环境差异通过
 # APP_ENV 合并环境文件覆盖（挂载 devops-system-prod.yaml，见 deploy/）。
-FROM golang:1.26-alpine AS builder
+# go.mod 要求 go >= 1.27.1，且官方镜像锁定 GOTOOLCHAIN=local，
+# 基础镜像必须与 go.work/go.mod 的 go 指令一致，否则 go 命令直接失败。
+FROM golang:1.27-alpine AS builder
 
 ARG VERSION=dev
 # 默认走国内代理（与宿主机 go env GOPROXY 一致），海外构建可 --build-arg GOPROXY= 覆盖
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
+# 关闭工作区模式：镜像内只存在本模块，兄弟模块按 require 版本从代理解析
+ENV GOWORK=off
 
 WORKDIR /src
 
 # 依赖描述先于源码拷贝，go.sum 不变时命中层缓存
-COPY go.work go.work.sum ./
-COPY devops-infra/go.mod devops-infra/go.sum devops-infra/
-COPY devops-id/go.mod devops-id/go.sum devops-id/
 COPY devops-system/go.mod devops-system/go.sum devops-system/
 
-# go.work 工作区含全部三个模块，预下载需逐模块执行
 RUN --mount=type=cache,target=/go/pkg/mod \
-    cd devops-infra && go mod download \
-    && cd ../devops-id && go mod download \
-    && cd ../devops-system && go mod download
+    cd devops-system && go mod download
 
-COPY devops-infra/ devops-infra/
-COPY devops-id/ devops-id/
 COPY devops-system/ devops-system/
 
 # CGO_ENABLED=0 静态编译；-trimpath 去掉本机路径

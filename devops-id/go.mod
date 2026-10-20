@@ -7,7 +7,7 @@ require (
 	github.com/google/wire v0.7.0
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
-	github.com/stanley760/devops/devops-infra v0.1.1
+	github.com/stanley760/devops/devops-infra v0.2.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
@@ -170,5 +170,3 @@ require (
 )
 
 tool github.com/air-verse/air
-
-replace github.com/stanley760/devops/devops-infra => ../devops-infra

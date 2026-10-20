@@ -11,9 +11,9 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/cobra v1.10.2
-	github.com/stanley760/devops/devops-common v0.1.1
-	github.com/stanley760/devops/devops-id v0.1.1
-	github.com/stanley760/devops/devops-infra v0.1.1
+	github.com/stanley760/devops/devops-common v0.2.0
+	github.com/stanley760/devops/devops-id v0.2.0
+	github.com/stanley760/devops/devops-infra v0.2.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
 	golang.org/x/crypto v0.57.0
@@ -172,9 +172,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.42.2 // indirect
 )
-
-replace github.com/stanley760/devops/devops-common => ../devops-common
-
-replace github.com/stanley760/devops/devops-id => ../devops-id
-
-replace github.com/stanley760/devops/devops-infra => ../devops-infra
