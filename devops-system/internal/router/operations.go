@@ -359,6 +359,100 @@ func registerTenants(api huma.API, h *apiv1.TenantHandler, kit *middleware.Kit) 
 	}), h.Delete)
 }
 
+// registerDicts dictionary module 9 interfaces (dictionary types + dictionary items).
+// The two resources are separated into distinct path prefixes (/dict-types, /dict-data),
+// matching the yudao-style console layout.
+func registerDicts(api huma.API, h *apiv1.DictHandler, kit *middleware.Kit) {
+	common := huma.Operation{
+		Tags:      []string{"dicts"},
+		Responses: humaerr.CommonErrResponses(),
+	}
+
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-type-list", Method: http.MethodGet, Path: "/api/v1/dict-types",
+		Summary: "dictionary type list", Middlewares: kit.Biz("system:dict:list"),
+	}), h.ListTypes)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-type-get", Method: http.MethodGet, Path: "/api/v1/dict-types/{id}",
+		Summary: "dictionary type detail", Middlewares: kit.Biz("system:dict:query"),
+	}), h.GetType)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-type-create", Method: http.MethodPost, Path: "/api/v1/dict-types",
+		Summary: "create dictionary type", Description: "the type code cannot be changed after creation.",
+		Middlewares: kit.Biz("system:dict:create"),
+	}), h.CreateType)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-type-update", Method: http.MethodPut, Path: "/api/v1/dict-types/{id}",
+		Summary: "update dictionary type", Middlewares: kit.Biz("system:dict:update"),
+	}), h.UpdateType)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-type-delete", Method: http.MethodDelete, Path: "/api/v1/dict-types/{id}",
+		Summary: "delete dictionary type", Description: "a type that still has items cannot be deleted.",
+		Middlewares: kit.Biz("system:dict:delete"),
+	}), h.DeleteType)
+
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-list", Method: http.MethodGet, Path: "/api/v1/dict-data",
+		Summary: "dictionary item list", Middlewares: kit.Biz("system:dict:list"),
+	}), h.ListData)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-simple", Method: http.MethodGet, Path: "/api/v1/dict-data/simple",
+		Summary: "dictionary items of one type", Description: "returns the enabled items of one dictionary type, for the frontend dropdowns.",
+		Middlewares: kit.Biz("system:dict:list"),
+	}), h.ListByType)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-get", Method: http.MethodGet, Path: "/api/v1/dict-data/{id}",
+		Summary: "dictionary item detail", Middlewares: kit.Biz("system:dict:query"),
+	}), h.GetData)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-create", Method: http.MethodPost, Path: "/api/v1/dict-data",
+		Summary: "create dictionary item", Middlewares: kit.Biz("system:dict:create"),
+	}), h.CreateData)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-update", Method: http.MethodPut, Path: "/api/v1/dict-data/{id}",
+		Summary: "update dictionary item", Middlewares: kit.Biz("system:dict:update"),
+	}), h.UpdateData)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "dict-data-delete", Method: http.MethodDelete, Path: "/api/v1/dict-data/{id}",
+		Summary: "delete dictionary item", Middlewares: kit.Biz("system:dict:delete"),
+	}), h.DeleteData)
+}
+
+// registerConfigs system configuration module 6 interfaces.
+func registerConfigs(api huma.API, h *apiv1.ConfigHandler, kit *middleware.Kit) {
+	common := huma.Operation{
+		Tags:      []string{"configs"},
+		Responses: humaerr.CommonErrResponses(),
+	}
+
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-list", Method: http.MethodGet, Path: "/api/v1/configs",
+		Summary: "configuration list", Middlewares: kit.Biz("system:config:list"),
+	}), h.List)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-get", Method: http.MethodGet, Path: "/api/v1/configs/{id}",
+		Summary: "configuration detail", Middlewares: kit.Biz("system:config:query"),
+	}), h.Get)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-get-by-key", Method: http.MethodGet, Path: "/api/v1/configs/key/{key}",
+		Summary: "configuration detail by key", Middlewares: kit.Biz("system:config:query"),
+	}), h.GetByKey)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-create", Method: http.MethodPost, Path: "/api/v1/configs",
+		Summary: "create configuration", Description: "the key cannot be changed after creation.",
+		Middlewares: kit.Biz("system:config:create"),
+	}), h.Create)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-update", Method: http.MethodPut, Path: "/api/v1/configs/{id}",
+		Summary: "update configuration", Middlewares: kit.Biz("system:config:update"),
+	}), h.Update)
+	huma.Register(api, with(common, huma.Operation{
+		OperationID: "config-delete", Method: http.MethodDelete, Path: "/api/v1/configs/{id}",
+		Summary: "delete configuration", Description: "built-in configurations cannot be deleted.",
+		Middlewares: kit.Biz("system:config:delete"),
+	}), h.Delete)
+}
+
 // registerAuth auth module 7 interfaces (P1).
 func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 	common := huma.Operation{

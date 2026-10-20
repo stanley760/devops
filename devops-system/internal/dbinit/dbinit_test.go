@@ -185,6 +185,11 @@ func TestEmbeddedSQLWellFormed(t *testing.T) {
 		"t_system_operation_log": true,
 		// Added in the DDD/CQRS refactor: domain event table (carries pending projection facts, no seed data).
 		"t_system_domain_event": true,
+		// Dictionary module: dictionary types + dictionary items.
+		"t_system_dict_type": true,
+		"t_system_dict_data": true,
+		// System configuration module.
+		"t_system_config": true,
 	}
 	got := make(map[string]bool, len(ddls))
 	for _, s := range ddls {

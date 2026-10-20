@@ -17,6 +17,8 @@ type PostRoutes func(huma.API)
 type TenantRoutes func(huma.API)
 type LoginLogRoutes func(huma.API)
 type OperationLogRoutes func(huma.API)
+type DictRoutes func(huma.API)
+type ConfigRoutes func(huma.API)
 
 // Modules is the set of business route modules the application layer needs to explicitly compose.
 type Modules struct {
@@ -29,6 +31,8 @@ type Modules struct {
 	Tenants       TenantRoutes
 	LoginLogs     LoginLogRoutes
 	OperationLogs OperationLogRoutes
+	Dicts         DictRoutes
+	Configs       ConfigRoutes
 }
 
 func NewAuthRoutes(svc *service.Auth, kit *middleware.Kit) AuthRoutes {
@@ -74,4 +78,14 @@ func NewLoginLogRoutes(svc *service.LoginLog, kit *middleware.Kit) LoginLogRoute
 func NewOperationLogRoutes(svc *service.OperationLog, kit *middleware.Kit) OperationLogRoutes {
 	h := apiv1.NewOperationLogHandler(svc)
 	return func(api huma.API) { registerOperationLogs(api, h, kit) }
+}
+
+func NewDictRoutes(svc *service.Dict, kit *middleware.Kit) DictRoutes {
+	h := apiv1.NewDictHandler(svc)
+	return func(api huma.API) { registerDicts(api, h, kit) }
+}
+
+func NewConfigRoutes(svc *service.Config, kit *middleware.Kit) ConfigRoutes {
+	h := apiv1.NewConfigHandler(svc)
+	return func(api huma.API) { registerConfigs(api, h, kit) }
 }

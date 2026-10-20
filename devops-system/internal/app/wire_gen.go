@@ -41,6 +41,10 @@ func InitializeHTTP(cfg config.Config, kit *middleware.Kit, authM *auth.Manager)
 	loginLogRoutes := router.NewLoginLogRoutes(loginLog, kit)
 	operationLog := service.NewOperationLog()
 	operationLogRoutes := router.NewOperationLogRoutes(operationLog, kit)
+	dict := service.NewDict()
+	dictRoutes := router.NewDictRoutes(dict, kit)
+	serviceConfig := service.NewConfig()
+	configRoutes := router.NewConfigRoutes(serviceConfig, kit)
 	modules := router.Modules{
 		Auth:          authRoutes,
 		Users:         userRoutes,
@@ -51,6 +55,8 @@ func InitializeHTTP(cfg config.Config, kit *middleware.Kit, authM *auth.Manager)
 		Tenants:       tenantRoutes,
 		LoginLogs:     loginLogRoutes,
 		OperationLogs: operationLogRoutes,
+		Dicts:         dictRoutes,
+		Configs:       configRoutes,
 	}
 	register := router.NewRegister(apiDocConfig, authM, modules)
 	return register

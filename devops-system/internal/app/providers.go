@@ -21,6 +21,8 @@ var serviceSet = wire.NewSet(
 	service.NewTenant,
 	service.NewLoginLog,
 	service.NewOperationLog,
+	service.NewDict,
+	service.NewConfig,
 )
 
 var routeSet = wire.NewSet(
@@ -35,6 +37,8 @@ var routeSet = wire.NewSet(
 	router.NewTenantRoutes,
 	router.NewLoginLogRoutes,
 	router.NewOperationLogRoutes,
+	router.NewDictRoutes,
+	router.NewConfigRoutes,
 	wire.Struct(new(router.Modules), "*"),
 	router.NewRegister,
 )

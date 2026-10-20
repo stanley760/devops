@@ -1,4 +1,4 @@
--- t_system_menu initial data (global table): the full menu master set, 34 rows.
+-- t_system_menu initial data (global table): the full menu master set, 44 rows.
 -- Directories/menus 1-9, buttons = parent menu ID*10 + sequence number; buttons have always_show=FALSE.
 -- Explicit ID, no ID issuance. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_menu
@@ -15,6 +15,8 @@ VALUES
     (7,  'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '租户管理', '',                   2, 6, 1, 'tenant', 'ep:coin',            'platform/tenant/index', 1, TRUE, TRUE),
     (8,  'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '登录日志', 'system:loginlog:list',   2, 7, 1, 'loginlog', 'ep:document', 'system/loginlog/index', 1, TRUE, TRUE),
     (9,  'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '操作日志', 'system:operationlog:list',   2, 8, 1, 'operationlog', 'ep:document', 'system/operationlog/index', 1, TRUE, TRUE),
+    (10, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典管理', 'system:dict:list',   2, 9, 1, 'dict',  'ep:collection',           'system/dict/index',  1, TRUE, TRUE),
+    (11, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '参数配置', 'system:config:list', 2, 10, 1, 'config', 'ep:operation',           'system/config/index', 1, TRUE, TRUE),
     (21, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户查询', 'system:user:query',          3, 1, 2, '', '', '', 1, TRUE, FALSE),
     (22, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户新增', 'system:user:create',         3, 2, 2, '', '', '', 1, TRUE, FALSE),
     (23, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户修改', 'system:user:update',         3, 3, 2, '', '', '', 1, TRUE, FALSE),
@@ -39,5 +41,13 @@ VALUES
     (81, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志删除', 'system:loginlog:delete', 3, 1, 8, '', '', '', 1, TRUE, FALSE),
     (82, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志清空', 'system:loginlog:clean',  3, 2, 8, '', '', '', 1, TRUE, FALSE),
     (91, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志删除', 'system:operationlog:delete', 3, 1, 9, '', '', '', 1, TRUE, FALSE),
-    (92, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志清空', 'system:operationlog:clean',  3, 2, 9, '', '', '', 1, TRUE, FALSE)
+    (92, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志清空', 'system:operationlog:clean',  3, 2, 9, '', '', '', 1, TRUE, FALSE),
+    (101, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典查询', 'system:dict:query',   3, 1, 10, '', '', '', 1, TRUE, FALSE),
+    (102, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典新增', 'system:dict:create',  3, 2, 10, '', '', '', 1, TRUE, FALSE),
+    (103, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典修改', 'system:dict:update',  3, 3, 10, '', '', '', 1, TRUE, FALSE),
+    (104, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典删除', 'system:dict:delete',  3, 4, 10, '', '', '', 1, TRUE, FALSE),
+    (111, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置查询', 'system:config:query',   3, 1, 11, '', '', '', 1, TRUE, FALSE),
+    (112, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置新增', 'system:config:create',  3, 2, 11, '', '', '', 1, TRUE, FALSE),
+    (113, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置修改', 'system:config:update',  3, 3, 11, '', '', '', 1, TRUE, FALSE),
+    (114, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置删除', 'system:config:delete',  3, 4, 11, '', '', '', 1, TRUE, FALSE)
 ON DUPLICATE KEY UPDATE id = id;

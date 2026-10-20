@@ -49,6 +49,8 @@ func NewRegister(docCfg config.APIDocConfig, authM *auth.Manager, modules Module
 		modules.Tenants(humaAPI)
 		modules.LoginLogs(humaAPI)
 		modules.OperationLogs(humaAPI)
+		modules.Dicts(humaAPI)
+		modules.Configs(humaAPI)
 	}
 }
 

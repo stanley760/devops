@@ -47,6 +47,8 @@ func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *aut
 		Tenants:       NewTenantRoutes(service.NewTenant(authM), kit),
 		LoginLogs:     NewLoginLogRoutes(service.NewLoginLog(), kit),
 		OperationLogs: NewOperationLogRoutes(service.NewOperationLog(), kit),
+		Dicts:         NewDictRoutes(service.NewDict(), kit),
+		Configs:       NewConfigRoutes(service.NewConfig(), kit),
 	}
 	return NewRegister(docCfg, authM, modules)
 }

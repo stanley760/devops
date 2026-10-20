@@ -222,6 +222,8 @@ Base64 形式的 32 字节随机值通常是 44 个字符，长度满足当前 H
 | 菜单 | `GET/POST /menus` `GET/PUT/DELETE /menus/:id`                                                             | JWT + 租户 + `system:menu:*`                                   |
 | 部门 | `GET/POST /depts` `GET/PUT/DELETE /depts/:id`                                                             | JWT + 租户 + `system:dept:*`                                   |
 | 岗位 | `GET/POST /posts` `GET/PUT/DELETE /posts/:id`                                                             | JWT + 租户 + `system:post:*`                                   |
+| 字典 | `GET/POST /dict-types` `GET/PUT/DELETE /dict-types/:id` `GET/POST /dict-data` `GET/PUT/DELETE /dict-data/:id` `GET /dict-data/simple` | JWT + 租户 + `system:dict:*`                 |
+| 配置 | `GET/POST /configs` `GET/PUT/DELETE /configs/:id` `GET /configs/key/:key`                                    | JWT + 租户 + `system:config:*`                |
 | 租户 | `GET/POST /tenants` `GET/PUT/DELETE /tenants/:id` `PUT /tenants/:id/status`                               | JWT + **平台**（`g2` 平台管理员 + `platform:tenant:*`）        |
 
 中间件链：`Recovery → AccessLog → CORS →（公开路由 | JWT → Tenant → Perm → 业务 | JWT → PlatformPerm → 租户管理）`。
