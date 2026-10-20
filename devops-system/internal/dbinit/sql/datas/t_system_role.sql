@@ -1,5 +1,5 @@
--- t_system_role 初始数据：租户 1（default）角色 1=超级管理员（内置）、2=普通角色。
--- 显式 ID + tenant_id。ON DUPLICATE KEY UPDATE id = id 保证重复执行无副作用。
+-- t_system_role initial data: tenant 1 (default) roles 1=super admin (builtin), 2=common role.
+-- Explicit ID + tenant_id. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_role
     (id, tenant_id, creator, create_time, updater, update_time, name, code, sort, data_scope, status, type)
 VALUES

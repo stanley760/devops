@@ -1,7 +1,8 @@
-// Package tenantdb 单库多租户上下文与数据访问入口。
+// Package tenantdb is the single-database multi-tenant context and data access entry point.
 //
-// dao 层统一经 DB(ctx) 获取连接，TenantPlugin 依据 ctx 自动注入/过滤
-// tenant_id；无租户上下文访问租户表 fail-closed。
+// The dao layer uniformly obtains connections via DB(ctx), and TenantPlugin
+// automatically injects/filters tenant_id based on the ctx; accessing tenant
+// tables without a tenant context fails closed.
 package tenantdb
 
 import (
@@ -13,8 +14,9 @@ import (
 	client "github.com/stanley760/devops/devops-infra/database/mysql"
 )
 
-// DB dao 层统一入口：
-// 所有租户共用同一连接，租户隔离由 TenantPlugin 的 tenant_id 过滤实现。
+// DB is the unified dao layer entry point:
+// all tenants share the same connection, and tenant isolation is implemented
+// by TenantPlugin's tenant_id filtering.
 func DB(ctx context.Context) *gorm.DB {
 	if tx, ok := database.ExecutorFromContext(ctx); ok {
 		return tx
@@ -22,8 +24,8 @@ func DB(ctx context.Context) *gorm.DB {
 	return client.Get().WithContext(ctx)
 }
 
-// Transaction 在共享数据库上执行事务。
-// 事务会注入 context，DB(ctx) 内的 Repository 自动复用同一个事务。
+// Transaction executes a transaction on the shared database.
+// The transaction injects the context, so repositories inside DB(ctx) reuse the same transaction automatically.
 func Transaction(ctx context.Context, fn database.TxFunc) error {
 	if _, ok := database.ExecutorFromContext(ctx); ok {
 		return fn(ctx)

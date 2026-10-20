@@ -19,7 +19,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if !ok || got != 7 {
 		t.Fatalf("Load() = (%d, %v), want (7, true)", got, ok)
 	}
-	// 磁盘格式必须是纯十进制整数文本，与历史缓存文件兼容。
+	// The on-disk format must be plain decimal integer text, compatible with historical cache files.
 	data, err := os.ReadFile(cache.workerPath())
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestLoadMissing(t *testing.T) {
 	cache := New(t.TempDir(), "leaf", "user")
 	if _, ok := cache.Load(); ok {
-		t.Fatal("缺失文件不应加载成功")
+		t.Fatal("missing file should not load successfully")
 	}
 }
 
@@ -45,7 +45,7 @@ func TestLoadCorrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := cache.Load(); ok {
-		t.Fatal("损坏文件不应加载成功")
+		t.Fatal("corrupt file should not load successfully")
 	}
 }
 
@@ -56,7 +56,7 @@ func TestEnsureCreatesNestedDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(filepath.Join(root, "a", "leaf", "user")); err != nil || !info.IsDir() {
-		t.Fatalf("嵌套目录未创建: %v", err)
+		t.Fatalf("nested directory not created: %v", err)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestWatermarkRoundTrip(t *testing.T) {
 func TestWatermarkMissing(t *testing.T) {
 	cache := New(t.TempDir(), "leaf", "user")
 	if _, ok := cache.LoadWatermark(); ok {
-		t.Fatal("缺失水位文件不应加载成功")
+		t.Fatal("missing watermark file should not load successfully")
 	}
 }
 
@@ -90,7 +90,7 @@ func TestWatermarkCorrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := cache.LoadWatermark(); ok {
-		t.Fatal("损坏水位文件不应加载成功")
+		t.Fatal("corrupt watermark file should not load successfully")
 	}
 }
 
@@ -109,7 +109,7 @@ func TestAtomicWriteReplacesContent(t *testing.T) {
 	if !ok || got != 99 {
 		t.Fatalf("Load() = (%d, %v), want (99, true)", got, ok)
 	}
-	// 不应留下临时文件
+	// Should not leave temp files behind
 	entries, err := os.ReadDir(cache.dir)
 	if err != nil {
 		t.Fatal(err)

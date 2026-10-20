@@ -5,17 +5,17 @@ import (
 	"fmt"
 )
 
-// Ping 检查底层连接池可用性，超时由调用方通过 context 控制。
+// Ping checks the availability of the underlying connection pool; the timeout is controlled by the caller via context.
 func (c *Client) Ping(ctx context.Context) error {
 	if c == nil || c.db == nil {
-		return fmt.Errorf("MySQL 客户端未初始化")
+		return fmt.Errorf("MySQL client not initialized")
 	}
 	pool, err := c.db.DB()
 	if err != nil {
-		return fmt.Errorf("获取底层连接池失败: %w", err)
+		return fmt.Errorf("failed to obtain the underlying connection pool: %w", err)
 	}
 	if err := pool.PingContext(ctx); err != nil {
-		return fmt.Errorf("MySQL 健康检查失败: %w", err)
+		return fmt.Errorf("MySQL health check failed: %w", err)
 	}
 	return nil
 }

@@ -1,5 +1,5 @@
-// 发号域单元测试：位布局、单调性、时钟回拨保护（无需 etcd）。
-// etcd 槽位抢占/lease 释放为运行时验收项（双实例启动槽位不冲突、kill 后 10s 可抢）。
+// Unit tests for the ID generation domain: bit layout, monotonicity, and clock rollback protection (no etcd needed).
+// etcd slot claiming / lease release are runtime acceptance items (dual-instance startup has no slot conflicts; reclaimable within 10s after kill).
 package idgen
 
 import (
@@ -31,19 +31,19 @@ func TestNextBitLayoutAndMonotonic(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		id, err := generator.next(context.Background())
 		if err != nil {
-			t.Fatalf("第 %d 次发号失败: %v", i, err)
+			t.Fatalf("ID generation %d failed: %v", i, err)
 		}
 		if id <= prev {
-			t.Fatalf("ID 未递增: %d <= %d", id, prev)
+			t.Fatalf("ID not increasing: %d <= %d", id, prev)
 		}
 		if got := (id >> seqBits) & maxWorker; got != worker {
-			t.Fatalf("worker 位错误: got %d want %d", got, worker)
+			t.Fatalf("worker bits wrong: got %d want %d", got, worker)
 		}
 		if got := id & maxSeq; got < 0 || got > maxSeq {
-			t.Fatalf("序列位越界: %d", got)
+			t.Fatalf("sequence bits out of range: %d", got)
 		}
 		if ms := (id >> (workerBits + seqBits)) + epoch; ms > time.Now().UnixMilli() {
-			t.Fatalf("时间戳位超前当前时间: %d", ms)
+			t.Fatalf("timestamp bits ahead of current time: %d", ms)
 		}
 		prev = id
 	}
@@ -60,32 +60,32 @@ func TestBatchNextStrictlyIncreasing(t *testing.T) {
 	}
 	for i := 1; i < len(ids); i++ {
 		if ids[i] <= ids[i-1] {
-			t.Fatalf("批量 ID 未严格递增: ids[%d]=%d <= ids[%d]=%d", i, ids[i], i-1, ids[i-1])
+			t.Fatalf("batch IDs not strictly increasing: ids[%d]=%d <= ids[%d]=%d", i, ids[i], i-1, ids[i-1])
 		}
 	}
 }
 
 func TestClockBackwardSmallSpin(t *testing.T) {
 	generator := newTestGenerator(1)
-	generator.lastTimestamp = time.Now().UnixMilli() + 3 // 回拨 3ms（< 5ms 阈值）
+	generator.lastTimestamp = time.Now().UnixMilli() + 3 // roll back 3ms (< 5ms threshold)
 	if _, err := generator.next(context.Background()); err != nil {
-		t.Fatalf("小回拨应自旋等待追平，got %v", err)
+		t.Fatalf("small rollback should spin-wait to catch up, got %v", err)
 	}
 }
 
 func TestClockBackwardLargeReject(t *testing.T) {
 	generator := newTestGenerator(1)
-	generator.lastTimestamp = time.Now().UnixMilli() + 100 // 回拨 100ms（≥ 5ms 阈值）
+	generator.lastTimestamp = time.Now().UnixMilli() + 100 // roll back 100ms (>= 5ms threshold)
 	if _, err := generator.next(context.Background()); !errors.Is(err, ErrClockBackward) {
-		t.Fatalf("大回拨应拒绝发号，got %v", err)
+		t.Fatalf("large rollback should reject ID generation, got %v", err)
 	}
 }
 
 func TestLeaseLostReject(t *testing.T) {
-	// lease 失效（槽位可能被他实例抢占）后必须熔断发号
+	// after lease expiry (the slot may have been taken by another instance) ID generation must be cut off
 	generator := newTestGenerator(1)
 	generator.leaseLost.Store(true)
 	if _, err := generator.next(context.Background()); !errors.Is(err, ErrLeaseLost) {
-		t.Fatalf("lease 失效应拒绝发号，got %v", err)
+		t.Fatalf("lease loss should reject ID generation, got %v", err)
 	}
 }

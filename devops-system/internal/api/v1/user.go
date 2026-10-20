@@ -1,4 +1,4 @@
-// 用户管理接口（huma）。
+// User management endpoints (huma).
 package api
 
 import (
@@ -15,65 +15,65 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// UserHandler 用户管理接口。
+// UserHandler serves the user management endpoints.
 type UserHandler struct {
 	svc *service.User
 }
 
-// NewUserHandler 创建 handler。
+// NewUserHandler creates the handler.
 func NewUserHandler(svc *service.User) *UserHandler { return &UserHandler{svc: svc} }
 
 // ---- Input / Output ----
 
-// UserListInput GET /system/api/v1/users 查询参数。
+// UserListInput holds the GET /system/api/v1/users query parameters.
 type UserListInput struct {
 	domain.PageParam
-	Username string                            `query:"username" maxLength:"30" doc:"用户姓名"`
-	Mobile   string                            `query:"mobile" maxLength:"20" doc:"手机号码"`
-	Status   humaparam.Optional[int8]          `query:"status" minimum:"0" maximum:"1" doc:"账号状态 0:禁用；1:启用"`
-	DeptID   humaparam.Optional[types.ParamID] `query:"dept_id" doc:"关联部门id"`
+	Username string                            `query:"username" maxLength:"30" doc:"User name"`
+	Mobile   string                            `query:"mobile" maxLength:"20" doc:"Mobile number"`
+	Status   humaparam.Optional[int8]          `query:"status" minimum:"0" maximum:"1" doc:"Account status 0: disabled; 1: enabled"`
+	DeptID   humaparam.Optional[types.ParamID] `query:"dept_id" doc:"Associated dept ID"`
 }
 
-// UserListOutput 用户分页列表信封。
+// UserListOutput is the paginated user list envelope.
 type UserListOutput struct {
 	Body commonResp.BaseResponse[domain.PageResult[types.UserDTO]]
 }
 
-// UserIDInput path 参数。
+// UserIDInput holds the path parameter.
 type UserIDInput struct {
-	ID types.ParamID `path:"id" doc:"用户id"`
+	ID types.ParamID `path:"id" doc:"User ID"`
 }
 
-// UserGetOutput 用户详情信封（基本信息 + 角色/岗位 ID）。
+// UserGetOutput is the user detail envelope (basic info + role/post IDs).
 type UserGetOutput struct {
 	Body commonResp.BaseResponse[types.UserDetailResp]
 }
 
-// UserCreateInput POST /system/api/v1/users（角色分配 g 行联动）。
+// UserCreateInput is POST /system/api/v1/users (role assignment cascades to the g rows).
 type UserCreateInput struct {
 	Body types.UserCreateReq
 }
 
-// UserEmptyOutput 无数据信封。
+// UserEmptyOutput is the no-data envelope.
 type UserEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// UserUpdateInput PUT /system/api/v1/users/{id}（密码走重置接口）。
+// UserUpdateInput is PUT /system/api/v1/users/{id} (passwords go through the reset endpoint).
 type UserUpdateInput struct {
-	ID   types.ParamID `path:"id" doc:"用户id"`
+	ID   types.ParamID `path:"id" doc:"User ID"`
 	Body types.UserUpdateReq
 }
 
-// UserResetPasswordInput PUT /system/api/v1/users/{id}/password（重置后踢下线）。
+// UserResetPasswordInput is PUT /system/api/v1/users/{id}/password (a reset kicks the user offline).
 type UserResetPasswordInput struct {
-	ID   types.ParamID `path:"id" doc:"用户id"`
+	ID   types.ParamID `path:"id" doc:"User ID"`
 	Body types.ResetPasswordReq
 }
 
 // ---- Handlers ----
 
-// List GET /system/api/v1/users。
+// List handles GET /system/api/v1/users.
 func (h *UserHandler) List(ctx context.Context, in *UserListInput) (*UserListOutput, error) {
 	var deptID *types.ID
 	if in.DeptID.IsSet {
@@ -96,7 +96,7 @@ func (h *UserHandler) List(ctx context.Context, in *UserListInput) (*UserListOut
 	return &UserListOutput{Body: response.OKBody(page)}, nil
 }
 
-// Get GET /system/api/v1/users/{id}。
+// Get handles GET /system/api/v1/users/{id}.
 func (h *UserHandler) Get(ctx context.Context, in *UserIDInput) (*UserGetOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -109,7 +109,7 @@ func (h *UserHandler) Get(ctx context.Context, in *UserIDInput) (*UserGetOutput,
 	return &UserGetOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Create POST /system/api/v1/users。
+// Create handles POST /system/api/v1/users.
 func (h *UserHandler) Create(ctx context.Context, in *UserCreateInput) (*UserEmptyOutput, error) {
 	if err := h.svc.Create(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -117,7 +117,7 @@ func (h *UserHandler) Create(ctx context.Context, in *UserCreateInput) (*UserEmp
 	return &UserEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Update PUT /system/api/v1/users/{id}。
+// Update handles PUT /system/api/v1/users/{id}.
 func (h *UserHandler) Update(ctx context.Context, in *UserUpdateInput) (*UserEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -129,7 +129,7 @@ func (h *UserHandler) Update(ctx context.Context, in *UserUpdateInput) (*UserEmp
 	return &UserEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// ResetPassword PUT /system/api/v1/users/{id}/password（重置后踢下线）。
+// ResetPassword handles PUT /system/api/v1/users/{id}/password (a reset kicks the user offline).
 func (h *UserHandler) ResetPassword(ctx context.Context, in *UserResetPasswordInput) (*UserEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -141,7 +141,7 @@ func (h *UserHandler) ResetPassword(ctx context.Context, in *UserResetPasswordIn
 	return &UserEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Delete DELETE /system/api/v1/users/{id}。
+// Delete handles DELETE /system/api/v1/users/{id}.
 func (h *UserHandler) Delete(ctx context.Context, in *UserIDInput) (*UserEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {

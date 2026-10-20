@@ -1,4 +1,4 @@
-// Package middleware 存放 gin 中间件。
+// Package middleware holds gin middleware.
 package middleware
 
 import (
@@ -12,8 +12,9 @@ import (
 	"github.com/stanley760/devops/devops-infra/errs"
 )
 
-// Recovery panic 统一处理：记录堆栈后返回 500 错误信封。
-// 不用 gin.Recovery()，其默认输出纯文本，不符合统一响应格式。
+// Recovery handles panics uniformly: log the stack, then return a 500 error envelope.
+// gin.Recovery() is not used because its default output is plain text, which does
+// not conform to the unified response format.
 func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
@@ -25,7 +26,8 @@ func Recovery() gin.HandlerFunc {
 					"stack", string(debug.Stack()),
 				)
 				if c.Writer.Written() {
-					// 部分响应已写出，无法再改写为信封，仅置 500
+					// Part of the response has already been written, so it cannot be rewritten
+					// as an envelope; only set the 500 status.
 					c.AbortWithStatus(http.StatusInternalServerError)
 					return
 				}

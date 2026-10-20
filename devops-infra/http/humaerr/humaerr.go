@@ -1,13 +1,16 @@
-// Package humaerr huma 错误出口与统一信封对齐（D1/D6/D7）。
+// Package humaerr aligns huma's error output with the unified envelope (D1/D6/D7).
 //
-// huma 默认错误响应为 RFC7807 problem+json，与项目的 BaseResponse 信封契约不符。
-// Install() 覆盖包级变量 huma.NewError 后（须在任何 huma 请求处理前调用）：
-//   - handler 返回 errs.ToHumaError(err) → 走 NewError → 信封 ✔
-//   - huma schema 校验失败（422）→ 映射 400，校验明细并入 msg ✔
-//   - 自定义 Envelope 未实现 ContentTypeFilter，Content-Type 保持 application/json ✔
+// huma's default error response is RFC7807 problem+json, which does not match the
+// project's BaseResponse envelope contract.
+// After Install() overrides the package-level variable huma.NewError (must be called
+// before any huma request handling):
+//   - a handler returns errs.ToHumaError(err) → goes through NewError → envelope ✔
+//   - huma schema validation failure (422) → mapped to 400, validation details merged into msg ✔
+//   - a custom Envelope without ContentTypeFilter keeps Content-Type as application/json ✔
 //
-// WriteErr 会经 NewErrorWithContext（默认委托 NewError）取错误对象，
-// 并以 GetStatus() 重读状态码——Install 内的状态映射因此对校验路径全局生效。
+// WriteErr obtains the error object via NewErrorWithContext (which delegates to
+// NewError by default) and re-reads the status code with GetStatus() — the status
+// mapping inside Install therefore applies globally to the validation path as well.
 package humaerr
 
 import (
@@ -16,21 +19,24 @@ import (
 	"strings"
 )
 
-// Envelope 错误信封（与 common/response.BaseResponse[any] 的失败形态字节一致）。
+// Envelope is the error envelope (byte-identical to the failure shape of
+// common/response.BaseResponse[any]).
 type Envelope struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
-	Data any    `json:"data"` // 恒 nil，序列化为 "data":null，与 gin 版一致
+	Data any    `json:"data"` // always nil; serialized as "data":null, matching the Gin version
 }
 
-// GetStatus 实现 huma.StatusError。
+// GetStatus implements huma.StatusError.
 func (e *Envelope) GetStatus() int { return e.Code }
 
-// Error 实现 error / huma.StatusError。
+// Error implements error / huma.StatusError.
 func (e *Envelope) Error() string { return e.Msg }
 
-// Install 覆盖 huma.NewError（包级变量），全局生效；在 main 启动时调用。
-// 422（huma schema 校验失败）映射为 400，校验明细并入 msg，与旧 gin 契约一致。
+// Install overrides huma.NewError (package-level variable), effective globally;
+// call it during main startup.
+// 422 (huma schema validation failure) is mapped to 400, with validation details
+// merged into msg, matching the legacy Gin contract.
 func Install() {
 	huma.NewError = func(status int, msg string, detailErrs ...error) huma.StatusError {
 		if status == http.StatusUnprocessableEntity {
@@ -44,13 +50,13 @@ func Install() {
 	}
 }
 
-// formatValidation 汇总校验明细为面向用户的中文提示。
+// formatValidation aggregates validation details into a user-facing message.
 func formatValidation(msg string, errs []error) string {
 	if len(errs) == 0 {
-		return "参数校验失败: " + msg
+		return "parameter validation failed: " + msg
 	}
 	var b strings.Builder
-	b.WriteString("参数校验失败: ")
+	b.WriteString("parameter validation failed: ")
 	for i, err := range errs {
 		if i > 0 {
 			b.WriteString("; ")
@@ -60,20 +66,20 @@ func formatValidation(msg string, errs []error) string {
 	return b.String()
 }
 
-// envelopeSchema 错误信封 schema（文档形态与运行时输出一致）。
+// envelopeSchema is the error envelope schema (docs form matches the runtime output).
 func envelopeSchema() *huma.Schema {
 	return &huma.Schema{
 		Type: "object",
 		Properties: map[string]*huma.Schema{
-			"code": {Type: "integer", Description: "业务码，与 HTTP 状态码一致"},
-			"msg":  {Type: "string", Description: "提示信息"},
-			"data": {Description: "业务数据，失败时恒为 null"},
+			"code": {Type: "integer", Description: "business code, identical to the HTTP status code"},
+			"msg":  {Type: "string", Description: "message"},
+			"data": {Description: "business data; always null on failure"},
 		},
 	}
 }
 
-// ErrResponses 生成指定状态码的信封响应声明（D6）。
-// 与 Operation.Responses 搭配，替代 huma 默认 problem+json 错误文档。
+// ErrResponses generates envelope response declarations for the given status codes (D6).
+// Paired with Operation.Responses, it replaces huma's default problem+json error docs.
 func ErrResponses(codes map[string]string) map[string]*huma.Response {
 	content := map[string]*huma.MediaType{
 		"application/json": {Schema: envelopeSchema()},
@@ -85,13 +91,14 @@ func ErrResponses(codes map[string]string) map[string]*huma.Response {
 	return responses
 }
 
-// CommonErrResponses 预置常用错误码（400/401/403/404/500）的信封响应声明。
+// CommonErrResponses provides envelope response declarations for the common
+// error codes (400/401/403/404/500).
 func CommonErrResponses() map[string]*huma.Response {
 	return ErrResponses(map[string]string{
-		"400": "参数错误",
-		"401": "未登录或会话已过期",
-		"403": "无操作权限",
-		"404": "资源不存在",
-		"500": "服务器内部错误",
+		"400": "bad request",
+		"401": "not logged in or session expired",
+		"403": "operation not permitted",
+		"404": "resource not found",
+		"500": "internal server error",
 	})
 }

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// TestHumaEnvelopeWriters 信封回调工厂表驱动金标准：断言每个场景的完整 JSON body 与状态码。
+// TestHumaEnvelopeWriters: the envelope callback factory table-driven golden standard: asserts each scenario's complete JSON body and status code.
 func TestHumaEnvelopeWriters(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -19,14 +19,14 @@ func TestHumaEnvelopeWriters(t *testing.T) {
 		status int
 		body   string
 	}{
-		{"401 未带token", writeHuma401, securitymw.ErrUnauthorized, http.StatusUnauthorized, `{"code":401,"msg":"未登录或会话已过期","data":null}`},
-		{"401 会话失效(wrapped)", writeHuma401, fmt.Errorf("session: %w", securitymw.ErrSessionInactive), http.StatusUnauthorized, `{"code":401,"msg":"登录状态已失效，请重新登录","data":null}`},
-		{"401 认证基础设施错误", writeHumaAuthInfraErr, errors.New("redis down"), http.StatusUnauthorized, `{"code":401,"msg":"登录状态已失效，请重新登录","data":null}`},
-		{"403 租户不可用", writeHuma403Tenant, nil, http.StatusForbidden, `{"code":403,"msg":"租户不可用（停用或已过期）","data":null}`},
-		{"403 域内鉴权拒绝", writeHuma403Perm, nil, http.StatusForbidden, `{"code":403,"msg":"无操作权限","data":null}`},
-		{"403 非平台管理员(wrapped)", writeHuma403Platform, fmt.Errorf("gate: %w", securitymw.ErrNotPlatformAdmin), http.StatusForbidden, `{"code":403,"msg":"需要平台管理员权限","data":null}`},
-		{"403 平台Enforce拒绝", writeHuma403Platform, securitymw.ErrForbidden, http.StatusForbidden, `{"code":403,"msg":"无操作权限","data":null}`},
-		{"403 鉴权基础设施错误", writeHumaAuthzInfraErr, errors.New("casbin down"), http.StatusForbidden, `{"code":403,"msg":"无操作权限","data":null}`},
+		{"401 no token", writeHuma401, securitymw.ErrUnauthorized, http.StatusUnauthorized, `{"code":401,"msg":"not logged in or session expired","data":null}`},
+		{"401 session invalid (wrapped)", writeHuma401, fmt.Errorf("session: %w", securitymw.ErrSessionInactive), http.StatusUnauthorized, `{"code":401,"msg":"login state invalid, please log in again","data":null}`},
+		{"401 authentication infrastructure error", writeHumaAuthInfraErr, errors.New("redis down"), http.StatusUnauthorized, `{"code":401,"msg":"login state invalid, please log in again","data":null}`},
+		{"403 tenant unavailable", writeHuma403Tenant, nil, http.StatusForbidden, `{"code":403,"msg":"tenant is unavailable (disabled or expired)","data":null}`},
+		{"403 in-domain authorization denied", writeHuma403Perm, nil, http.StatusForbidden, `{"code":403,"msg":"no operation permission","data":null}`},
+		{"403 not platform admin (wrapped)", writeHuma403Platform, fmt.Errorf("gate: %w", securitymw.ErrNotPlatformAdmin), http.StatusForbidden, `{"code":403,"msg":"platform administrator permission required","data":null}`},
+		{"403 platform Enforce denied", writeHuma403Platform, securitymw.ErrForbidden, http.StatusForbidden, `{"code":403,"msg":"no operation permission","data":null}`},
+		{"403 authorization infrastructure error", writeHumaAuthzInfraErr, errors.New("casbin down"), http.StatusForbidden, `{"code":403,"msg":"no operation permission","data":null}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

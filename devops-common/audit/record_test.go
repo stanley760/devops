@@ -8,7 +8,7 @@ import (
 )
 
 func TestClipTruncatesByRuneNotByte(t *testing.T) {
-	// 「黑龙江省」3 个字符 = 9 字节；若按字节截断会切出非法 UTF-8。
+	// "黑龙江省" is 3 characters = 9 bytes; truncating by bytes would cut invalid UTF-8.
 	input := "黑龙江省哈尔滨市"
 	got := Clip(input, 3)
 
@@ -24,8 +24,8 @@ func TestClipTruncatesByRuneNotByte(t *testing.T) {
 }
 
 func TestClipKeepsStringWhenAlreadyWithinLimit(t *testing.T) {
-	// 4 个字符 = 12 字节 > 4，但字符数 4 <= 4：按字符计数时无需截断。
-	// 这正是"按字节截会误伤中文"的反面场景。
+	// 4 characters = 12 bytes > 4, but the rune count 4 <= 4: no truncation needed when counting by character.
+	// This is the mirror case of "truncating by bytes would harm multi-byte text".
 	input := "北京上海"
 	got := Clip(input, 4)
 	if got != input {
@@ -56,7 +56,7 @@ func TestClipHandlesEdgeCases(t *testing.T) {
 }
 
 func TestClipNeverProducesInvalidUTF8(t *testing.T) {
-	// 混合 ASCII 与多字节字符，逐个收紧截断点。
+	// Mix ASCII and multi-byte characters, tightening the truncation point one by one.
 	input := "user-北京市-上海-abc"
 	for n := 0; n <= utf8.RuneCountInString(input)+2; n++ {
 		got := Clip(input, n)
@@ -104,7 +104,7 @@ func TestRecordNormalizeClipsAllBoundedFields(t *testing.T) {
 }
 
 func TestRecordNormalizeKeepsUnboundedFields(t *testing.T) {
-	// Contents/Extra 为 TEXT，不在截断契约内，原样透传。
+	// Contents/Extra are TEXT columns, outside the truncation contract, passed through unchanged.
 	body := strings.Repeat("B", 5000)
 	rec := Record{Contents: body, Extra: body}.Normalize()
 
@@ -124,9 +124,9 @@ func TestRecordNormalizePreservesUnknownUserType(t *testing.T) {
 }
 
 func TestClipClientMeta(t *testing.T) {
-	// 各字段造足够长的内容以真正触发截断（中文，验证按字符而非字节）。
-	longCN := strings.Repeat("城", 100) // 100 字符，超过 MaxGeo(64)/MaxIP(50)
-	longUA := strings.Repeat("U", 600) // 600 字符，超过 MaxUserAgent(512)
+	// Build each field long enough to actually trigger truncation (multi-byte text, verifying character- not byte-based counting).
+	longCN := strings.Repeat("城", 100) // 100 characters, exceeds MaxGeo(64)/MaxIP(50)
+	longUA := strings.Repeat("U", 600) // 600 characters, exceeds MaxUserAgent(512)
 	meta := ClipClientMeta(ClientMeta{
 		IP:          longCN,
 		UserAgent:   longUA,
@@ -158,7 +158,7 @@ func TestClipClientMeta(t *testing.T) {
 }
 
 func TestNoopSinkAcceptsRecords(t *testing.T) {
-	// Noop 是未装配时的安全默认值，必须可安全调用。
+	// Noop is the safe default when nothing is wired up, and must be safe to call.
 	Noop.Emit(t.Context(), Record{Module: "system"})
 }
 

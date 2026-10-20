@@ -27,24 +27,24 @@ func TestTransactionInjectsExecutor(t *testing.T) {
 	err := Transaction(ctx, fakeExecutor{tx: tx}, func(txCtx context.Context) error {
 		got, ok := ExecutorFromContext(txCtx)
 		if !ok || got == nil {
-			t.Fatal("事务未注入 context")
+			t.Fatal("transaction was not injected into context")
 		}
 		if got.Statement.Context != ctx {
-			t.Fatal("事务执行器未继承原始 context")
+			t.Fatal("transaction executor did not inherit the original context")
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("事务执行失败: %v", err)
+		t.Fatalf("transaction execution failed: %v", err)
 	}
 }
 
 func TestTransactionNilArguments(t *testing.T) {
 	if err := Transaction(context.Background(), nil, func(context.Context) error { return nil }); err == nil {
-		t.Fatal("executor 为 nil 时应返回错误")
+		t.Fatal("should return an error when executor is nil")
 	}
 	if err := Transaction(context.Background(), fakeExecutor{}, nil); err == nil {
-		t.Fatal("事务函数为 nil 时应返回错误")
+		t.Fatal("should return an error when the transaction function is nil")
 	}
 }
 

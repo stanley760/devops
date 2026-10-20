@@ -1,4 +1,4 @@
-// 操作审计读取侧（写入侧由 humakit 审计采集中间件经 audit.Sink 落库）。
+// Operation audit read side (the write side is handled by the humakit audit-collection middleware via audit.Sink).
 package dao
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// ListOperationLogs 分页查询操作审计（新行在前）。
+// ListOperationLogs paginates operation audit rows (newest first).
 func ListOperationLogs(ctx context.Context, q types.OperationLogPageQuery) (domain.PageResult[model.OperationLog], error) {
 	db := tenantdb.DB(ctx).Model(&model.OperationLog{})
 	if q.Module != "" {
@@ -43,15 +43,15 @@ func ListOperationLogs(ctx context.Context, q types.OperationLogPageQuery) (doma
 		domain.PageParam{PageNum: q.PageNum, PageSize: q.PageSize},
 	)
 	if err != nil {
-		return domain.PageResult[model.OperationLog]{}, errs.Wrap(err, errs.CodeInternal, "查询操作审计列表失败")
+		return domain.PageResult[model.OperationLog]{}, errs.Wrap(err, errs.CodeInternal, "failed to query operation audit list")
 	}
 	return page, nil
 }
 
-// DeleteOperationLogs 批量物理删除审计行。
+// DeleteOperationLogs batch-deletes audit rows.
 //
-// 物理删除：审计行无软删语义，留下 deleted_at 行只会让表继续膨胀。
-// 返回实际删除行数。
+// Physical delete: audit rows have no soft-delete semantics; keeping deleted_at rows would only keep the table growing.
+// Returns the number of rows actually deleted.
 func DeleteOperationLogs(ctx context.Context, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -59,15 +59,15 @@ func DeleteOperationLogs(ctx context.Context, ids []int64) (int64, error) {
 	res := tenantdb.DB(ctx).Unscoped().
 		Where("id IN ?", ids).Delete(&model.OperationLog{})
 	if res.Error != nil {
-		return 0, errs.Wrap(res.Error, errs.CodeInternal, "删除操作审计失败")
+		return 0, errs.Wrap(res.Error, errs.CodeInternal, "failed to delete operation audit rows")
 	}
 	return res.RowsAffected, nil
 }
 
-// CleanOperationLogs 清空本租户全部审计行，返回删除行数。
+// CleanOperationLogs deletes all audit rows of the current tenant, returning the deleted row count.
 //
-// Unscoped 之后 TenantPlugin 不再注入租户条件，故必须显式带 tenant_id——
-// 否则会跨租户清空。
+// After Unscoped, TenantPlugin no longer injects the tenant condition, so tenant_id must be
+// specified explicitly — otherwise rows of other tenants would be cleaned as well.
 func CleanOperationLogs(ctx context.Context) (int64, error) {
 	tid, err := tenantOf(ctx)
 	if err != nil {
@@ -76,7 +76,7 @@ func CleanOperationLogs(ctx context.Context) (int64, error) {
 	res := tenantdb.DB(ctx).Unscoped().
 		Where("tenant_id = ?", tid).Delete(&model.OperationLog{})
 	if res.Error != nil {
-		return 0, errs.Wrap(res.Error, errs.CodeInternal, "清空操作审计失败")
+		return 0, errs.Wrap(res.Error, errs.CodeInternal, "failed to clean operation audit rows")
 	}
 	return res.RowsAffected, nil
 }

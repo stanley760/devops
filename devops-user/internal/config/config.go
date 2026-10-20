@@ -1,14 +1,19 @@
-// Package config 定义 devops-user（C 端用户服务）的配置结构。
+// Package config defines the configuration structure for devops-user (the
+// C-side user service).
 //
-// 加载机制复用 devops-infra/config（bootstrap 基础 + APP_ENV 环境覆盖合并 +
-// 可选 Nacos 远程配置），本包只声明自己的根Config 与专有配置段。
+// The loading mechanism reuses devops-infra/config (bootstrap base + APP_ENV
+// environment override merge + optional Nacos remote config); this package
+// only declares its own root Config and dedicated sections.
 //
-// 与 devops-system 的差异（有意为之，不是遗漏）：
-//   - 无 tenant 段：C 端是单租户形态，不做多租户隔离；
-//   - 无 authz/casbin：C 端权限是「只能操作自己的数据」，属行级归属校验，
-//     由 service 层按 claims.UID 过滤，不引入 RBAC；
-//   - jwt.issuer 独立（本服务默认 devops-user），避免与 devops-system 的 token
-//     在网关 jwt-auth 的 consumers 里互相匹配。
+// Differences from devops-system (deliberate, not an oversight):
+//   - no tenant section: the C side is single-tenant, with no multi-tenant
+//     isolation;
+//   - no authz/casbin: C-side permissions are "you can only operate on your
+//     own data", a row-level ownership check done by the service layer
+//     filtering on claims.UID, with no RBAC;
+//   - jwt.issuer is independent (this service defaults to devops-user),
+//     avoiding cross-matching with devops-system tokens in the gateway
+//     jwt-auth consumers.
 package config
 
 import (
@@ -19,10 +24,12 @@ import (
 	securityjwt "github.com/stanley760/devops/devops-infra/security/jwt"
 )
 
-// DefaultJWTKeyID key_id 未配置时的默认 kid（token 头与 JWKS 一致）。
+// DefaultJWTKeyID is the default kid when key_id is not configured (consistent
+// between the token header and JWKS).
 const DefaultJWTKeyID = "devops-user-rs256-1"
 
-// Config devops-user 服务根配置，对应 config/bootstrap.yaml 顶层结构。
+// Config is the devops-user service root config, corresponding to the
+// top-level structure of config/bootstrap.yaml.
 type Config struct {
 	Server        config.ServerConfig `mapstructure:"server"`
 	Log           config.LogConfig    `mapstructure:"log"`
@@ -38,77 +45,95 @@ type Config struct {
 	OAuth         OAuthConfig         `mapstructure:"oauth"`
 }
 
-// OAuthConfig 三方登录配置。
+// OAuthConfig is the third-party login configuration.
 //
-// ⚠️ client_secret 必须由密钥管理注入，**禁止提交真实值**；
-// dev 下留空即可（对应提供方显示为「未配置」，前端隐藏入口）。
+// ⚠️ client_secret must be injected by secret management; **committing real
+// values is forbidden**; leaving it empty in dev is fine (the corresponding
+// provider shows as "not configured" and the frontend hides its entry).
 type OAuthConfig struct {
-	// StateTTL state 有效期；超过 10 分钟的授权请求基本是用户放着不管，
-	// 再放开只会增大重放窗口。
+	// StateTTL is the state lifetime; authorization requests older than 10
+	// minutes are basically the user walking away, and allowing more only
+	// widens the replay window.
 	StateTTL time.Duration `mapstructure:"state_ttl"`
-	// RedirectWhitelist 登录后跳回地址的白名单前缀。
+	// RedirectWhitelist holds whitelist prefixes for post-login redirect URLs.
 	//
-	// ⚠️ **必须配**：不校验则攻击者可用 open redirect 钓鱼
-	//（登录成功后跳转到自己的站点偷 token）。
+	// ⚠️ **Required**: without this check an attacker can use an open redirect
+	// to phish (redirecting to their own site after a successful login to
+	// steal the token).
 	RedirectWhitelist []string `mapstructure:"redirect_whitelist"`
-	// Github / Google / Wechat 各提供方配置。
+	// Per-provider config for Github / Google / Wechat.
 	Github ProviderConfig `mapstructure:"github"`
 	Google ProviderConfig `mapstructure:"google"`
 	Wechat ProviderConfig `mapstructure:"wechat"`
 }
 
-// ProviderConfig 单个三方提供方配置。
+// ProviderConfig is the configuration for a single third-party provider.
 type ProviderConfig struct {
 	ClientID     string `mapstructure:"client_id"`
 	ClientSecret string `mapstructure:"client_secret"`
 	RedirectURL  string `mapstructure:"redirect_url"`
-	// Scopes 申请的权限范围。
+	// Scopes are the requested permission scopes.
 	//
-	// ⚠️ **微信忽略此项**：网站应用只允许 `snsapi_login`，配别的值也会被
-	// provider 内部强制覆盖为 snsapi_login。保留字段仅为与其他提供方结构一致。
+	// ⚠️ **WeChat ignores this**: website apps only allow `snsapi_login`, and
+	// any other value is forcibly overridden to snsapi_login inside the
+	// provider. The field is kept only for structural consistency with other
+	// providers.
 	Scopes []string `mapstructure:"scopes"`
-	// AutoRegister 未绑定时是否自动建本地号。
+	// AutoRegister controls whether to auto-create a local account when not
+	// yet bound.
 	//
-	// ⚠️ 自动建号会把「任何能登录该三方的人」变成本地用户。
-	// 面向公开注册的产品通常置 false：先登录再绑定，可在绑定时做一致性校验。
+	// ⚠️ Auto-creating accounts turns "anyone who can log into that third
+	// party" into a local user. Products with open registration usually set
+	// this to false: log in first, then bind, allowing consistency checks at
+	// bind time.
 	AutoRegister bool `mapstructure:"auto_register"`
-	// NicknamePrefix 自动建号时的昵称前缀（便于识别来源）。
+	// NicknamePrefix is the nickname prefix used when auto-creating accounts
+	// (to identify the source).
 	NicknamePrefix string `mapstructure:"nickname_prefix"`
 }
 
-// LoginLockConfig 登录失败限流与账号临时锁定配置。
+// LoginLockConfig is the login failure rate limiting and temporary account
+// lockout configuration.
 //
-// bcrypt 只能拖慢单次爆破，无法阻止高速尝试；C 端开放注册、用户名可枚举，
-// 必须叠加 IP 限流 + 账号锁定两个维度（缺一可被绕过）。
+// bcrypt only slows down a single brute-force attempt; it cannot stop
+// high-speed attempts. The C side has open registration and enumerable
+// usernames, so IP rate limiting and account lockout must be combined across
+// both dimensions (missing either can be bypassed).
 type LoginLockConfig struct {
-	// Enabled 总开关；false 时不做限流与锁定（dev/测试可关）。
+	// Enabled is the master switch; when false, no rate limiting or lockout
+	// (can be turned off in dev/test).
 	Enabled bool `mapstructure:"enabled"`
-	// MaxIPFails 单 IP 在窗口内允许的最大失败次数；0 表示不限 IP。
+	// MaxIPFails is the max failures allowed per IP within the window; 0 means
+	// no IP limit.
 	MaxIPFails int `mapstructure:"max_ip_fails"`
-	// IPWindow IP 计数窗口。
+	// IPWindow is the IP counter window.
 	IPWindow time.Duration `mapstructure:"ip_window"`
-	// MaxUserFails 单账号在窗口内允许的最大失败次数；0 表示不锁账号。
+	// MaxUserFails is the max failures allowed per account within the window;
+	// 0 means no account lockout.
 	MaxUserFails int `mapstructure:"max_user_fails"`
-	// UserWindow 账号失败计数窗口。
+	// UserWindow is the account failure counter window.
 	UserWindow time.Duration `mapstructure:"user_window"`
-	// LockTTL 账号锁定时长。
+	// LockTTL is the account lockout duration.
 	LockTTL time.Duration `mapstructure:"lock_ttl"`
 }
 
-// JWTConfig JWT 双token 配置（RS256）。
+// JWTConfig is the JWT dual-token configuration (RS256).
 //
-// 与 devops-system 同构但**必须使用不同的 issuer 与 kid**：两个服务都用同一套
-// jwt-auth consumer 时，issuer 相同会导致 token 跨服务互认——B 端 token 能访问
-// C 端接口，反之亦然。生产各自持私钥，仅公钥经 JWKS 暴露给网关验签。
+// Structurally identical to devops-system but **must use a different issuer
+// and kid**: when both services share the same jwt-auth consumer, an identical
+// issuer would make tokens mutually accepted across services — a B-side token
+// could access C-side endpoints and vice versa. In production each holds its
+// own private key, with only the public key exposed to the gateway via JWKS
+// for verification.
 type JWTConfig struct {
-	SigningKey    string        `mapstructure:"signing_key"`    // RS256 私钥 PEM（PKCS#1/PKCS#8）
-	KeyID         string        `mapstructure:"key_id"`         // kid 头（轮换标识），缺省 DefaultJWTKeyID
-	Issuer        string        `mapstructure:"issuer"`         // 签发者，须与网关 jwt-auth 的 consumers[].issuer 一致
-	AccessExpire  time.Duration `mapstructure:"access_expire"`  // access token 有效期
-	RefreshExpire time.Duration `mapstructure:"refresh_expire"` // refresh token（会话）有效期
+	SigningKey    string        `mapstructure:"signing_key"`    // RS256 private key PEM (PKCS#1/PKCS#8)
+	KeyID         string        `mapstructure:"key_id"`         // kid header (rotation identifier), defaults to DefaultJWTKeyID
+	Issuer        string        `mapstructure:"issuer"`         // issuer, must match the gateway jwt-auth consumers[].issuer
+	AccessExpire  time.Duration `mapstructure:"access_expire"`  // access token lifetime
+	RefreshExpire time.Duration `mapstructure:"refresh_expire"` // refresh token (session) lifetime
 }
 
-// EffectiveKeyID 返回生效的 kid。
+// EffectiveKeyID returns the effective kid.
 func (c JWTConfig) EffectiveKeyID() string {
 	if c.KeyID == "" {
 		return DefaultJWTKeyID
@@ -116,8 +141,10 @@ func (c JWTConfig) EffectiveKeyID() string {
 	return c.KeyID
 }
 
-// SharedJWTConfig 映射为共享 JWT 配置（YAML 键不变，仅做转换）。
-// keySet 由调用方注入：本服务自验签场景传承载自身公钥的 StaticKeySet。
+// SharedJWTConfig maps to the shared JWT config (YAML keys unchanged,
+// conversion only). keySet is injected by the caller: in this service's
+// self-verification scenario, a StaticKeySet carrying its own public key is
+// passed.
 func (c JWTConfig) SharedJWTConfig(keySet securityjwt.KeySet) securityjwt.Config {
 	return securityjwt.Config{
 		PrivateKeyPEM: []byte(c.SigningKey),
@@ -129,24 +156,27 @@ func (c JWTConfig) SharedJWTConfig(keySet securityjwt.KeySet) securityjwt.Config
 	}
 }
 
-// IDClientConfig devops-id 发号服务接入配置（含客户端预取缓冲）。
+// IDClientConfig is the devops-id ID generation service client configuration
+// (including client prefetch buffering).
 type IDClientConfig struct {
-	Endpoint    string        `mapstructure:"endpoint"`     // devops-id gRPC 地址
-	Batch       int           `mapstructure:"batch"`        // 预取批量（1 = 关闭预取，逐次 RPC）
-	LowWater    float64       `mapstructure:"low_water"`    // 预取水位（剩余比例）
-	DialTimeout time.Duration `mapstructure:"dial_timeout"` // 拨号超时
-	CallTimeout time.Duration `mapstructure:"call_timeout"` // 单次调用超时
+	Endpoint    string        `mapstructure:"endpoint"`     // devops-id gRPC address
+	Batch       int           `mapstructure:"batch"`        // prefetch batch size (1 = prefetch off, one RPC at a time)
+	LowWater    float64       `mapstructure:"low_water"`    // prefetch water level (remaining ratio)
+	DialTimeout time.Duration `mapstructure:"dial_timeout"` // dial timeout
+	CallTimeout time.Duration `mapstructure:"call_timeout"` // per-call timeout
 }
 
-// ObservabilityConfig 服务级观测配置；ServiceName 由 nacos.registry.service_name 派生。
+// ObservabilityConfig is the service-level observability configuration;
+// ServiceName is derived from nacos.registry.service_name.
 type ObservabilityConfig struct {
-	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP 出口；空表示本地 span 不上报
-	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // 根采样率，<=0 视为 1.0
-	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // 是否启用 Prometheus 指标
+	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP endpoint; empty means local spans are not reported
+	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // root sampling ratio; <=0 is treated as 1.0
+	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // whether Prometheus metrics are enabled
 }
 
-// APIDocConfig OpenAPI 文档门控。BasePath 是文档挂载路径，而非 OpenAPI servers URL。
+// APIDocConfig is the OpenAPI documentation gating. BasePath is the doc mount
+// path, not the OpenAPI servers URL.
 type APIDocConfig struct {
-	Enabled  bool   `mapstructure:"enabled"`   // 仅 dev/test 开启，prod 必须关闭
-	BasePath string `mapstructure:"base_path"` // 默认 /apidoc
+	Enabled  bool   `mapstructure:"enabled"`   // enabled in dev/test only; must be off in prod
+	BasePath string `mapstructure:"base_path"` // defaults to /apidoc
 }

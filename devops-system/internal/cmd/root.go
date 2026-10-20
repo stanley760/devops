@@ -1,7 +1,8 @@
-// Package cmd 定义 devops-system 的命令行入口。
+// Package cmd defines the command-line entrypoint for devops-system.
 //
-// 配置管理：路径由 -f/--config-file 绑定，加载与读取封装在 devops-infra/config，
-// cobra.OnInitialize 中完成加载，PersistentPreRunE 中完成组件初始化。
+// Configuration management: the path is bound by -f/--config-file, with
+// loading and reading encapsulated in devops-infra/config; loading happens
+// in cobra.OnInitialize and component initialization in PersistentPreRunE.
 package cmd
 
 import (
@@ -48,9 +49,9 @@ var obsRuntime *observability.Runtime
 
 var rootCmd = &cobra.Command{
 	Use:   "devops-system",
-	Short: "devops 用户权限系统",
+	Short: "devops user and permission system",
 
-	// 所有子命令执行前都会先跑这里：初始化日志
+	// Runs before any subcommand: initializes logging
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var cfg config.Config
 		if err := infracfg.LoadInto(&cfg); err != nil {
@@ -74,7 +75,7 @@ var rootCmd = &cobra.Command{
 		}
 		obsRuntime = obs
 
-		slog.Debug("初始化完成",
+		slog.Debug("initialization complete",
 			"service", "devops-system",
 			"config", infracfg.Files(),
 			"env", infracfg.Env(),
@@ -83,7 +84,7 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 
-	// 所有子命令执行后统一收尾，保证日志不丢
+	// Unified teardown after any subcommand, ensuring logs are not lost
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		_ = nacos.Close()
 		if obsRuntime != nil {
@@ -98,10 +99,10 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// loadNacosConfig 拉取远程 Nacos 配置并合并，远程优先：
-// 命中远程 dataID 即以远程为准；仅当远程未命中 profile dataID
-// （<service>-<env>.yaml）时，才合并本地同名环境文件兜底。
-// bootstrap.yaml 始终作为公共基线。
+// loadNacosConfig fetches and merges remote Nacos configuration, remote
+// first: a remote dataID hit takes precedence; only when the remote misses
+// the profile dataID (<service>-<env>.yaml) is the local same-named env file
+// merged as a fallback. bootstrap.yaml always serves as the common baseline.
 func loadNacosConfig(cfg *config.Config) error {
 	if !cfg.Nacos.Enabled {
 		return nil
@@ -133,10 +134,10 @@ func loadNacosConfig(cfg *config.Config) error {
 		}
 	}
 	if cfg.Nacos.ConfigCenter.Required && !loaded {
-		return fmt.Errorf("nacos 配置中心未返回配置")
+		return fmt.Errorf("nacos config center returned no configuration")
 	}
 	if !profileLoaded {
-		// 远程未命中 profile 配置：合并本地 <service>-<env>.yaml 兜底
+		// Remote missed the profile config: merge the local <service>-<env>.yaml fallback
 		if err := infracfg.MergeEnvConfig(); err != nil {
 			return err
 		}
@@ -150,11 +151,11 @@ func init() {
 	)
 }
 
-// Execute 执行根命令。version 用于 --version 输出。
+// Execute runs the root command. version is used for the --version output.
 func Execute(version string) {
 	rootCmd.Version = version
 
-	// cobra.OnInitialize 会在每个命令的 Run 之前执行，此处完成配置加载
+	// cobra.OnInitialize runs before the Run of every command; configuration loading happens here
 	cobra.OnInitialize(func() {
 		if err := infracfg.Init(confFile); err != nil {
 			panic(err)
@@ -166,10 +167,10 @@ func Execute(version string) {
 	}
 }
 
-// serverCmd 启动 HTTP 服务。
+// serverCmd starts the HTTP service.
 var serverCmd = &cobra.Command{
 	Use:   "server",
-	Short: "启动 HTTP 服务",
+	Short: "Start the HTTP service",
 	RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		type cleanup struct {
 			name string
@@ -182,7 +183,7 @@ var serverCmd = &cobra.Command{
 		defer func() {
 			for i := len(cleanups) - 1; i >= 0; i-- {
 				if err := cleanups[i].run(); err != nil {
-					runErr = errors.Join(runErr, fmt.Errorf("清理 %s 失败: %w", cleanups[i].name, err))
+					runErr = errors.Join(runErr, fmt.Errorf("failed to clean up %s: %w", cleanups[i].name, err))
 				}
 			}
 		}()
@@ -192,9 +193,9 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 
-		// 装配链：db → TenantPlugin(fail-closed) → 启动初始化
-		//   （建表 SQL + 种子 SQL，internal/dbinit）→ authz → store(Redis 会话)
-		//   → 共享安全(RS256 JWT + session) → idclient（发号）→ auth/service → httpx
+		// Assembly chain: db → TenantPlugin(fail-closed) → startup initialization
+		//   (schema SQL + seed SQL, internal/dbinit) → authz → store (Redis sessions)
+		//   → shared security (RS256 JWT + session) → idclient (ID issuance) → auth/service → httpx
 		if err := client.Init(cfg.Mysql); err != nil {
 			return err
 		}
@@ -203,13 +204,14 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 		if err := tenantdb.RegisterPlugin(client.Get()); err != nil {
-			return fmt.Errorf("注册租户过滤插件失败: %w", err)
+			return fmt.Errorf("failed to register tenant filter plugin: %w", err)
 		}
-		// 启动期初始化（详见 internal/dbinit 包文档）：建表 SQL + 种子 SQL
-		// 按表存在性跳过（表已存在不再执行）→ casbin。全部就绪后才注册
-		// Nacos 接流量；失败 fail-closed 拒绝启动。
+		// Startup initialization (see the internal/dbinit package docs): schema SQL
+		// + seed SQL are skipped per table existence (existing tables are not
+		// re-run) → casbin. Nacos registration only accepts traffic once everything
+		// is ready; on failure it fails closed and refuses to start.
 		if err := dbinit.Run(client.Get()); err != nil {
-			return fmt.Errorf("启动建表/种子失败: %w", err)
+			return fmt.Errorf("startup schema/seed failed: %w", err)
 		}
 		if err := authz.Init(client.Get()); err != nil {
 			return err
@@ -218,8 +220,8 @@ var serverCmd = &cobra.Command{
 			authz.Close()
 			return nil
 		})
-		if err := authz.SeedPolicies(1, 1); err != nil { // 幂等（AddPolicyIfAbsent）
-			return fmt.Errorf("casbin 策略种子失败: %w", err)
+		if err := authz.SeedPolicies(1, 1); err != nil { // idempotent (AddPolicyIfAbsent)
+			return fmt.Errorf("casbin policy seeding failed: %w", err)
 		}
 		if err := store.Init(cfg.Redis); err != nil {
 			return err
@@ -229,20 +231,21 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 
-		// 共享安全装配：配置私钥 → 自验签 KeySet（单签发方；轮换期可扩展多公钥/JWKS）
+		// Shared security wiring: configured private key → self-verifying KeySet
+		// (single issuer; multi-public-key/JWKS can be added during rotation)
 		pub, err := securityjwt.PublicKeyFromPrivatePEM([]byte(cfg.JWT.SigningKey))
 		if err != nil {
-			return fmt.Errorf("解析 JWT 私钥失败（jwt.signing_key 须为 RSA 私钥 PEM）: %w", err)
+			return fmt.Errorf("failed to parse JWT private key (jwt.signing_key must be an RSA private key PEM): %w", err)
 		}
 		keySet, err := securityjwt.NewStaticKeySet(map[string]*rsa.PublicKey{
 			cfg.JWT.EffectiveKeyID(): pub,
 		})
 		if err != nil {
-			return fmt.Errorf("构建 JWT KeySet 失败: %w", err)
+			return fmt.Errorf("failed to build JWT KeySet: %w", err)
 		}
 		tokenMgr, err := securityjwt.NewManager(cfg.JWT.SharedJWTConfig(keySet))
 		if err != nil {
-			return fmt.Errorf("初始化共享 JWT 管理器失败: %w", err)
+			return fmt.Errorf("failed to initialize shared JWT manager: %w", err)
 		}
 		sessionStore := securitysession.NewRedisClientStore(store.Get(), cfg.JWT.RefreshExpire)
 		authM := auth.New(cfg.JWT, tokenMgr, sessionStore)
@@ -250,7 +253,7 @@ var serverCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		addCleanup("devops-id 连接", func() error { return grpcinfra.Close(conn) })
+		addCleanup("devops-id connection", func() error { return grpcinfra.Close(conn) })
 		idc := idclient.New(conn, idclient.BufferConfig{
 			Batch:       cfg.IDClient.Batch,
 			LowWater:    cfg.IDClient.LowWater,
@@ -258,12 +261,14 @@ var serverCmd = &cobra.Command{
 		})
 		model.ConfigureModel(idc)
 
-		// 业务中间件套件（D7：业务依赖经 Deps 注入，nil 项由 NewKit 补生产默认绑定）。
+		// Business middleware suite (D7: business dependencies are injected via Deps; nil items get production defaults from NewKit).
 		kit := middleware.NewKit(authM, middleware.Deps{})
 
-		// 操作审计装配：Sink 落本租户 t_system_operation_log，采集范围由
-		// router 包的路由白名单决定（只审计写操作，见 audit_modules.go）。
-		// 审计是旁路：写入失败仅 slog.Warn，不影响业务响应。
+		// Operation audit wiring: the Sink writes this tenant's t_system_operation_log,
+		// and the collection scope is decided by the route whitelist in the router
+		// package (write operations only, see audit_modules.go). Auditing is a
+		// side path: write failures only log at slog.Warn and do not affect business
+		// responses.
 		kit.EnableAudit(humakit.AuditDeps{
 			Sink:    sysaudit.NewSink(),
 			Resolve: router.AuditModuleResolver(),
@@ -271,12 +276,12 @@ var serverCmd = &cobra.Command{
 
 		serviceName := cfg.Nacos.Registry.ServiceName
 		if serviceName == "" {
-			return fmt.Errorf("nacos.registry.service_name 未配置")
+			return fmt.Errorf("nacos.registry.service_name is not configured")
 		}
 		if err := nacos.Register(serviceName, cfg.Server.Port, cfg.Nacos.Registry.Meta); err != nil {
 			return err
 		}
-		addCleanup("nacos 服务注册", func() error {
+		addCleanup("nacos service registration", func() error {
 			return nacos.Deregister(serviceName, cfg.Server.Port)
 		})
 
@@ -287,18 +292,26 @@ var serverCmd = &cobra.Command{
 		}
 		register := app.InitializeHTTP(cfg, kit, authM)
 
-		// 流量入口收口（第三层）：要求请求携带可独立校验通过的 Bearer JWT。
+		// Traffic-entry enforcement (third layer): requests must carry a Bearer JWT
+		// that validates independently.
 		//
-		// 网关侧已由 Higress jwt-auth 插件验签（deploy/higress/wasmplugins/
-		// jwt-auth-2.0.0.yaml），本层是纵深防御：compose 形态没有 NetworkPolicy，
-		// 网关可被同网络容器绕过，绕过时不经过任何插件，故应用层再校验一次。
-		// jwt-auth 以 Ingress 资源为粒度挂载、无法按路径表达策略，本层承担细粒度收口。
+		// The gateway side is already verified by the Higress jwt-auth plugin
+		// (deploy/higress/wasmplugins/jwt-auth-2.0.0.yaml); this layer is
+		// defense in depth: the compose topology has no NetworkPolicy, so the
+		// gateway can be bypassed by containers on the same network, and a bypass
+		// goes through no plugins at all — hence the application layer validates
+		// once more. jwt-auth is mounted per Ingress resource and cannot express
+		// per-path policies, so this layer takes on fine-grained enforcement.
 		//
-		// 放行名单内的端点不经网关，仍可直连：
-		//   - 健康检查与指标：容器编排探针与 Prometheus 抓取；
-		//   - login / refresh / jwks.json：匿名端点，用户此时尚无 token
-		//     （与 devops-system-public.yaml 保持同口径，否则无人能登录）；
-		//   - apidoc 挂载点：仅 dev/test 开启（apidoc.enabled 控制）。
+		// Endpoints on the allowlist bypass the gateway and can still be reached
+		// directly:
+		//   - Health checks and metrics: container orchestration probes and
+		//     Prometheus scraping;
+		//   - login / refresh / jwks.json: anonymous endpoints, where the user has
+		//     no token yet (kept in line with devops-system-public.yaml, otherwise
+		//     nobody could log in);
+		//   - apidoc mount point: enabled in dev/test only (controlled by
+		//     apidoc.enabled).
 		guard := &httpinfra.GuardHooks{Guards: []gin.HandlerFunc{
 			gateway.EnforceFromConfig(cfg.Gateway, authM,
 				[]string{

@@ -1,5 +1,7 @@
-// 登录审计管理服务：查询侧（写入侧见 service.Auth.login 的 defer 落库）。
-// 删除/清空为运维留存量管控入口，独立权限门控（system:loginlog:delete / :clean）。
+// Login audit management service: query side (the write side lives in the
+// deferred persistence of service.Auth.login). Delete/clean are ops entry
+// points for retention control, gated by dedicated permissions
+// (system:loginlog:delete / :clean).
 package service
 
 import (
@@ -14,13 +16,13 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// LoginLog 登录审计服务。
+// LoginLog is the login audit service.
 type LoginLog struct{}
 
-// NewLoginLog 创建服务（无状态，仅读 dao）。
+// NewLoginLog creates the service (stateless, read-only dao access).
 func NewLoginLog() *LoginLog { return &LoginLog{} }
 
-// List 分页查询登录审计。
+// List returns a paginated query of login audit records.
 func (s *LoginLog) List(ctx context.Context, q types.LoginLogPageQuery) (domain.PageResult[types.LoginLogDTO], error) {
 	page, err := dao.ListLoginLogs(ctx, q)
 	if err != nil {
@@ -44,27 +46,28 @@ func (s *LoginLog) List(ctx context.Context, q types.LoginLogPageQuery) (domain.
 	}), nil
 }
 
-// Delete 批量删除审计行（ids 逗号分隔，如 "12,34,56"）。
+// Delete batch-deletes audit rows (ids comma-separated, e.g. "12,34,56").
 func (s *LoginLog) Delete(ctx context.Context, idsCSV string) error {
 	ids, err := parseIDsCSV(idsCSV)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		return errs.New(errs.CodeParam, "ids 不能为空")
+		return errs.New(errs.CodeParam, "ids cannot be empty")
 	}
 	_, err = dao.DeleteLoginLogs(ctx, ids)
 	return err
 }
 
-// Clean 清空本租户全部审计行。
+// Clean clears all audit rows of the current tenant.
 func (s *LoginLog) Clean(ctx context.Context) error {
 	_, err := dao.CleanLoginLogs(ctx)
 	return err
 }
 
-// parseIDsCSV 解析逗号分隔的 ID 串（容忍空白；任一非法即整体拒绝，不做静默跳过——
-// 审计删除必须精确对账）。
+// parseIDsCSV parses a comma-separated ID string (whitespace tolerated; any
+// invalid entry rejects the whole batch, with no silent skipping —
+// audit deletion must reconcile exactly).
 func parseIDsCSV(s string) ([]int64, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
@@ -74,7 +77,7 @@ func parseIDsCSV(s string) ([]int64, error) {
 	for _, p := range parts {
 		v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
 		if err != nil || v <= 0 {
-			return nil, errs.New(errs.CodeParam, "ids 非法：须为正整数逗号分隔（如 12,34,56）")
+			return nil, errs.New(errs.CodeParam, "invalid ids: must be comma-separated positive integers (e.g. 12,34,56)")
 		}
 		ids = append(ids, v)
 	}

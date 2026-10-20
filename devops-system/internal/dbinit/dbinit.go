@@ -1,19 +1,20 @@
-// Package dbinit 启动期建表与初始数据初始化（纯 SQL 脚本，零记账）。
+// Package dbinit handles startup table creation and initial data initialization (pure SQL scripts, zero bookkeeping).
 //
-// 职责边界：建表与初始数据都写成 .sql 脚本嵌入二进制，服务启动完成前
-// （server 装配链 / migrate 子命令）执行一次。
+// Responsibility boundary: table creation and initial data are written as .sql scripts embedded
+// in the binary and executed once before startup completes (in the server assembly chain /
+// the migrate subcommand).
 //
-// 脚本布局（文件名主干 = 表名，须匹配 ^t_[a-z0-9_]+$）：
-//   - sql/schema/<table>.sql   每表一个 CREATE TABLE IF NOT EXISTS；
-//   - sql/datas/<table>.sql  每表的初始数据（无种子的表不放文件）。
+// Script layout (file name stem = table name, must match ^t_[a-z0-9_]+$):
+//   - sql/schema/<table>.sql   one CREATE TABLE IF NOT EXISTS per table;
+//   - sql/datas/<table>.sql   initial data per table (tables without seeds get no file).
 //
-// 跳过判定：
-//   - 建表：表已存在（information_schema 判存）整个跳过；
-//   - 种子：仅当对应表刚被本次创建才执行（表已存在 = 数据已初始化）。
+// Skip rules:
+//   - table creation: skipped entirely if the table already exists (checked via information_schema);
+//   - seeds: executed only if the corresponding table was just created by this run (table exists = data already initialized).
 //
-// 注意：DDL 脚本变更不作用于已存在的表——存量库 schema 变更需手动 ALTER。
-// 多实例并发首启靠 CREATE TABLE IF NOT EXISTS 与种子 ON DUPLICATE KEY
-// UPDATE id = id 兜底，不引入分布式锁。
+// Note: DDL script changes do not apply to existing tables — schema changes on an existing DB require manual ALTER.
+// Concurrent first-start of multiple instances relies on CREATE TABLE IF NOT EXISTS and the seed
+// ON DUPLICATE KEY UPDATE id = id fallback, with no distributed lock introduced.
 package dbinit
 
 import (
@@ -32,33 +33,33 @@ import (
 //go:embed sql/schema sql/datas
 var scriptFS embed.FS
 
-// tablePattern 文件名主干约定：表名。
+// tablePattern is the file name stem convention: the table name.
 var tablePattern = regexp.MustCompile(`^t_[a-z0-9_]+$`)
 
-// createTableRE 建表语句开头：捕获组 1 为被创建的表名。
+// createTableRE matches the start of a CREATE TABLE statement; capture group 1 is the created table name.
 var createTableRE = regexp.MustCompile("(?i)^CREATE TABLE (?:IF NOT EXISTS )?`?([a-z0-9_]+)`?\\s*\\(")
 
-// script 单个 SQL 脚本（已拆分的语句序列）。
+// script is a single SQL script (already split into a statement sequence).
 type script struct {
-	Table string // 文件名主干（表名）
-	Name  string // 完整文件名
+	Table string // file name stem (table name)
+	Name  string // full file name
 	Stmts []string
 }
 
-// Run 对目标库执行建表与初始数据脚本（详见包文档）。
+// Run executes the table creation and initial data scripts against the target DB (see the package doc for details).
 func Run(gdb *gorm.DB) error {
 	return runFS(gdb, scriptFS)
 }
 
-// runFS 对给定文件系统执行建表与种子脚本（独立给单测注入 MapFS）。
+// runFS executes the table creation and seed scripts against the given file system (separate, so tests can inject a MapFS).
 func runFS(gdb *gorm.DB, fsys fs.FS) error {
 	ddls, err := loadScripts(fsys, "sql/schema", true)
 	if err != nil {
-		return fmt.Errorf("加载建表脚本失败: %w", err)
+		return fmt.Errorf("failed to load table creation scripts: %w", err)
 	}
 	datas, err := loadScripts(fsys, "sql/datas", false)
 	if err != nil {
-		return fmt.Errorf("加载种子脚本失败: %w", err)
+		return fmt.Errorf("failed to load seed scripts: %w", err)
 	}
 	ddlTables := make(map[string]bool, len(ddls))
 	for _, s := range ddls {
@@ -66,7 +67,7 @@ func runFS(gdb *gorm.DB, fsys fs.FS) error {
 	}
 	for _, s := range datas {
 		if !ddlTables[s.Table] {
-			return fmt.Errorf("种子脚本 %s 没有对应的建表脚本 sql/schema/%s", s.Name, s.Name)
+			return fmt.Errorf("seed script %s has no corresponding table creation script sql/schema/%s", s.Name, s.Name)
 		}
 	}
 
@@ -79,22 +80,22 @@ func runFS(gdb *gorm.DB, fsys fs.FS) error {
 		}
 		if exists {
 			skipped++
-			slog.Info("表已存在，跳过建表", "table", s.Table, "file", s.Name)
+			slog.Info("table already exists, skipping creation", "table", s.Table, "file", s.Name)
 			continue
 		}
 		for _, stmt := range s.Stmts {
 			if err := gdb.Exec(stmt).Error; err != nil {
-				return fmt.Errorf("执行建表脚本 %s 失败: %w", s.Name, err)
+				return fmt.Errorf("failed to execute table creation script %s: %w", s.Name, err)
 			}
 		}
 		created[s.Table] = true
-		slog.Info("建表已执行", "table", s.Table, "file", s.Name)
+		slog.Info("table creation executed", "table", s.Table, "file", s.Name)
 	}
 
 	seeded := 0
 	for _, s := range datas {
 		if !created[s.Table] {
-			slog.Info("种子跳过（表非本次创建）", "table", s.Table, "file", s.Name)
+			slog.Info("seed skipped (table not created by this run)", "table", s.Table, "file", s.Name)
 			continue
 		}
 		if err := gdb.Transaction(func(tx *gorm.DB) error {
@@ -105,18 +106,18 @@ func runFS(gdb *gorm.DB, fsys fs.FS) error {
 			}
 			return nil
 		}); err != nil {
-			return fmt.Errorf("执行种子脚本 %s 失败: %w", s.Name, err)
+			return fmt.Errorf("failed to execute seed script %s: %w", s.Name, err)
 		}
 		seeded++
-		slog.Info("种子数据已执行", "table", s.Table, "file", s.Name)
+		slog.Info("seed data executed", "table", s.Table, "file", s.Name)
 	}
 
-	slog.Info("dbinit 完成", "created", len(created), "seeded", seeded, "skipped", skipped)
+	slog.Info("dbinit completed", "created", len(created), "seeded", seeded, "skipped", skipped)
 	return nil
 }
 
-// loadScripts 加载并校验 dir 下全部 .sql（文件名主干 = 表名，按名排序）。
-// isDDL 时校验恰含 1 条 CREATE TABLE 且表名与文件名主干一致。
+// loadScripts loads and validates all .sql files under dir (file name stem = table name, sorted by name).
+// When isDDL, it validates that the file contains exactly 1 CREATE TABLE and that the table name matches the file name stem.
 func loadScripts(fsys fs.FS, dir string, isDDL bool) ([]script, error) {
 	paths, err := fs.Glob(fsys, dir+"/*.sql")
 	if err != nil {
@@ -128,7 +129,7 @@ func loadScripts(fsys fs.FS, dir string, isDDL bool) ([]script, error) {
 		base := path.Base(p)
 		stem := strings.TrimSuffix(base, ".sql")
 		if !tablePattern.MatchString(stem) {
-			return nil, fmt.Errorf("文件名 %s 不合规（须为 <表名>.sql，表名匹配 ^t_[a-z0-9_]+$）", base)
+			return nil, fmt.Errorf("file name %s is invalid (must be <table>.sql, with the table name matching ^t_[a-z0-9_]+$)", base)
 		}
 		content, err := fs.ReadFile(fsys, p)
 		if err != nil {
@@ -137,25 +138,25 @@ func loadScripts(fsys fs.FS, dir string, isDDL bool) ([]script, error) {
 		stmts := splitStatements(string(content))
 		if isDDL {
 			if len(stmts) != 1 {
-				return nil, fmt.Errorf("建表脚本 %s 须恰含 1 条 CREATE TABLE 语句，实际 %d 条", base, len(stmts))
+				return nil, fmt.Errorf("table creation script %s must contain exactly 1 CREATE TABLE statement, got %d", base, len(stmts))
 			}
 			m := createTableRE.FindStringSubmatch(stmts[0])
 			if m == nil {
-				return nil, fmt.Errorf("建表脚本 %s 的语句不是 CREATE TABLE", base)
+				return nil, fmt.Errorf("the statement in table creation script %s is not CREATE TABLE", base)
 			}
 			if m[1] != stem {
-				return nil, fmt.Errorf("建表脚本 %s 创建的表 %s 与文件名主干不一致", base, m[1])
+				return nil, fmt.Errorf("the table %s created by table creation script %s does not match the file name stem", m[1], base)
 			}
 		} else if len(stmts) == 0 {
-			return nil, fmt.Errorf("种子脚本 %s 无有效语句", base)
+			return nil, fmt.Errorf("seed script %s has no valid statements", base)
 		}
 		out = append(out, script{Table: stem, Name: base, Stmts: stmts})
 	}
 	return out, nil
 }
 
-// tableExists 判表是否已存在：MySQL 查 information_schema（MySQL/MariaDB
-// 通用）；其他方言（单测 sqlite）查 sqlite_master。
+// tableExists checks whether a table exists: MySQL queries information_schema (works for
+// MySQL/MariaDB alike); other dialects (sqlite in tests) query sqlite_master.
 func tableExists(gdb *gorm.DB, table string) (bool, error) {
 	var cnt int64
 	var err error
@@ -171,7 +172,7 @@ func tableExists(gdb *gorm.DB, table string) (bool, error) {
 		).Scan(&cnt).Error
 	}
 	if err != nil {
-		return false, fmt.Errorf("查询表 %s 是否存在失败: %w", table, err)
+		return false, fmt.Errorf("failed to check whether table %s exists: %w", table, err)
 	}
 	return cnt > 0, nil
 }

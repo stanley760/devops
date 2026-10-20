@@ -6,17 +6,17 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// 角色域事件名。
+// Role domain event names.
 const (
 	EventRoleMenusAssigned = "iam.role.menus_assigned"
 	EventRoleDeleted       = "iam.role.deleted"
 )
 
-// RoleMenusAssigned 角色菜单分配变更 → 按 (role, tenant) 快照重建 casbin p 行。
+// RoleMenusAssigned: role menu assignment changed → snapshot-rebuild casbin p rows by (role, tenant).
 //
-// 投影：casbin.RebuildRolePolicies（先清后建，幂等）。
-// 改造前为 service/role.go:168 的同步调用，失败返回
-// "菜单已保存，但权限策略刷新失败，请重试"。内置角色不产生此事件。
+// Projection: casbin.RebuildRolePolicies (clear first then rebuild, idempotent).
+// Before the refactor this was a synchronous call at service/role.go:168; on failure it returned
+// "menu saved, but permission policy refresh failed, please retry". Builtin roles do not emit this event.
 type RoleMenusAssigned struct {
 	shared.BaseEvent
 	RoleID      int64
@@ -25,17 +25,17 @@ type RoleMenusAssigned struct {
 	Permissions []string
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e RoleMenusAssigned) EventName() string { return EventRoleMenusAssigned }
 
 func (e RoleMenusAssigned) aggregateInfo() (string, int64) { return "iam.role", e.RoleID }
 
 func (e RoleMenusAssigned) eventTenantID() int64 { return e.TenantID }
 
-// RoleDeleted 角色软删 → 清理 p 行与 g 行引用。
+// RoleDeleted: role soft-deleted → clean up p row and g row references.
 //
-// 投影：casbin.RemoveRolePolicies + RemoveRoleGrouping。
-// 改造前为 service/role.go:188-193 的两次同步调用。
+// Projection: casbin.RemoveRolePolicies + RemoveRoleGrouping.
+// Before the refactor these were two synchronous calls at service/role.go:188-193.
 type RoleDeleted struct {
 	shared.BaseEvent
 	RoleID   int64
@@ -43,17 +43,17 @@ type RoleDeleted struct {
 	TenantID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e RoleDeleted) EventName() string { return EventRoleDeleted }
 
 func (e RoleDeleted) aggregateInfo() (string, int64) { return "iam.role", e.RoleID }
 
 func (e RoleDeleted) eventTenantID() int64 { return e.TenantID }
 
-// RoleEventPayload 是角色域事件的持久化载荷编解码入口。
+// RoleEventPayload is the persistence payload encode/decode entry for role domain events.
 type RoleEventPayload struct{}
 
-// Decode 按事件名还原事件实例。未知事件名返回 ok=false。
+// Decode restores an event instance by event name. An unknown event name returns ok=false.
 func (RoleEventPayload) Decode(name string, raw []byte) (shared.Event, bool, error) {
 	switch name {
 	case EventRoleMenusAssigned:

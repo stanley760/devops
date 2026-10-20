@@ -1,6 +1,6 @@
-// Package persistence 是领域仓储端口的 GORM 实现（基础设施层）。
+// Package persistence is the GORM implementation of domain repository ports (infrastructure layer).
 //
-// 依赖方向：infrastructure → domain。领域层不认识本包，反之亦然不成立。
+// Dependency direction: infrastructure → domain. The domain layer does not know this package; the reverse does not hold.
 package persistence
 
 import (
@@ -12,28 +12,30 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/tenantdb"
 )
 
-// txKey 事务句柄在 context 中的存放键。
+// txKey is the context key under which the transaction handle is stored.
 type txKey struct{}
 
-// gormTxManager 是 shared.TxManager 的 GORM 实现。
+// gormTxManager is the GORM implementation of shared.TxManager.
 //
-// 解决的问题：改造前 dao.WithTx 把 *gorm.DB 完全封在 dao 包内，
-// service 层无法声明跨聚合用例的事务边界，只能在应用层写手工补偿
-// （service/tenant.go:104 用 HardDeleteTenant 回滚租户行）。
-// 现在应用层通过本端口声明边界，事务句柄经 ctx 传递给各仓储实现，
-// *gorm.DB 不再泄漏出 persistence 包。
+// Problem solved: before the refactor, dao.WithTx kept *gorm.DB entirely inside the dao package,
+// so the service layer could not declare transaction boundaries for cross-aggregate use cases
+// and had to write manual compensation in the application layer (service/tenant.go:104 used
+// HardDeleteTenant to roll back the tenant row). Now the application layer declares the
+// boundary through this port, the transaction handle is passed to each repository
+// implementation via ctx, and *gorm.DB no longer leaks out of the persistence package.
 type gormTxManager struct{}
 
-// NewTxManager 构造事务管理器。
+// NewTxManager constructs the transaction manager.
 func NewTxManager() shared.TxManager { return gormTxManager{} }
 
-// WithinTx 在单一事务内执行 fn。
+// WithinTx executes fn within a single transaction.
 //
-// 若 ctx 中已存在事务句柄，则直接复用（嵌套调用不额外开事务），
-// 使仓储内部调用 WithinTx 时不会产生事务嵌套导致的锁问题。
+// If a transaction handle already exists in ctx, it is reused directly (nested calls open no
+// extra transaction), so a repository implementation calling WithinTx internally does not
+// cause lock problems from transaction nesting.
 func (gormTxManager) WithinTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if _, ok := txFrom(ctx); ok {
-		// 已在事务中：复用外层事务。
+		// already in a transaction: reuse the outer transaction.
 		return fn(ctx)
 	}
 	return tenantdb.DB(ctx).Transaction(func(tx *gorm.DB) error {
@@ -41,10 +43,11 @@ func (gormTxManager) WithinTx(ctx context.Context, fn func(ctx context.Context) 
 	})
 }
 
-// txFrom 从 ctx 取事务句柄。
+// txFrom takes the transaction handle from ctx.
 //
-// 仓储实现统一经此取连接：有事务则复用，无事务则回落到租户连接
-// （tenantdb.DB(ctx) 会应用租户过滤插件）。
+// Repository implementations uniformly take the connection through this: reuse the transaction
+// if present, otherwise fall back to the tenant connection (tenantdb.DB(ctx) applies the
+// tenant filtering plugin).
 func txFrom(ctx context.Context) (*gorm.DB, bool) {
 	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok && tx != nil {
 		return tx, true
@@ -52,7 +55,7 @@ func txFrom(ctx context.Context) (*gorm.DB, bool) {
 	return nil, false
 }
 
-// db 取当前可用连接：优先事务句柄，其次租户连接。
+// db takes the currently available connection: the transaction handle first, then the tenant connection.
 func db(ctx context.Context) *gorm.DB {
 	if tx, ok := txFrom(ctx); ok {
 		return tx.WithContext(ctx)

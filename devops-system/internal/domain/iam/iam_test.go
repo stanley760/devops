@@ -10,7 +10,7 @@ import (
 
 func fixedTime() time.Time { return time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC) }
 
-// bizCode 提取业务错误码（errs.BizError）。
+// bizCode extracts the business error code (errs.BizError).
 func bizCode(err error) int {
 	var be *errs.BizError
 	if errors.As(err, &be) {
@@ -23,8 +23,8 @@ func newUser(id int64, status UserStatus) *User {
 	return &User{ID: id, TenantID: 7, Username: "alice", Status: status}
 }
 
-// TestUserEnsureDeletable 覆盖聚合内的删除不变式。
-// 这三条规则改造前是 service/user.go:232-237 的裸 if，无法脱离 DB 验证。
+// TestUserEnsureDeletable covers the delete invariants within the aggregate.
+// Before the refactor these three rules were bare ifs at service/user.go:232-237, unverifiable without a DB.
 func TestUserEnsureDeletable(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -33,31 +33,31 @@ func TestUserEnsureDeletable(t *testing.T) {
 		wantCode  int
 		wantEmpty bool
 	}{
-		{name: "删除其他用户", userID: 42, actorID: 7, wantEmpty: true},
-		{name: "删除自己被拒", userID: 7, actorID: 7, wantCode: errs.CodeParam},
-		{name: "内置超管不可删", userID: builtinAdminID, actorID: 7, wantCode: errs.CodeParam},
+		{name: "delete another user", userID: 42, actorID: 7, wantEmpty: true},
+		{name: "deleting self rejected", userID: 7, actorID: 7, wantCode: errs.CodeParam},
+		{name: "builtin super admin not deletable", userID: builtinAdminID, actorID: 7, wantCode: errs.CodeParam},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := newUser(c.userID, UserStatusEnabled).EnsureDeletable(c.actorID)
 			if c.wantEmpty {
 				if err != nil {
-					t.Fatalf("期望通过，实际报错: %v", err)
+					t.Fatalf("expected pass, got error: %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatal("期望拒绝，实际通过")
+				t.Fatal("expected rejection, got pass")
 			}
 			if got := bizCode(err); got != c.wantCode {
-				t.Fatalf("错误码 = %d, want %d", got, c.wantCode)
+				t.Fatalf("error code = %d, want %d", got, c.wantCode)
 			}
 		})
 	}
 }
 
-// TestUserChangeStatusRecordsEvent 停用/启用应记录对应领域事件。
-// 改造前该规则在 service/user.go:201-203，测试必须起 Redis + MySQL + HTTP 全栈。
+// TestUserChangeStatusRecordsEvent: disabling/enabling should record the corresponding domain events.
+// Before the refactor this rule was at service/user.go:201-203; testing required the full Redis + MySQL + HTTP stack.
 func TestUserChangeStatusRecordsEvent(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -65,32 +65,32 @@ func TestUserChangeStatusRecordsEvent(t *testing.T) {
 		to        UserStatus
 		wantEvent string
 	}{
-		{name: "正常转停用", from: UserStatusEnabled, to: UserStatusDisabled, wantEvent: EventUserDeactivated},
-		{name: "停用转正常", from: UserStatusDisabled, to: UserStatusEnabled, wantEvent: EventUserActivated},
-		{name: "状态不变不记事件", from: UserStatusEnabled, to: UserStatusEnabled},
+		{name: "enabled to disabled", from: UserStatusEnabled, to: UserStatusDisabled, wantEvent: EventUserDeactivated},
+		{name: "disabled to enabled", from: UserStatusDisabled, to: UserStatusEnabled, wantEvent: EventUserActivated},
+		{name: "unchanged status records no event", from: UserStatusEnabled, to: UserStatusEnabled},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			u := newUser(42, c.from)
 			u.ChangeStatus(c.to, fixedTime())
 			if u.Status != c.to {
-				t.Fatalf("状态 = %d, want %d", u.Status, c.to)
+				t.Fatalf("status = %d, want %d", u.Status, c.to)
 			}
 			events := u.Events()
 			if c.wantEvent == "" {
 				if len(events) != 0 {
-					t.Fatalf("期望无事件，实际 %d 个", len(events))
+					t.Fatalf("expected no events, got %d", len(events))
 				}
 				return
 			}
 			if len(events) != 1 || events[0].EventName() != c.wantEvent {
-				t.Fatalf("事件 = %v, want %s", events, c.wantEvent)
+				t.Fatalf("events = %v, want %s", events, c.wantEvent)
 			}
 		})
 	}
 }
 
-// TestUserAssignRolesRecordsEvent 角色分配应记录 g 行同步事件。
+// TestUserAssignRolesRecordsEvent: role assignment should record the g row sync event.
 func TestUserAssignRolesRecordsEvent(t *testing.T) {
 	u := newUser(42, UserStatusEnabled)
 	u.AssignRoles([]int64{3, 5}, []string{"editor", "ops"}, fixedTime())
@@ -100,67 +100,67 @@ func TestUserAssignRolesRecordsEvent(t *testing.T) {
 	}
 	events := u.Events()
 	if len(events) != 1 {
-		t.Fatalf("事件数 = %d, want 1", len(events))
+		t.Fatalf("event count = %d, want 1", len(events))
 	}
 	e, ok := events[0].(UserRolesAssigned)
 	if !ok {
-		t.Fatalf("事件类型 = %T, want UserRolesAssigned", events[0])
+		t.Fatalf("event type = %T, want UserRolesAssigned", events[0])
 	}
 	if len(e.RoleCodes) != 2 || e.RoleCodes[0] != "editor" {
 		t.Fatalf("RoleCodes = %v, want [editor ops]", e.RoleCodes)
 	}
 }
 
-// TestUserPullEventsConsumesBuffer PullEvents 应消费事件缓冲（只投递一次）。
+// TestUserPullEventsConsumesBuffer: PullEvents should consume the event buffer (deliver only once).
 func TestUserPullEventsConsumesBuffer(t *testing.T) {
 	u := newUser(42, UserStatusEnabled)
 	u.AssignRoles([]int64{1}, []string{"r"}, fixedTime())
 
 	if got := u.PullEvents(); len(got) != 1 {
-		t.Fatalf("首次 PullEvents = %d, want 1", len(got))
+		t.Fatalf("first PullEvents = %d, want 1", len(got))
 	}
 	if got := u.PullEvents(); len(got) != 0 {
-		t.Fatalf("二次 PullEvents = %d, want 0（应已消费）", len(got))
+		t.Fatalf("second PullEvents = %d, want 0 (should already be consumed)", len(got))
 	}
-	// Events 只读副本不影响缓冲。
+	// the Events read-only copy does not affect the buffer.
 	if got := u.Events(); len(got) != 0 {
 		t.Fatalf("Events = %d, want 0", len(got))
 	}
 }
 
-// TestRoleEnsureDeletable 内置角色不可删除。
+// TestRoleEnsureDeletable: builtin roles cannot be deleted.
 func TestRoleEnsureDeletable(t *testing.T) {
 	builtin := &Role{ID: 2, Code: "super_admin", Type: RoleTypeBuiltin}
 	if err := builtin.EnsureDeletable(); err == nil {
-		t.Fatal("内置角色应拒绝删除")
+		t.Fatal("builtin roles should reject deletion")
 	} else if bizCode(err) != errs.CodeParam {
-		t.Fatalf("错误码 = %d, want CodeParam", bizCode(err))
+		t.Fatalf("error code = %d, want CodeParam", bizCode(err))
 	}
 
 	custom := &Role{ID: 9, Code: "editor", Type: RoleTypeCustom}
 	if err := custom.EnsureDeletable(); err != nil {
-		t.Fatalf("自定义角色应允许删除: %v", err)
+		t.Fatalf("custom roles should allow deletion: %v", err)
 	}
 }
 
-// TestRoleAssignMenusSkipsBuiltin 内置角色分配菜单不应派生 p 行事件。
-// 这是防超管被锁死的关键规则（改造前 service/role.go:159）。
+// TestRoleAssignMenusSkipsBuiltin: builtin role menu assignment should not derive p row events.
+// This is the key rule preventing the super admin from being locked out (previously service/role.go:159).
 func TestRoleAssignMenusSkipsBuiltin(t *testing.T) {
 	builtin := &Role{ID: 2, Code: "super_admin", Type: RoleTypeBuiltin}
 	builtin.AssignMenus([]int64{1, 2}, []string{"system:user:list"}, fixedTime())
 	if len(builtin.Events()) != 0 {
-		t.Fatalf("内置角色不应产生 p 行事件，实际 %d 个", len(builtin.Events()))
+		t.Fatalf("builtin roles should not produce p row events, got %d", len(builtin.Events()))
 	}
 
 	custom := &Role{ID: 9, Code: "editor", Type: RoleTypeCustom}
 	custom.AssignMenus([]int64{1}, []string{"system:user:list"}, fixedTime())
 	events := custom.Events()
 	if len(events) != 1 || events[0].EventName() != EventRoleMenusAssigned {
-		t.Fatalf("事件 = %v, want RoleMenusAssigned", events)
+		t.Fatalf("events = %v, want RoleMenusAssigned", events)
 	}
 }
 
-// TestValidateDataScope 自定义口径必须携带部门集合。
+// TestValidateDataScope: the custom scope must carry a dept set.
 func TestValidateDataScope(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -168,26 +168,26 @@ func TestValidateDataScope(t *testing.T) {
 		deptIDs    string
 		wantReject bool
 	}{
-		{name: "全部权限无需部门", scope: 1, deptIDs: ""},
-		{name: "自定义带部门", scope: 2, deptIDs: "[4,5]"},
-		{name: "自定义缺部门被拒", scope: 2, deptIDs: "", wantReject: true},
-		{name: "自定义空数组被拒", scope: 2, deptIDs: "[]", wantReject: true},
-		{name: "自定义脏数据被拒", scope: 2, deptIDs: `["4"]`, wantReject: true},
+		{name: "all permission needs no dept", scope: 1, deptIDs: ""},
+		{name: "custom with depts", scope: 2, deptIDs: "[4,5]"},
+		{name: "custom without depts rejected", scope: 2, deptIDs: "", wantReject: true},
+		{name: "custom empty array rejected", scope: 2, deptIDs: "[]", wantReject: true},
+		{name: "custom dirty data rejected", scope: 2, deptIDs: `["4"]`, wantReject: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := ValidateDataScope(c.scope, c.deptIDs)
 			if c.wantReject && err == nil {
-				t.Fatal("期望拒绝，实际通过")
+				t.Fatal("expected rejection, got pass")
 			}
 			if !c.wantReject && err != nil {
-				t.Fatalf("期望通过，实际: %v", err)
+				t.Fatalf("expected pass, got: %v", err)
 			}
 		})
 	}
 }
 
-// TestTenantIsEnabled 租户三态可用性（正常/停用/过期）。
+// TestTenantIsEnabled: tenant three-state usability (normal/disabled/expired).
 func TestTenantIsEnabled(t *testing.T) {
 	now := fixedTime()
 	past := now.Add(-time.Hour)
@@ -199,10 +199,10 @@ func TestTenantIsEnabled(t *testing.T) {
 		expireTime *time.Time
 		want       bool
 	}{
-		{name: "正常且永不过期", status: TenantStatusEnabled, want: true},
-		{name: "停用", status: TenantStatusDisabled, want: false},
-		{name: "已过期", status: TenantStatusEnabled, expireTime: &past, want: false},
-		{name: "未过期", status: TenantStatusEnabled, expireTime: &future, want: true},
+		{name: "normal and never expires", status: TenantStatusEnabled, want: true},
+		{name: "disabled", status: TenantStatusDisabled, want: false},
+		{name: "expired", status: TenantStatusEnabled, expireTime: &past, want: false},
+		{name: "not expired", status: TenantStatusEnabled, expireTime: &future, want: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -214,18 +214,18 @@ func TestTenantIsEnabled(t *testing.T) {
 	}
 }
 
-// TestTenantChangeRecordsDisableEvent 停用租户应记录全员下线事件。
+// TestTenantChangeRecordsDisableEvent: disabling a tenant should record the everyone-offline event.
 func TestTenantChangeRecordsDisableEvent(t *testing.T) {
 	tn := &Tenant{ID: 7, Status: TenantStatusEnabled}
 	tn.Change(TenantUpdate{Name: "t7", Status: TenantStatusDisabled}, fixedTime())
 
 	events := tn.Events()
 	if len(events) != 1 || events[0].EventName() != EventTenantDisabled {
-		t.Fatalf("事件 = %v, want TenantDisabled", events)
+		t.Fatalf("events = %v, want TenantDisabled", events)
 	}
 }
 
-// TestMenuEnsureNotSelfOrDescendant 防环：菜单不可挂到自己的后代下。
+// TestMenuEnsureNotSelfOrDescendant: cycle prevention — a menu cannot be attached under its own descendant.
 func TestMenuEnsureNotSelfOrDescendant(t *testing.T) {
 	all := []*Menu{
 		{ID: 1, ParentID: 0},
@@ -235,12 +235,12 @@ func TestMenuEnsureNotSelfOrDescendant(t *testing.T) {
 	m := &Menu{ID: 2, ParentID: 1}
 
 	if err := m.EnsureNotSelfOrDescendant(3, all); err == nil {
-		t.Fatal("挂到自身后代应被拒绝")
+		t.Fatal("attaching under a descendant should be rejected")
 	}
 	if err := m.EnsureNotSelfOrDescendant(1, all); err != nil {
-		t.Fatalf("挂到父级应允许: %v", err)
+		t.Fatalf("attaching under the parent should be allowed: %v", err)
 	}
 	if err := m.EnsureNotSelfOrDescendant(0, all); err != nil {
-		t.Fatalf("顶级应允许: %v", err)
+		t.Fatalf("top level should be allowed: %v", err)
 	}
 }

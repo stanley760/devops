@@ -182,7 +182,7 @@ func TestManagerClosedRejectsNewRequests(t *testing.T) {
 }
 
 func TestManagerUsesLocalModeSlot(t *testing.T) {
-	// 本地模式（nil Lease/Slots = 无协调基础设施）：使用缓存槽位
+	// Local mode (nil Lease/Slots = no coordination infrastructure): use the cached slot
 	cache := t.TempDir()
 	workerFile := filepath.Join(cache, "leaf", "user", "worker_id")
 	if err := os.MkdirAll(filepath.Dir(workerFile), 0o755); err != nil {
@@ -210,7 +210,7 @@ func TestManagerUsesLocalModeSlot(t *testing.T) {
 }
 
 func TestNoFallbackWithoutOptIn(t *testing.T) {
-	// P0-1 fail-closed: etcd 不可用且未开启 AllowLocalFallback → 拒绝发号
+	// P0-1 fail-closed: etcd unavailable and AllowLocalFallback not enabled -> refuse ID generation
 	lease := &fakeLeaseLifecycle{lost: make(chan struct{}), grantErr: errors.New("etcd down")}
 	slots := &fakeSlotCoordinator{}
 
@@ -224,12 +224,12 @@ func TestNoFallbackWithoutOptIn(t *testing.T) {
 
 	_, err = manager.Next(context.Background(), "user")
 	if !errors.Is(err, ErrInfraUnavailable) {
-		t.Fatalf("fail-closed 应返回 ErrInfraUnavailable, got %v", err)
+		t.Fatalf("fail-closed should return ErrInfraUnavailable, got %v", err)
 	}
 }
 
 func TestFallbackWithoutCachedSlotFails(t *testing.T) {
-	// P0-1: 开启 AllowLocalFallback 但无缓存槽位 → ErrNoCachedSlot（永不 slot 0）
+	// P0-1: AllowLocalFallback enabled but no cached slot -> ErrNoCachedSlot (never slot 0)
 	lease := &fakeLeaseLifecycle{lost: make(chan struct{}), grantErr: errors.New("etcd down")}
 
 	manager, err := NewManager(Config{LeafName: "leaf", AllowLocalFallback: true}, func(bizTag string) TagInfra {
@@ -242,12 +242,12 @@ func TestFallbackWithoutCachedSlotFails(t *testing.T) {
 
 	_, err = manager.Next(context.Background(), "user")
 	if !errors.Is(err, ErrNoCachedSlot) {
-		t.Fatalf("无缓存槽位应返回 ErrNoCachedSlot, got %v", err)
+		t.Fatalf("no cached slot should return ErrNoCachedSlot, got %v", err)
 	}
 }
 
 func TestFallbackWithCachedSlotUsesCached(t *testing.T) {
-	// P0-1: 开启 AllowLocalFallback 且有缓存槽位 → 使用缓存
+	// P0-1: AllowLocalFallback enabled and a cached slot exists -> use the cache
 	cache := t.TempDir()
 	workerFile := filepath.Join(cache, "leaf", "user", "worker_id")
 	if err := os.MkdirAll(filepath.Dir(workerFile), 0o755); err != nil {
@@ -276,7 +276,7 @@ func TestFallbackWithCachedSlotUsesCached(t *testing.T) {
 }
 
 func TestNoFallbackOnContextCancel(t *testing.T) {
-	// P1-6: ctx 取消不触发 fallback
+	// P1-6: ctx cancellation does not trigger fallback
 	lease := &fakeLeaseLifecycle{lost: make(chan struct{}), grantErr: context.Canceled}
 
 	manager, err := NewManager(Config{LeafName: "leaf", AllowLocalFallback: true}, func(bizTag string) TagInfra {
@@ -289,7 +289,7 @@ func TestNoFallbackOnContextCancel(t *testing.T) {
 
 	_, err = manager.Next(context.Background(), "user")
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("ctx cancel 应原样返回, got %v", err)
+		t.Fatalf("ctx cancel should be returned as-is, got %v", err)
 	}
 }
 
@@ -389,12 +389,12 @@ func TestMaxGeneratorsLimit(t *testing.T) {
 }
 
 func TestConcurrentFirstUseInitializesOnce(t *testing.T) {
-	// P1-5: 并发首次使用同一 tag 只初始化一次
+	// P1-5: concurrent first use of the same tag initializes it only once
 	slots := &fakeSlotCoordinator{acquireSlot: 3}
 	lease := &fakeLeaseLifecycle{lost: make(chan struct{})}
 
 	manager, err := NewManager(Config{LeafName: "leaf"}, func(bizTag string) TagInfra {
-		time.Sleep(50 * time.Millisecond) // 模拟慢 I/O
+		time.Sleep(50 * time.Millisecond) // simulate slow I/O
 		return TagInfra{Lease: lease, Slots: slots, Cache: workerfile.New(t.TempDir(), "leaf", bizTag)}
 	}, nil)
 	if err != nil {
@@ -421,9 +421,9 @@ func TestConcurrentFirstUseInitializesOnce(t *testing.T) {
 }
 
 func TestWatermarkStartupWait(t *testing.T) {
-	// P0-2: 启动时等待水位窗口过去
+	// P0-2: wait for the watermark window to pass at startup
 	cache := t.TempDir()
-	// 预设水位为 now+100ms
+	// preset the watermark to now+100ms
 	wmPath := filepath.Join(cache, "leaf", "user", "watermark")
 	if err := os.MkdirAll(filepath.Dir(wmPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -449,7 +449,7 @@ func TestWatermarkStartupWait(t *testing.T) {
 	elapsed := time.Since(started)
 	_ = id
 	if elapsed < 50*time.Millisecond {
-		t.Fatalf("启动等待时间 %v 太短，水位窗口可能未等待", elapsed)
+		t.Fatalf("startup wait %v is too short; the watermark window may not have been awaited", elapsed)
 	}
 }
 
@@ -463,6 +463,6 @@ func TestValidateNameLengthLimit(t *testing.T) {
 	longTag := "this_is_a_very_long_biz_tag_name"
 	_, err = manager.Next(context.Background(), longTag)
 	if !errors.Is(err, ErrInvalidName) {
-		t.Fatalf("超长 tag error = %v, want ErrInvalidName", err)
+		t.Fatalf("over-long tag error = %v, want ErrInvalidName", err)
 	}
 }

@@ -1,5 +1,5 @@
--- t_system_operation_log 操作审计表（租户表）：B 端管理写操作审计。
--- 列宽与 devops-common/audit 契约常量一一对应。
+-- t_system_operation_log operation audit table (tenant table): B-side admin write operation audit.
+-- The column widths correspond one-to-one with the devops-common/audit contract constants.
 CREATE TABLE IF NOT EXISTS t_system_operation_log (
     id             BIGINT       NOT NULL,
     creator        VARCHAR(64)  NULL,

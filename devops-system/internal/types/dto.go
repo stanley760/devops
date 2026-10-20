@@ -1,88 +1,88 @@
-// 认证与用户信息 DTO。ID 一律 types.ID 字符串形态下发。
+// Authentication and user info DTOs. IDs are always issued in the types.ID string form.
 package types
 
 import "time"
 
-// LoginReq 登录入参。tenant_code 为空取 tenant.default_code。
+// LoginReq is the login input. An empty tenant_code falls back to tenant.default_code.
 type LoginReq struct {
-	TenantCode string `json:"tenant_code,omitempty" binding:"omitempty,max=30" maxLength:"30" doc:"租户编号"`
-	Username   string `json:"username" binding:"required,min=2,max=30" minLength:"2" maxLength:"30" doc:"用户姓名"`
-	Password   string `json:"password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"用户密码"`
+	TenantCode string `json:"tenant_code,omitempty" binding:"omitempty,max=30" maxLength:"30" doc:"tenant code"`
+	Username   string `json:"username" binding:"required,min=2,max=30" minLength:"2" maxLength:"30" doc:"username"`
+	Password   string `json:"password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"password"`
 }
 
-// TenantBrief 租户摘要。
+// TenantBrief is the tenant summary.
 type TenantBrief struct {
-	ID   ID     `json:"id" doc:"租户id"`
-	Name string `json:"name" doc:"租户名字"`
-	Code string `json:"code" doc:"租户编码"`
+	ID   ID     `json:"id" doc:"tenant id"`
+	Name string `json:"name" doc:"tenant name"`
+	Code string `json:"code" doc:"tenant code"`
 }
 
-// LoginResp 登录响应：双 token + 租户。
+// LoginResp is the login response: token pair + tenant.
 type LoginResp struct {
-	AccessToken  string      `json:"access_token" doc:"当前token"`
-	RefreshToken string      `json:"refresh_token" doc:"刷新token"`
-	ExpiresIn    int64       `json:"expires_in" doc:"当前token有效期"` // access token 有效期（秒）
-	Tenant       TenantBrief `json:"tenant" doc:"租户信息"`
+	AccessToken  string      `json:"access_token" doc:"current token"`
+	RefreshToken string      `json:"refresh_token" doc:"refresh token"`
+	ExpiresIn    int64       `json:"expires_in" doc:"current token validity"` // access token validity in seconds
+	Tenant       TenantBrief `json:"tenant" doc:"tenant info"`
 }
 
-// RefreshReq 刷新入参。
+// RefreshReq is the refresh input.
 type RefreshReq struct {
-	RefreshToken string `json:"refresh_token" binding:"required,uuid" format:"uuid" doc:"刷新token"`
+	RefreshToken string `json:"refresh_token" binding:"required,uuid" format:"uuid" doc:"refresh token"`
 }
 
-// TokenResp 刷新响应（结构同 LoginResp）。
+// TokenResp is the refresh response (same structure as LoginResp).
 type TokenResp = LoginResp
 
-// UserDTO 用户信息。
+// UserDTO is the user info.
 type UserDTO struct {
-	ID        ID        `json:"id" doc:"用户id"`
-	Username  string    `json:"username" doc:"用户名称"`
-	Nickname  string    `json:"nickname" doc:"用户昵称"`
-	Email     string    `json:"email" doc:"电子邮箱"`
-	Mobile    string    `json:"mobile" doc:"手机号码"`
-	Gender    int8      `json:"gender" doc:"性别 0未知 1男 2女"`
-	Avatar    string    `json:"avatar" doc:"头像"`
-	DeptID    ID        `json:"deptId" doc:"部门id"`
-	PostIDs   []ID      `json:"postIds" doc:"关联岗位id列表"`
-	Remark    string    `json:"remark" doc:"备注"`
-	LoginIP   string    `json:"loginIp" doc:"登录ip地址"`
-	LoginDate time.Time `json:"loginDate" doc:"登录时间"`
+	ID        ID        `json:"id" doc:"user id"`
+	Username  string    `json:"username" doc:"username"`
+	Nickname  string    `json:"nickname" doc:"nickname"`
+	Email     string    `json:"email" doc:"email"`
+	Mobile    string    `json:"mobile" doc:"mobile number"`
+	Gender    int8      `json:"gender" doc:"gender 0 unknown 1 male 2 female"`
+	Avatar    string    `json:"avatar" doc:"avatar"`
+	DeptID    ID        `json:"deptId" doc:"department id"`
+	PostIDs   []ID      `json:"postIds" doc:"associated post ID list"`
+	Remark    string    `json:"remark" doc:"remark"`
+	LoginIP   string    `json:"loginIp" doc:"login IP address"`
+	LoginDate time.Time `json:"loginDate" doc:"login time"`
 }
 
-// UserInfoResp GET /auth/info 响应。
+// UserInfoResp is the GET /auth/info response.
 type UserInfoResp struct {
-	User        UserDTO     `json:"user" doc:"用户信息"`
-	Tenant      TenantBrief `json:"tenant" doc:"租户"`
-	Roles       []string    `json:"roles" doc:"角色列表"`       // 角色编码
-	Permissions []string    `json:"permissions" doc:"权限列表"` // 权限标识
+	User        UserDTO     `json:"user" doc:"user info"`
+	Tenant      TenantBrief `json:"tenant" doc:"tenant"`
+	Roles       []string    `json:"roles" doc:"role list"`             // role codes
+	Permissions []string    `json:"permissions" doc:"permission list"` // permission identifiers
 }
 
-// RouterNode 前端路由节点（菜单树）。
+// RouterNode is a frontend route node (menu tree).
 type RouterNode struct {
-	ID            ID           `json:"id" doc:"菜单id"`
-	Name          string       `json:"name" doc:"菜单名称"`
-	Path          string       `json:"path" doc:"菜单路径"`
-	Component     string       `json:"component" doc:"组件路径"`
-	ComponentName string       `json:"componentName" doc:"组件名称"`
-	Icon          string       `json:"icon" doc:"图标"`
-	Sort          int          `json:"sort" doc:"排序"`
-	Visible       bool         `json:"visible" doc:"是否可见"`
-	KeepAlive     bool         `json:"keepAlive" doc:"是否缓存"`
-	AlwaysShow    bool         `json:"alwaysShow" doc:"是否总是显示"`
-	Children      []RouterNode `json:"children" doc:"子路由"`
+	ID            ID           `json:"id" doc:"menu id"`
+	Name          string       `json:"name" doc:"menu name"`
+	Path          string       `json:"path" doc:"menu path"`
+	Component     string       `json:"component" doc:"component path"`
+	ComponentName string       `json:"componentName" doc:"component name"`
+	Icon          string       `json:"icon" doc:"icon"`
+	Sort          int          `json:"sort" doc:"sort order"`
+	Visible       bool         `json:"visible" doc:"visible"`
+	KeepAlive     bool         `json:"keepAlive" doc:"keep alive"`
+	AlwaysShow    bool         `json:"alwaysShow" doc:"always show"`
+	Children      []RouterNode `json:"children" doc:"child routes"`
 }
 
-// UpdateProfileReq PUT /auth/profile 入参。
+// UpdateProfileReq is the PUT /auth/profile input.
 type UpdateProfileReq struct {
-	Nickname string `json:"nickname" binding:"required,min=1,max=30" minLength:"1" maxLength:"30" doc:"昵称"`
-	Email    string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"邮箱账号"`
-	Mobile   string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"手机号码"`
-	Gender   int8   `json:"gender,omitempty" binding:"omitempty,min=0,max=2" minimum:"0" maximum:"2" doc:"性别 0未知 1男 2女"`
-	Avatar   string `json:"avatar,omitempty" binding:"omitempty,max=512" maxLength:"512" doc:"图片链接"`
+	Nickname string `json:"nickname" binding:"required,min=1,max=30" minLength:"1" maxLength:"30" doc:"nickname"`
+	Email    string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email account"`
+	Mobile   string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"mobile number"`
+	Gender   int8   `json:"gender,omitempty" binding:"omitempty,min=0,max=2" minimum:"0" maximum:"2" doc:"gender 0 unknown 1 male 2 female"`
+	Avatar   string `json:"avatar,omitempty" binding:"omitempty,max=512" maxLength:"512" doc:"image URL"`
 }
 
-// UpdatePasswordReq PUT /auth/profile/password 入参。
+// UpdatePasswordReq is the PUT /auth/profile/password input.
 type UpdatePasswordReq struct {
-	OldPassword string `json:"old_password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"旧密码"`
-	NewPassword string `json:"new_password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"新密码"`
+	OldPassword string `json:"old_password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"old password"`
+	NewPassword string `json:"new_password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"new password"`
 }

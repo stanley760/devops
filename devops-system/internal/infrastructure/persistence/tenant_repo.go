@@ -16,19 +16,19 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/model"
 )
 
-// tenantRepo 是 iam.TenantRepository 的 GORM 实现。
+// tenantRepo is the GORM implementation of iam.TenantRepository.
 //
-// t_tenant 是全局表（租户注册表本身，无 tenant_id），故租户插件不注入；
-// 其余租户内表仍靠插件过滤。
+// t_tenant is a global table (the tenant registry itself, no tenant_id), so the tenant plugin
+// does not inject; other in-tenant tables are still filtered by the plugin.
 type tenantRepo struct{}
 
-// NewTenantRepository 构造租户仓储。
+// NewTenantRepository constructs the tenant repository.
 func NewTenantRepository() iam.TenantRepository { return tenantRepo{} }
 
 func (tenantRepo) Save(ctx context.Context, t *iam.Tenant) error {
 	if t.ID == 0 {
 		if err := db(ctx).Create(toTenantPO(t)).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建租户失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create tenant")
 		}
 		return nil
 	}
@@ -41,10 +41,10 @@ func (tenantRepo) Save(ctx context.Context, t *iam.Tenant) error {
 		"remark":         t.Remark,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新租户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update tenant")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "租户不存在")
+		return errs.New(errs.CodeNotFound, "tenant not found")
 	}
 	return appendEvents(ctx, t.PullEvents()...)
 }
@@ -53,23 +53,24 @@ func (tenantRepo) Get(ctx context.Context, id int64) (*iam.Tenant, error) {
 	var po model.Tenant
 	if err := db(ctx).Where("id = ?", id).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "租户不存在")
+			return nil, errs.New(errs.CodeNotFound, "tenant not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询租户失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query tenant")
 	}
 	return toTenantDomain(&po), nil
 }
 
-// GetByCode 按编码取租户（登录入参 tenant_code 的解析路径）。
+// GetByCode fetches a tenant by code (the resolution path for the login input tenant_code).
 //
-// 登录场景 ctx 尚未解析租户，租户插件对全局表本就不注入，故此处安全。
+// In the login scenario ctx has not resolved a tenant yet; the tenant plugin does not inject for
+// global tables anyway, so this is safe here.
 func (tenantRepo) GetByCode(ctx context.Context, code string) (*iam.Tenant, error) {
 	var po model.Tenant
 	if err := db(ctx).Where("code = ?", code).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "租户不存在")
+			return nil, errs.New(errs.CodeNotFound, "tenant not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询租户失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query tenant")
 	}
 	return toTenantDomain(&po), nil
 }
@@ -87,12 +88,12 @@ func (tenantRepo) List(ctx context.Context, f iam.TenantFilter) (domain.PageResu
 	}
 	page, err := gormx.FindPage[model.Tenant](conn.Order("id DESC"), f.PageParam)
 	if err != nil {
-		return domain.PageResult[*iam.Tenant]{}, errs.Wrap(err, errs.CodeInternal, "查询租户列表失败")
+		return domain.PageResult[*iam.Tenant]{}, errs.Wrap(err, errs.CodeInternal, "failed to query tenant list")
 	}
 	return domain.MapPage(page, func(po model.Tenant) *iam.Tenant { return toTenantDomain(&po) }), nil
 }
 
-// Delete 软删租户并改写 code 绕开全局唯一索引 uk_code。
+// Delete soft-deletes the tenant and rewrites the code to bypass the global unique index uk_code.
 func (tenantRepo) Delete(ctx context.Context, t *iam.Tenant, operator string) error {
 	res := db(ctx).Model(&model.Tenant{}).Where("id = ?", t.ID).Updates(map[string]any{
 		"code":       iam.SoftDeletedCode(t.Code, t.ID),
@@ -100,22 +101,22 @@ func (tenantRepo) Delete(ctx context.Context, t *iam.Tenant, operator string) er
 		"updater":    operator,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "删除租户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to delete tenant")
 	}
 	return appendEvents(ctx, t.PullEvents()...)
 }
 
 func (tenantRepo) CodeExists(ctx context.Context, code string, excludeID int64) (bool, error) {
-	return existsBy(ctx, &model.Tenant{}, "code", code, excludeID, "检查租户编码唯一性失败")
+	return existsBy(ctx, &model.Tenant{}, "code", code, excludeID, "failed to check tenant code uniqueness")
 }
 
 func (tenantRepo) IsAnyUserExists(ctx context.Context, tenantID int64) (bool, error) {
-	// 显式带 tenant_id：跨租户表查询必须自己表达范围（租户插件按 ctx 注入，
-	// 而此处 ctx 是租户管理侧的全局 ctx，不是目标租户的 ctx）。
+	// explicitly carry tenant_id: cross-tenant table queries must express the scope themselves (the
+	// tenant plugin injects by ctx, and here ctx is the tenant-management-side global ctx, not the target tenant's ctx).
 	var cnt int64
 	if err := db(ctx).Model(&model.User{}).
 		Where("tenant_id = ?", tenantID).Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "查询租户用户失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to query tenant users")
 	}
 	return cnt > 0, nil
 }
@@ -148,8 +149,8 @@ func toTenantDomain(po *model.Tenant) *iam.Tenant {
 	}
 }
 
-// 审计行列宽（与 model gorm tag 对齐；超长截断保行不丢）。
-// 改造前分散在 dao/login_log.go:18-23，此处保持同一口径。
+// Audit column widths (aligned with the model gorm tags; overlong values are truncated so rows are never lost).
+// Before the refactor these were scattered in dao/login_log.go:18-23; the same semantics are kept here.
 const (
 	loginLogMaxUsername  = 30
 	loginLogMaxIP        = 50
@@ -157,17 +158,18 @@ const (
 	loginLogMaxGeo       = 64
 )
 
-// loginLogRepo 是 auditlog.LoginLogWriter + LoginLogReader 的 GORM 实现。
+// loginLogRepo is the GORM implementation of auditlog.LoginLogWriter + LoginLogReader.
 type loginLogRepo struct{}
 
-// NewLoginLogRepository 构造登录日志仓储。
+// NewLoginLogRepository constructs the login log repository.
 func NewLoginLogRepository() auditlog.LoginLogWriter { return loginLogRepo{} }
 
-// Append 落一行登录审计。
+// Append persists one login audit row.
 //
-// 尽力而为语义保留：审计写入失败不影响登录结果，仅记告警。
-// 落库前按列宽截断——网关侧对 UA/Geo 无长度约束，MySQL 严格模式下
-// 超长会整行被拒（丢审计行比截断更不可接受）。
+// Best-effort semantics preserved: a failed audit write does not affect the login result, only a warning is logged.
+// Values are truncated to the column width before persistence — the gateway imposes no length limit
+// on UA/Geo, and under MySQL strict mode overlong values get the whole row rejected (losing the audit
+// row is worse than truncating it).
 func (loginLogRepo) Append(ctx context.Context, l *auditlog.LoginLog) error {
 	if l == nil {
 		return nil
@@ -185,13 +187,13 @@ func (loginLogRepo) Append(ctx context.Context, l *auditlog.LoginLog) error {
 		Code:        l.Code,
 	}
 	if err := db(ctx).Create(po).Error; err != nil {
-		// 审计丢行需要可见性，故用 Warn 而非静默。
-		return errs.Wrap(err, errs.CodeInternal, "登录审计落库失败")
+		// a lost audit row needs visibility, hence Warn rather than silence.
+		return errs.Wrap(err, errs.CodeInternal, "failed to persist login audit")
 	}
 	return nil
 }
 
-// NewLoginLogReader 构造登录日志读端口。
+// NewLoginLogReader constructs the login log read port.
 func NewLoginLogReader() auditlog.LoginLogReader { return loginLogRepo{} }
 
 func (loginLogRepo) List(ctx context.Context, f auditlog.LoginLogFilter) (domain.PageResult[*auditlog.LoginLog], error) {
@@ -213,7 +215,7 @@ func (loginLogRepo) List(ctx context.Context, f auditlog.LoginLogFilter) (domain
 	}
 	page, err := gormx.FindPage[model.LoginLog](conn.Order("id DESC"), f.PageParam)
 	if err != nil {
-		return domain.PageResult[*auditlog.LoginLog]{}, errs.Wrap(err, errs.CodeInternal, "查询登录审计列表失败")
+		return domain.PageResult[*auditlog.LoginLog]{}, errs.Wrap(err, errs.CodeInternal, "failed to query login audit list")
 	}
 	out := make([]*auditlog.LoginLog, 0, len(page.List))
 	for i := range page.List {
@@ -225,22 +227,23 @@ func (loginLogRepo) List(ctx context.Context, f auditlog.LoginLogFilter) (domain
 	}, nil
 }
 
-// DeleteByIDs 批量物理删除审计行。
+// DeleteByIDs batch-deletes audit rows physically.
 func (loginLogRepo) DeleteByIDs(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	if err := db(ctx).Unscoped().Where("id IN ?", ids).
 		Delete(&model.LoginLog{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "删除登录审计失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to delete login audit rows")
 	}
 	return nil
 }
 
-// Clean 清空本租户全部审计行。
+// Clean deletes all audit rows of the current tenant.
 //
-// Unscoped 之后租户插件不再注入条件，故必须显式带 tenant_id——
-// 否则会跨租户清空（既有实现 dao/login_log.go:97 同样显式处理）。
+// After Unscoped the tenant plugin no longer injects conditions, so tenant_id must be specified
+// explicitly — otherwise other tenants would be cleaned as well (the existing implementation
+// dao/login_log.go:97 handles it explicitly the same way).
 func (loginLogRepo) Clean(ctx context.Context) error {
 	tid, err := tenantOf(ctx)
 	if err != nil {
@@ -248,7 +251,7 @@ func (loginLogRepo) Clean(ctx context.Context) error {
 	}
 	if err := db(ctx).Unscoped().Where("tenant_id = ?", tid).
 		Delete(&model.LoginLog{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "清空登录审计失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to clean login audit rows")
 	}
 	return nil
 }
@@ -271,13 +274,14 @@ func toLoginLogDomain(po *model.LoginLog) *auditlog.LoginLog {
 	}
 }
 
-// operationLogRepo 是 auditlog.OperationLogReader 的 GORM 实现。
+// operationLogRepo is the GORM implementation of auditlog.OperationLogReader.
 //
-// 只读 + 删除/清空：写入侧仍由 humakit 审计采集中间件经
-// devops-infra/audit.Sink 落库（保持既有双轨制，不改变审计采集范围白名单）。
+// Read-only + delete/clean: the write side is still persisted by the humakit audit-collection
+// middleware via devops-infra/audit.Sink (preserving the existing dual-track approach, without
+// changing the audit collection scope whitelist).
 type operationLogRepo struct{}
 
-// NewOperationLogReader 构造操作日志读端口。
+// NewOperationLogReader constructs the operation log read port.
 func NewOperationLogReader() auditlog.OperationLogReader { return operationLogRepo{} }
 
 func (operationLogRepo) List(ctx context.Context, f auditlog.OperationLogFilter) (domain.PageResult[*auditlog.OperationLog], error) {
@@ -305,7 +309,7 @@ func (operationLogRepo) List(ctx context.Context, f auditlog.OperationLogFilter)
 	}
 	page, err := gormx.FindPage[model.OperationLog](conn.Order("id DESC"), f.PageParam)
 	if err != nil {
-		return domain.PageResult[*auditlog.OperationLog]{}, errs.Wrap(err, errs.CodeInternal, "查询操作审计列表失败")
+		return domain.PageResult[*auditlog.OperationLog]{}, errs.Wrap(err, errs.CodeInternal, "failed to query operation audit list")
 	}
 	return domain.MapPage(page, func(po model.OperationLog) *auditlog.OperationLog {
 		return toOperationLogDomain(&po)
@@ -318,7 +322,7 @@ func (operationLogRepo) DeleteByIDs(ctx context.Context, ids []int64) error {
 	}
 	if err := db(ctx).Unscoped().Where("id IN ?", ids).
 		Delete(&model.OperationLog{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "删除操作审计失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to delete operation audit rows")
 	}
 	return nil
 }
@@ -330,7 +334,7 @@ func (operationLogRepo) Clean(ctx context.Context) error {
 	}
 	if err := db(ctx).Unscoped().Where("tenant_id = ?", tid).
 		Delete(&model.OperationLog{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "清空操作审计失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to clean operation audit rows")
 	}
 	return nil
 }

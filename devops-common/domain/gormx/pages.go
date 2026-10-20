@@ -1,7 +1,8 @@
-// Package gormx 提供基于 GORM 的分页查询辅助。
+// Package gormx provides GORM-based pagination query helpers.
 //
-// 与父包 domain 分离，使 domain 保持零外部依赖：分页值对象是跨业务契约，
-// 而 GORM 查询辅助只服务于使用 GORM 的存储实现。
+// It is split from the parent domain package so that domain stays free of
+// external dependencies: the pagination value objects are a cross-business
+// contract, while the GORM query helpers only serve GORM-based repositories.
 package gormx
 
 import (
@@ -10,8 +11,8 @@ import (
 	"github.com/stanley760/devops/devops-common/domain"
 )
 
-// FindPage 统计符合条件的记录数并查询当前页。
-// 调用前在 db 上添加 Model、Where 等筛选条件和 Order 排序，不要预先设置 Limit/Offset。
+// FindPage counts the records matching the filters and queries the current page.
+// Add Model, Where and Order clauses to db before calling; do not set Limit/Offset beforehand.
 func FindPage[T any](db *gorm.DB, param domain.PageParam) (domain.PageResult[T], error) {
 	param = param.Normalize()
 	result := domain.PageResult[T]{
@@ -35,7 +36,7 @@ func FindPage[T any](db *gorm.DB, param domain.PageParam) (domain.PageResult[T],
 	return result, nil
 }
 
-// Paginate 返回可直接挂到 GORM 链上的 Offset/Limit 片段。
+// Paginate returns an Offset/Limit scope that can be chained directly onto a GORM query.
 func Paginate(page, pageSize int) func(*gorm.DB) *gorm.DB {
 	param := (domain.PageParam{PageNum: page, PageSize: pageSize}).Normalize()
 	return func(db *gorm.DB) *gorm.DB {

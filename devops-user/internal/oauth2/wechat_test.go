@@ -10,33 +10,37 @@ import (
 	"testing"
 )
 
-// TestWeChatAuthCodeURL 锁定微信授权 URL 的四个易错点：
-//  1. 端点必须是 /connect/qrconnect（不是标准 OAuth2 端点）；
-//  2. redirect_uri 必须被编码且**只编码一层**（Encode() 会双重编码）；
-//  3. scope 固定 snsapi_login；
-//  4. 末尾必须有 #wechat_redirect fragment，否则微信提示「链接无法访问」。
+// TestWeChatAuthCodeURL locks down the four easy-to-miss points of the WeChat
+// authorize URL:
+//  1. the endpoint must be /connect/qrconnect (not a standard OAuth2 endpoint);
+//  2. redirect_uri must be encoded and **only encoded once** (Encode()
+//     double-encodes);
+//  3. scope is fixed to snsapi_login;
+//  4. the URL must end with the #wechat_redirect fragment, otherwise WeChat
+//     shows "the link cannot be accessed".
 func TestWeChatAuthCodeURL(t *testing.T) {
 	p := NewWeChatProvider(Config{
 		ClientID:     "wx1234567890",
 		ClientSecret: "secret",
-		// 故意带端口和路径，验证整体被正确编码。
+		// Port and path are included deliberately, to verify the whole thing
+		// is encoded correctly.
 		RedirectURL: "http://localhost:10000/user/api/v1/oauth/wechat/callback",
 	})
 
 	got := p.AuthCodeURL("state-abc")
 
 	if !strings.HasPrefix(got, "https://open.weixin.qq.com/connect/qrconnect?") {
-		t.Fatalf("授权端点不对: %s", got)
+		t.Fatalf("wrong authorize endpoint: %s", got)
 	}
 	if !strings.HasSuffix(got, "#wechat_redirect") {
-		t.Fatalf("缺少 #wechat_redirect fragment，微信会报「该链接无法访问」: %s", got)
+		t.Fatalf("missing #wechat_redirect fragment; WeChat would report \"this link cannot be accessed\": %s", got)
 	}
 
-	// 去掉 fragment 后再解析 query。
+	// Strip the fragment before parsing the query.
 	query := strings.TrimSuffix(got, "#wechat_redirect")
 	u, err := url.Parse(query)
 	if err != nil {
-		t.Fatalf("URL 解析失败: %v", err)
+		t.Fatalf("URL parse failed: %v", err)
 	}
 	q := u.Query()
 
@@ -44,58 +48,61 @@ func TestWeChatAuthCodeURL(t *testing.T) {
 		t.Errorf("appid = %q", q.Get("appid"))
 	}
 	if q.Get("response_type") != "code" {
-		t.Errorf("response_type = %q, 须为 code", q.Get("response_type"))
+		t.Errorf("response_type = %q, must be code", q.Get("response_type"))
 	}
 	if q.Get("scope") != "snsapi_login" {
-		t.Errorf("scope = %q, 网站应用只能填 snsapi_login", q.Get("scope"))
+		t.Errorf("scope = %q; website apps can only use snsapi_login", q.Get("scope"))
 	}
 	if q.Get("state") != "state-abc" {
 		t.Errorf("state = %q", q.Get("state"))
 	}
 
-	// redirect_uri 解析回来必须与原始值逐字相同（未被双重编码破坏）。
+	// redirect_uri must parse back byte-for-byte identical to the original
+	// value (not corrupted by double encoding).
 	if ru := q.Get("redirect_uri"); ru != "http://localhost:10000/user/api/v1/oauth/wechat/callback" {
-		t.Errorf("redirect_uri 解码后 = %q, 期望还原为原始回调地址", ru)
+		t.Errorf("redirect_uri decoded = %q, expected to round-trip to the original callback address", ru)
 	}
-	// 双重编码的典型症状：解码后仍残留 %xx。
+	// The classic symptom of double encoding: %xx remnants survive decoding.
 	if decoded := q.Get("redirect_uri"); strings.Contains(decoded, "%3") {
-		t.Errorf("redirect_uri 被双重编码: %q", decoded)
+		t.Errorf("redirect_uri was double-encoded: %q", decoded)
 	}
 }
 
-// TestWeChatAuthCodeURL_NoDoubleEncode 对照组：证明 url.Values.Encode()
-// 会双重编码，因此本provider 必须手工拼接。
+// TestWeChatAuthCodeURL_NoDoubleEncode control group: proves
+// url.Values.Encode() double-encodes, so this provider must assemble the URL
+// by hand.
 func TestWeChatAuthCodeURL_NoDoubleEncode(t *testing.T) {
 	v := url.Values{}
 	v.Set("redirect_uri", "http://localhost:10000/cb")
-	// Values.Encode() 把 / 与 : 编码，虽能被 url.Parse 还原，
-	// 但微信侧对多层编码容忍度低，且标准库写法无法追加 fragment。
+	// Values.Encode() encodes / and :, which url.Parse can restore, but WeChat
+	// tolerates multi-layer encoding poorly, and the standard-library approach
+	// cannot append a fragment.
 	encoded := v.Encode()
 	if !strings.Contains(encoded, "redirect_uri=") {
-		t.Fatalf("对照组构造失败: %s", encoded)
+		t.Fatalf("control group setup failed: %s", encoded)
 	}
 }
 
-// TestWeChatEnabled 凭据齐备才可用。
+// TestWeChatEnabled usable only when credentials are complete.
 func TestWeChatEnabled(t *testing.T) {
 	full := Config{ClientID: "a", ClientSecret: "b", RedirectURL: "c"}
 	if !NewWeChatProvider(full).Enabled() {
-		t.Error("三项齐备时应 Enabled")
+		t.Error("should be Enabled when all three are present")
 	}
 	for name, cfg := range map[string]Config{
-		"缺 client_id":     {ClientSecret: "b", RedirectURL: "c"},
-		"缺 client_secret": {ClientID: "a", RedirectURL: "c"},
-		"缺 redirect_url":  {ClientID: "a", ClientSecret: "b"},
-		"全部为空":            {},
-		"微信不支持自定义scope":   {ClientID: "a", ClientSecret: "b", RedirectURL: "c", Scopes: []string{"snsapi_userinfo"}},
+		"missing client_id":                    {ClientSecret: "b", RedirectURL: "c"},
+		"missing client_secret":                {ClientID: "a", RedirectURL: "c"},
+		"missing redirect_url":                 {ClientID: "a", ClientSecret: "b"},
+		"all empty":                            {},
+		"wechat does not support custom scope": {ClientID: "a", ClientSecret: "b", RedirectURL: "c", Scopes: []string{"snsapi_userinfo"}},
 	} {
-		if NewWeChatProvider(cfg).Enabled() != (name == "微信不支持自定义scope") {
-			t.Errorf("%s: Enabled 结果不符预期", name)
+		if NewWeChatProvider(cfg).Enabled() != (name == "wechat does not support custom scope") {
+			t.Errorf("%s: Enabled result unexpected", name)
 		}
 	}
 }
 
-// newMockWechat 启动一个模拟微信 API 的测试服务器。
+// newMockWechat starts a test server mocking the WeChat API.
 func newMockWechat(t *testing.T, tokenBody, userBody string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -116,7 +123,8 @@ func mockWechatProvider(apiBase string) *WeChatProvider {
 	return p
 }
 
-// TestWeChatExchange_OK 正常链路：换 token → 拉用户 → 返回归一化信息。
+// TestWeChatExchange_OK happy path: exchange token → fetch user → return
+// normalized info.
 func TestWeChatExchange_OK(t *testing.T) {
 	srv := newMockWechat(t,
 		`{"access_token":"AT","expires_in":7200,"refresh_token":"RT","openid":"OPENID1","unionid":"UNIONID1"}`,
@@ -126,24 +134,26 @@ func TestWeChatExchange_OK(t *testing.T) {
 
 	info, at, rt, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE")
 	if err != nil {
-		t.Fatalf("Exchange 失败: %v", err)
+		t.Fatalf("Exchange failed: %v", err)
 	}
 	if info.ProviderUserID != "UNIONID1" {
-		t.Errorf("绑定键 = %q, 期望用 unionid（跨应用稳定）", info.ProviderUserID)
+		t.Errorf("binding key = %q, expected unionid (stable across apps)", info.ProviderUserID)
 	}
 	if info.Nickname != "微信用户" {
-		t.Errorf("昵称 = %q", info.Nickname)
+		t.Errorf("nickname = %q", info.Nickname)
 	}
 	if at != "AT" || rt != "RT" {
 		t.Errorf("token = %q / %q", at, rt)
 	}
-	// 头像尺寸段应被规整为 /0 取原图。
+	// The avatar size segment should be normalized to /0 for the original
+	// image.
 	if !strings.HasSuffix(info.AvatarURL, "/0") {
-		t.Errorf("头像 = %q, 期望以 /0 结尾取原图", info.AvatarURL)
+		t.Errorf("avatar = %q, expected to end with /0 for the original image", info.AvatarURL)
 	}
 }
 
-// TestWeChatExchange_UnionIDFallback unionid 缺失时退回 openid。
+// TestWeChatExchange_UnionIDFallback falls back to openid when unionid is
+// absent.
 func TestWeChatExchange_UnionIDFallback(t *testing.T) {
 	srv := newMockWechat(t,
 		`{"access_token":"AT","openid":"ONLY_OPENID"}`,
@@ -153,17 +163,19 @@ func TestWeChatExchange_UnionIDFallback(t *testing.T) {
 
 	info, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE")
 	if err != nil {
-		t.Fatalf("Exchange 失败: %v", err)
+		t.Fatalf("Exchange failed: %v", err)
 	}
 	if info.ProviderUserID != "ONLY_OPENID" {
-		t.Errorf("绑定键 = %q, unionid 缺失时应退回 openid", info.ProviderUserID)
+		t.Errorf("binding key = %q, should fall back to openid when unionid is absent", info.ProviderUserID)
 	}
 }
 
-// TestWeChatExchange_NoIdentity 三方未返回任何标识时必须拒绝。
+// TestWeChatExchange_NoIdentity must reject when the third party returns no
+// identifier.
 //
-// ⚠️ 若放行，会写入空绑定键，使所有此类账号互相错绑——
-// 这是必须失败的安全边界，不能因「字段缺失」而宽容。
+// ⚠️ Allowing it through would write an empty binding key, causing all such
+// accounts to be misbound to each other — this is a security boundary that
+// must fail, and must not be tolerated because of "missing fields".
 func TestWeChatExchange_NoIdentity(t *testing.T) {
 	srv := newMockWechat(t,
 		`{"access_token":"AT"}`,
@@ -173,15 +185,16 @@ func TestWeChatExchange_NoIdentity(t *testing.T) {
 
 	_, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE")
 	if err == nil {
-		t.Fatal("openid/unionid 均缺失时必须拒绝，不得放行")
+		t.Fatal("must reject when both openid and unionid are missing; must not allow through")
 	}
 	if !strings.Contains(err.Error(), "openid/unionid") {
-		t.Errorf("错误信息应说明缺失标识，实际: %v", err)
+		t.Errorf("the error should mention the missing identifier, got: %v", err)
 	}
 }
 
-// TestWeChatExchange_ErrCode 微信出错也返回 HTTP 200，
-// 只判状态码会把失败当成功——必须显式判 errcode。
+// TestWeChatExchange_ErrCode WeChat returns HTTP 200 even on error; checking
+// only the status code would treat failure as success — errcode must be
+// checked explicitly.
 func TestWeChatExchange_ErrCode(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -198,16 +211,17 @@ func TestWeChatExchange_ErrCode(t *testing.T) {
 			defer srv.Close()
 			_, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE")
 			if err == nil {
-				t.Fatalf("errcode=%s 时必须失败", tc.wantCode)
+				t.Fatalf("must fail when errcode=%s", tc.wantCode)
 			}
 			if !strings.Contains(err.Error(), tc.wantCode) {
-				t.Errorf("错误信息应含 errcode %s，实际: %v", tc.wantCode, err)
+				t.Errorf("the error should contain errcode %s, got: %v", tc.wantCode, err)
 			}
 		})
 	}
 }
 
-// TestWeChatExchange_UserInfoErrCode 拉用户信息阶段的errcode 同样须处理。
+// TestWeChatExchange_UserInfoErrCode the errcode from the user info stage must
+// also be handled.
 func TestWeChatExchange_UserInfoErrCode(t *testing.T) {
 	srv := newMockWechat(t,
 		`{"access_token":"AT","openid":"O1"}`,
@@ -216,21 +230,21 @@ func TestWeChatExchange_UserInfoErrCode(t *testing.T) {
 	defer srv.Close()
 
 	if _, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE"); err == nil {
-		t.Fatal("userinfo 返回 40003 时必须失败")
+		t.Fatal("must fail when userinfo returns 40003")
 	}
 }
 
-// TestWeChatExchange_EmptyAccessToken access_token 为空必须失败。
+// TestWeChatExchange_EmptyAccessToken must fail when access_token is empty.
 func TestWeChatExchange_EmptyAccessToken(t *testing.T) {
 	srv := newMockWechat(t, `{"openid":"O1"}`, `{}`)
 	defer srv.Close()
 
 	if _, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE"); err == nil {
-		t.Fatal("access_token 为空时必须失败")
+		t.Fatal("must fail when access_token is empty")
 	}
 }
 
-// TestNormalizeAvatar 头像尺寸段规整。
+// TestNormalizeAvatar avatar size segment normalization.
 func TestNormalizeAvatar(t *testing.T) {
 	p := NewWeChatProvider(Config{})
 	cases := map[string]string{
@@ -239,17 +253,19 @@ func TestNormalizeAvatar(t *testing.T) {
 		"https://thirdwx.qlogo.cn/a/0":   "https://thirdwx.qlogo.cn/a/0",
 		"https://thirdwx.qlogo.cn/a/46":  "https://thirdwx.qlogo.cn/a/0",
 		"https://thirdwx.qlogo.cn/a/132": "https://thirdwx.qlogo.cn/a/0",
-		// 末段不是尺寸数字时不应改动结构，只补 /0 可能错误，故原样返回。
+		// When the last segment is not a size number the structure must not be
+		// altered; appending /0 alone could be wrong, so it is returned as-is.
 		"https://thirdwx.qlogo.cn/a/abc": "https://thirdwx.qlogo.cn/a/abc/0",
 	}
 	for in, want := range cases {
 		if got := p.normalizeAvatar(in); got != want {
-			t.Errorf("normalizeAvatar(%q) = %q, 期望 %q", in, got, want)
+			t.Errorf("normalizeAvatar(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
-// TestWeChatNoEmail 微信不返回邮箱——锁定该行为，提醒不要依赖邮箱找回密码。
+// TestWeChatNoEmail WeChat does not return an email — locking in that behavior
+// as a reminder not to rely on email for password recovery.
 func TestWeChatNoEmail(t *testing.T) {
 	srv := newMockWechat(t,
 		`{"access_token":"AT","openid":"O1","unionid":"U1"}`,
@@ -259,29 +275,30 @@ func TestWeChatNoEmail(t *testing.T) {
 
 	info, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE")
 	if err != nil {
-		t.Fatalf("Exchange 失败: %v", err)
+		t.Fatalf("Exchange failed: %v", err)
 	}
 	if info.Email != "" {
-		t.Errorf("微信不应返回邮箱，实际得到 %q", info.Email)
+		t.Errorf("WeChat should not return an email, got %q", info.Email)
 	}
 }
 
-// TestWeChatExchange_JSONGarbage 响应非 JSON 时应失败而非 panic。
+// TestWeChatExchange_JSONGarbage should fail rather than panic when the
+// response is not JSON.
 func TestWeChatExchange_JSONGarbage(t *testing.T) {
 	srv := newMockWechat(t, `not json`, `not json`)
 	defer srv.Close()
 
 	if _, _, _, err := mockWechatProvider(srv.URL).Exchange(context.Background(), "CODE"); err == nil {
-		t.Fatal("非法 JSON 应返回错误")
+		t.Fatal("invalid JSON should return an error")
 	}
 }
 
-// TestWeChatName provider 名称须与 model.ProviderWechat 一致。
+// TestWeChatName the provider name must match model.ProviderWechat.
 func TestWeChatName(t *testing.T) {
 	if got := NewWeChatProvider(Config{}).Name(); got != "wechat" {
-		t.Errorf("Name() = %q, 期望 wechat", got)
+		t.Errorf("Name() = %q, want wechat", got)
 	}
 }
 
-// 确保 json 包被使用（wechatTokenResp 依赖标签解析）。
+// Ensure the json package is used (wechatTokenResp relies on tag parsing).
 var _ = json.Marshal

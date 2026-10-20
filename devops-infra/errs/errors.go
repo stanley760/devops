@@ -1,10 +1,10 @@
-// Package errs 定义统一错误码与业务错误类型。
+// Package errs defines unified error codes and the business error type.
 //
-// 统一错误处理的数据基础：
-//   - 错误码与 HTTP 状态码同空间：200 成功，400/401/403/404/500 等失败
-//   - 业务错误统一用 *BizError 携带 code 与用户可读 msg，可再包装底层错误
-//   - handler / service 以返回 error 的方式报告失败，
-//     由 response.FailErr 识别 BizError 并转换成统一响应
+// The data foundation of unified error handling:
+//   - Error codes share the HTTP status space: 200 success, 400/401/403/404/500 failures
+//   - Business errors uniformly use *BizError to carry a code and a user-readable msg, and can wrap an underlying error
+//   - handler / service report failures by returning error,
+//     which response.FailErr recognizes as BizError and converts into a unified response
 package errs
 
 import (
@@ -17,21 +17,21 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// 错误码常量，与 HTTP 状态码对齐。
+// Error code constants, aligned with HTTP status codes.
 const (
-	CodeOK               = 200 // 成功
-	CodeParam            = 400 // 参数错误
-	CodeUnauthorized     = 401 // 未登录或会话已过期
-	CodeForbidden        = 403 // 无操作权限
-	CodeNotFound         = 404 // 资源不存在
-	CodeMethodNotAllowed = 405 // 请求方法不支持
-	CodeTooManyRequests  = 429 // 请求过于频繁（限流）
-	CodeInternal         = 500 // 服务器内部错误
+	CodeOK               = 200 // success
+	CodeParam            = 400 // invalid parameter
+	CodeUnauthorized     = 401 // not logged in or session expired
+	CodeForbidden        = 403 // no operation permission
+	CodeNotFound         = 404 // resource not found
+	CodeMethodNotAllowed = 405 // request method not allowed
+	CodeTooManyRequests  = 429 // too many requests (rate limited)
+	CodeInternal         = 500 // internal server error
 )
 
-// BizError 业务错误。
-// Code 面向响应码与前端分支判断，Msg 面向用户展示，Err 保留底层原因供日志排查，
-// stack 为错误创建点的调用栈（New/Wrap 时捕获），日志经 Stack() 渲染定位错误发生位置。
+// BizError is a business error.
+// Code targets the response code and frontend branching, Msg targets user display, Err keeps the underlying cause for log triage,
+// and stack is the call stack at the error's creation point (captured in New/Wrap); logs use Stack() to locate where the error occurred.
 type BizError struct {
 	Code  int
 	Msg   string
@@ -39,7 +39,7 @@ type BizError struct {
 	stack []uintptr
 }
 
-// Error 实现 error 接口。
+// Error implements the error interface.
 func (e *BizError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("biz error: code=%d msg=%q: %v", e.Code, e.Msg, e.Err)
@@ -47,34 +47,34 @@ func (e *BizError) Error() string {
 	return fmt.Sprintf("biz error: code=%d msg=%q", e.Code, e.Msg)
 }
 
-// Unwrap 支持 errors.Is / errors.As 穿透到底层错误。
+// Unwrap supports errors.Is / errors.As unwrapping down to the underlying error.
 func (e *BizError) Unwrap() error { return e.Err }
 
-// Stack 渲染错误创建点的调用栈（每帧两行：函数名 + 文件:行号）。
-// 零值构造或未捕获（理论上不应出现）时返回空串，调用方据此省略日志字段。
+// Stack renders the call stack at the error's creation point (two lines per frame: function name + file:line).
+// It returns an empty string for a zero-value construction or when not captured (theoretically should not happen); callers omit the log field accordingly.
 func (e *BizError) Stack() string {
 	return formatFrames(e.stack)
 }
 
-// New 新建业务错误。
+// New creates a business error.
 func New(code int, msg string) *BizError {
 	return &BizError{Code: code, Msg: msg, stack: callers()}
 }
 
-// Wrap 在底层错误之上附加业务语义，保留原始错误用于日志。
+// Wrap attaches business semantics on top of an underlying error, keeping the original error for logs.
 func Wrap(err error, code int, msg string) *BizError {
 	return &BizError{Code: code, Msg: msg, Err: err, stack: callers()}
 }
 
-// callers 捕获调用栈，跳过 errs 包自身的帧（runtime.Callers/callers/New/Wrap），
-// 使栈顶落在业务代码的错误创建处。
+// callers captures the call stack, skipping the errs package's own frames (runtime.Callers/callers/New/Wrap),
+// so the stack top lands on the business code's error creation point.
 func callers() []uintptr {
 	pcs := make([]uintptr, 32)
 	n := runtime.Callers(3, pcs)
 	return pcs[:n]
 }
 
-// formatFrames 渲染调用栈（每帧两行：函数名 + 文件:行号）；空栈返回空串。
+// formatFrames renders the call stack (two lines per frame: function name + file:line); an empty stack returns an empty string.
 func formatFrames(pcs []uintptr) string {
 	if len(pcs) == 0 {
 		return ""
@@ -91,14 +91,14 @@ func formatFrames(pcs []uintptr) string {
 	return b.String()
 }
 
-// ToHumaError 将统一业务错误转换为 Huma Problem Details 错误。
+// ToHumaError converts a unified business error into a Huma Problem Details error.
 //
-// 只透出面向用户的 BizError.Msg，底层 Err 不进入响应，避免数据库凭据、
-// SQL、内网地址等敏感信息泄露；非 BizError 一律按内部错误处理。
+// Only the user-facing BizError.Msg is exposed; the underlying Err never enters the response, avoiding leaks of sensitive
+// information such as database credentials, SQL, and internal addresses; non-BizError is always treated as an internal error.
 //
-// 响应隐藏细节的同时，服务端日志必须保留完整错误链与发生点堆栈：
-// 非 BizError 与 5xx BizError 在此记录 Error 日志（这是 huma 路径唯一的
-// 错误日志出口）；4xx 属预期业务拒绝，不记日志（访问日志已有 Debug 记录）。
+// While the response hides details, server logs must keep the full error chain and the occurrence-point stack:
+// non-BizError and 5xx BizError are logged at Error level here (the only error log outlet on the huma path);
+// 4xx are expected business rejections and are not logged (the access log already has Debug records).
 func ToHumaError(err error) error {
 	if err == nil {
 		return nil
@@ -106,13 +106,13 @@ func ToHumaError(err error) error {
 
 	var bizErr *BizError
 	if !errors.As(err, &bizErr) {
-		slog.Error("未分类错误（非 BizError，按 500 响应）",
+		slog.Error("unclassified error (non-BizError, responding 500)",
 			"err", err, "stack", formatFrames(callers()))
-		return huma.Error500InternalServerError("服务器内部错误")
+		return huma.Error500InternalServerError("internal server error")
 	}
 
 	if bizErr.Code >= 500 {
-		slog.Error("业务错误（5xx）",
+		slog.Error("business error (5xx)",
 			"code", bizErr.Code, "msg", bizErr.Msg, "err", err, "stack", bizErr.Stack())
 	}
 
@@ -122,18 +122,18 @@ func ToHumaError(err error) error {
 	}
 	message := bizErr.Msg
 	if message == "" {
-		message = "服务器内部错误"
+		message = "internal server error"
 	}
 	return huma.NewError(status, message)
 }
 
-// 常用预定义错误，可直接返回或用 errors.Is 比较。
+// Common predefined errors, returned directly or compared with errors.Is.
 var (
-	ErrParam            = New(CodeParam, "参数错误")
-	ErrUnauthorized     = New(CodeUnauthorized, "未登录或会话已过期")
-	ErrForbidden        = New(CodeForbidden, "无操作权限")
-	ErrNotFound         = New(CodeNotFound, "资源不存在")
-	ErrMethodNotAllowed = New(CodeMethodNotAllowed, "请求方法不支持")
-	ErrTooManyRequests  = New(CodeTooManyRequests, "请求过于频繁，请稍后再试")
-	ErrInternal         = New(CodeInternal, "服务器内部错误")
+	ErrParam            = New(CodeParam, "invalid parameter")
+	ErrUnauthorized     = New(CodeUnauthorized, "not logged in or session expired")
+	ErrForbidden        = New(CodeForbidden, "no operation permission")
+	ErrNotFound         = New(CodeNotFound, "resource not found")
+	ErrMethodNotAllowed = New(CodeMethodNotAllowed, "request method not allowed")
+	ErrTooManyRequests  = New(CodeTooManyRequests, "too many requests, please try again later")
+	ErrInternal         = New(CodeInternal, "internal server error")
 )

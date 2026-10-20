@@ -1,8 +1,10 @@
-// Package types 跨层传输类型（DTO）。
+// Package types holds cross-layer transfer types (DTOs).
 //
-// ID 契约（字符串化的 int64 主键）已下沉到 devops-common/types，
-// 本包以类型别名转接，业务代码的 types.ID / types.ParamID 写法与
-// 类型定义位置解耦：实现迁移时全仓调用点零改动。
+// The ID contract (stringified int64 primary keys) has been moved down to
+// devops-common/types; this package re-exports them via type aliases, so the
+// types.ID / types.ParamID usage in business code is decoupled from where the
+// types are defined: migrating the implementation requires zero changes at
+// call sites across the repo.
 package types
 
 import (
@@ -12,19 +14,20 @@ import (
 	"github.com/stanley760/devops/devops-infra/errs"
 )
 
-// ID int64 主键的 DTO 形态：JSON 序列化为字符串（定义见 devops-common/types）。
+// ID is the DTO form of an int64 primary key: serialized as a string in JSON (defined in devops-common/types).
 type ID = commontypes.ID
 
-// ParamID path/query 中的字符串形态 ID（定义见 devops-common/types）。
+// ParamID is the string-form ID in path/query (defined in devops-common/types).
 type ParamID = commontypes.ParamID
 
-// InvalidIDError ID 参数解析失败（定义见 devops-common/types）。
+// InvalidIDError indicates an ID parameter parse failure (defined in devops-common/types).
 type InvalidIDError = commontypes.InvalidIDError
 
-// ParseID 解析路径/查询参数中的 ID（字符串形态）。
+// ParseID parses the ID (string form) in path/query parameters.
 //
-// 把零依赖层的 *InvalidIDError 映射为本服务的业务错误（400 参数错误），
-// 使errs.ToHumaError 能正确识别——契约层不应反向依赖基础设施错误码。
+// Maps the zero-dependency layer's *InvalidIDError to this service's business
+// error (400 parameter error), so errs.ToHumaError recognizes it correctly —
+// the contract layer must not depend on infrastructure error codes in reverse.
 func ParseID(s string) (ID, error) {
 	id, err := commontypes.ParseID(s)
 	if err != nil {
@@ -33,17 +36,18 @@ func ParseID(s string) (ID, error) {
 	return id, nil
 }
 
-// asParamError 将零依赖层的 ID 解析错误转换为 CodeParam 业务错误。
+// asParamError converts the zero-dependency layer's ID parse error into a CodeParam business error.
 func asParamError(err error) error {
 	var invalid *commontypes.InvalidIDError
 	if errors.As(err, &invalid) {
-		return errs.Wrap(err, errs.CodeParam, "ID 参数非法")
+		return errs.Wrap(err, errs.CodeParam, "invalid ID parameter")
 	}
 	return err
 }
 
-// Parse 解析 path/query 中的 ID 并映射为业务错误。
+// Parse parses the ID in path/query and maps it to a business error.
 //
-// ParamID 是类型别名，不能直接给它加方法，故在此以包级函数提供同等能力；
-// 调用点统一使用 types.ParseID(in.ID) 或本函数。
+// ParamID is a type alias, so methods cannot be added to it directly; this
+// package-level function provides the same capability. Call sites uniformly
+// use types.ParseID(in.ID) or this function.
 func Parse(id ParamID) (ID, error) { return ParseID(string(id)) }

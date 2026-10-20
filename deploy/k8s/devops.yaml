@@ -1,29 +1,29 @@
-# Kubernetes 部署清单（单文件，按分隔符分段）。
+# Kubernetes deployment manifests (single file, split into sections by separators).
 #
-# 前置假设（按实际环境修改）：
-#   1. 镜像已推送到仓库：registry.example.com/devops/*，替换下方 image 为实际地址
-#   2. MySQL / Redis / etcd 为集群外托管服务或独立部署（K8s 内直连 RDS 是常见形态），
-#      配置中的地址为占位，替换后应用
-#   3. 配置含数据库密码与 JWT 密钥，因此用 Secret 而非 ConfigMap 承载
-#      （当前配置系统无环境变量绑定，无法引用独立 Secret 键）
+# Assumptions (adjust to the actual environment):
+#   1. Images are pushed to a registry: registry.example.com/devops/*; replace the image values below with real addresses
+#   2. MySQL / Redis / etcd are managed services outside the cluster or deployed independently (connecting to RDS from inside K8s is a common pattern);
+#      the addresses in the configs are placeholders — replace them before applying
+#   3. The configs contain database passwords and the JWT signing key, hence carried in a Secret rather than a ConfigMap
+#      (the current config system has no env-var binding and cannot reference independent Secret keys)
 #
-# 使用：
+# Usage:
 #   kubectl apply -f deploy/k8s/devops.yaml
 #   kubectl -n devops wait --for=condition=complete job/devops-migrate --timeout=120s
 #   kubectl -n devops rollout status deploy/devops-id deploy/devops-system
 #
-# 设计要点：
-#   - devops-id 副本数 2：每个 leaf_name + biz_tag 下经 etcd 抢占独立 worker 槽位
-#   - devops-system 无状态（会话在 Redis），可任意水平扩
-#   - snowflake 强依赖时钟：节点须开 NTP/chrony，回拨会被拒绝发号
-#   - K8s ≥1.24 可用原生 grpc 探针探测 devops-id 健康状态
-#   - 网络隔离见同目录 networkpolicy.yaml（需 CNI 支持 NetworkPolicy，如 Calico/Cilium）
+# Design notes:
+#   - devops-id replicas 2: each claims an independent worker slot per leaf_name + biz_tag via etcd
+#   - devops-system is stateless (sessions in Redis), so it can scale horizontally freely
+#   - snowflake depends heavily on the clock: nodes must run NTP/chrony; a backwards step is rejected for ID generation
+#   - K8s ≥1.24 can use native grpc probes to check devops-id health
+#   - For network isolation see networkpolicy.yaml in the same directory (requires CNI support for NetworkPolicy, e.g. Calico/Cilium)
 apiVersion: v1
 kind: Namespace
 metadata:
   name: devops
 ---
-# devops-id 的 devops-id-prod.yaml（含 etcd 地址，故入 Secret）
+# devops-id's devops-id-prod.yaml (contains the etcd address, hence a Secret)
 apiVersion: v1
 kind: Secret
 metadata:
@@ -50,14 +50,14 @@ stringData:
     etcd:
       endpoints:
         - "YOUR_ETCD_ENDPOINT:2379"
-    # otlp_endpoint 留空 = 本地 span 不上报；接入集群内 Jaeger/Tempo/otel-collector 后填其 OTLP HTTP 地址
+    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Jaeger/Tempo/otel-collector
     observability:
       otlp_endpoint: ""
       sampler_ratio: 0.1
       metrics_enabled: true
       metrics_listen: ":9991"
 ---
-# devops-system 的 devops-system-prod.yaml（含 MySQL/Redis 密码与 JWT 密钥，故入 Secret）
+# devops-system's devops-system-prod.yaml (contains MySQL/Redis passwords and the JWT signing key, hence a Secret)
 apiVersion: v1
 kind: Secret
 metadata:
@@ -80,33 +80,34 @@ stringData:
     jwt:
       signing_key: "YOUR_JWT_SIGNING_KEY_MIN_32_CHARS"
     idclient:
-      endpoint: "devops-id.devops.svc.cluster.local:9990"  # K8s 直连 Service DNS（无 scheme，passthrough resolver）
-    # otlp_endpoint 留空 = 本地 span 不上报；接入集群内 Jaeger/Tempo/otel-collector 后填其 OTLP HTTP 地址
+      endpoint: "devops-id.devops.svc.cluster.local:9990"  # direct Service DNS inside K8s (no scheme, passthrough resolver)
+    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Jaeger/Tempo/otel-collector
     observability:
       otlp_endpoint: ""
       sampler_ratio: 0.1
       metrics_enabled: true
     apidoc:
-      enabled: false          # prod 必须关闭接口文档
+      enabled: false          # interactive API docs must be disabled in prod
       base_path: /apidoc
-    # 流量入口收口（应用层守卫）：要求请求携带有效 Bearer JWT。
-    # 网关侧由 Higress jwt-auth 插件验签（deploy/higress/wasmplugins/jwt-auth-2.0.0.yaml），
-    # 应用层再校验一次作为纵深防御。K8s 下另有 NetworkPolicy 强制仅网关可访问 9999。
-    # 旧的静态 X-Gateway-Token（require_token / token）已移除。
+    # Traffic-ingress containment (application-layer guard): require requests to carry a valid Bearer JWT.
+    # The gateway side is verified by the Higress jwt-auth plugin (deploy/higress/wasmplugins/jwt-auth-2.0.0.yaml);
+    # the application layer verifies once more as defense in depth. Under K8s a NetworkPolicy additionally
+    # enforces that only the gateway can reach 9999.
+    # The old static X-Gateway-Token (require_token / token) has been removed.
     gateway:
       require_jwt: true
       exempt_paths: []
     server:
-      trusted_proxies: ["10.0.0.0/8"]   # 按实际 ingress/LB 网段调整；直连置 []
+      trusted_proxies: ["10.0.0.0/8"]   # adjust to the actual ingress/LB CIDRs; use [] for direct connections
 ---
-# 建表迁移：业务表 + 种子数据
+# Schema migration: business tables + seed data
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: devops-migrate
   namespace: devops
 spec:
-  backoffLimit: 0          # 迁移幂等可重跑，但失败应人工排查而非自动重试
+  backoffLimit: 0          # migration is idempotent and re-runnable, but failures should be investigated manually rather than auto-retried
   ttlSecondsAfterFinished: 3600
   template:
     spec:
@@ -149,9 +150,9 @@ spec:
       labels:
         app: devops-id
       annotations:
-        # Prometheus 按注解发现并抓取（或改用 prometheus-operator ServiceMonitor）
+        # Prometheus discovers and scrapes via annotations (or switch to a prometheus-operator ServiceMonitor)
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9991"   # OTel 指标独立 HTTP 端口（gRPC 端口无法承载 /metrics）
+        prometheus.io/port: "9991"   # OTel metrics on a dedicated HTTP port (the gRPC port cannot serve /metrics)
         prometheus.io/path: "/metrics"
     spec:
       securityContext:
@@ -176,9 +177,9 @@ spec:
             limits:
               cpu: "1"
               memory: 256Mi
-          # K8s ≥1.24 原生 grpc 探针，探测 grpc.health.v1
-          # liveness 用 idgen.IdGen.live：降级(DEGRADED)不杀 Pod，仅 NotServing 重启
-          # readiness 用 idgen.IdGen：降级或不可用时摘流量
+          # K8s ≥1.24 native grpc probe, probing grpc.health.v1
+          # liveness uses idgen.IdGen.live: a degraded (DEGRADED) state does not kill the Pod, only NotServing triggers a restart
+          # readiness uses idgen.IdGen: degraded or unavailable takes the Pod out of service
           livenessProbe:
             grpc:
               port: 9990
@@ -196,7 +197,7 @@ spec:
               mountPath: /app/config/devops-id-prod.yaml
               subPath: devops-id-prod.yaml
               readOnly: true
-            # snowflake 槽位/发号水位缓存：Pod 级临时卷，重建靠 etcd 重新抢占
+            # snowflake slot / ID-watermark cache: Pod-level ephemeral volume; re-claimed from etcd after recreation
             - name: worker-cache
               mountPath: /app/data
       volumes:
@@ -239,7 +240,7 @@ spec:
       labels:
         app: devops-system
       annotations:
-        # /metrics 与业务同一 HTTP 端口（9999），仅集群内抓取，不经公网 ingress
+        # /metrics shares the same HTTP port as business traffic (9999); scraped only inside the cluster, never via the public ingress
         prometheus.io/scrape: "true"
         prometheus.io/port: "9999"
         prometheus.io/path: "/metrics"

@@ -1,306 +1,306 @@
-# devops-user（C 端用户服务）
+# devops-user (C-side User Service)
 
-与 `devops-system`（B 端管理后台）并列的**独立服务**，面向 App / 小程序等 C 端用户。
+An **independent service** alongside `devops-system` (B-side admin backend), serving App / mini-program and other C-side users.
 
-## 网关侧配置
+## Gateway-Side Configuration
 
-C 端走**独立域名 + 独立 jwt-auth 插件实例**，与 B 端完全隔离：
+The C side uses a **separate domain + a separate jwt-auth plugin instance**, fully isolated from the B side:
 
-| 资源 | 文件 | 作用 |
+| Resource | File | Role |
 |---|---|---|
-| 主路由 | `deploy/higress/ingresses/devops-user.yaml` | `user-api.devops.local/user`（挂 jwt-auth） |
-| 匿名路由 | `deploy/higress/ingresses/devops-user-public.yaml` | login / register / jwks.json（豁免） |
-| 验签插件 | `deploy/higress/wasmplugins/jwt-auth-user-2.0.0.yaml` | `issuer: devops-user` |
+| Main route | `deploy/higress/ingresses/devops-user.yaml` | `user-api.devops.local/user` (jwt-auth mounted) |
+| Anonymous route | `deploy/higress/ingresses/devops-user-public.yaml` | login / register / jwks.json (exempted) |
+| Verification plugin | `deploy/higress/wasmplugins/jwt-auth-user-2.0.0.yaml` | `issuer: devops-user` |
 
-**为什么独立域名**：两个服务都提供 `/.well-known/jwks.json`，同 host 下最长前缀匹配
-无法区分归属会随机命中其一。且 C/B 端流量特征不同（用户量、限流维度、灰度需求），
-需要分别治理。
+**Why a separate domain**: both services serve `/.well-known/jwks.json`, and under the same host longest-prefix matching
+cannot tell them apart, hitting one at random. And C/B-side traffic profiles differ (user volume, rate-limit dimensions, gray-release needs),
+requiring separate governance.
 
-### 三个不可改项（都踩过坑）
+### Three Must-Not-Change Items (All Have Caused Pitfalls)
 
-1. **`metadata.name` 不能叫 `jwt-auth`** —— pilot 会走 Istio 原生分支
-   （`JwtRule: ""`），all-in-one 2.2.3 无 `jwt_authn` filter，一律不加载。
-2. **`url` 必须用 `localhost:8002`** —— `oci://` 需 controller 拉取落盘，file 后端不触发。
-3. **`matchRules.config` 不能内联 `consumers` 数组** —— pilot 解析失败并**静默跳过
-   整个插件**（无任何日志）；也不能只写 `{}`（会整体替换 `defaultConfig`，
-   真 token 也被 403 `Access Denied`）。必须带 `allow` 指回 `defaultConfig` 的 consumer。
+1. **`metadata.name` cannot be `jwt-auth`** — pilot would take the Istio native branch
+   (`JwtRule: ""`), and all-in-one 2.2.3 has no `jwt_authn` filter, so nothing loads.
+2. **`url` must use `localhost:8002`** — `oci://` requires the controller to pull and persist, which does not trigger under the file backend.
+3. **`matchRules.config` cannot inline the `consumers` array** — pilot fails to parse and **silently skips
+   the whole plugin** (no logs at all); nor can it be just `{}` (that replaces `defaultConfig` entirely, so even real tokens get
+   403 `Access Denied`). It must carry `allow` pointing back to the consumer in `defaultConfig`.
 
-验证插件是否真加载：
+To verify the plugin is really loaded:
 
 ```bash
 docker compose -f deploy/docker-compose-dev.yml exec higress \
   sh -c 'grep -c "fetching image plugins/jwt-auth" /var/log/higress/gateway.log'
 ```
 
-或看无 token 请求返回**纯文本** `Jwt is missing`（信封格式 `{"code":401,...}`
-说明是应用层，插件没生效）。
+Or check whether a token-less request returns **plain text** `Jwt is missing` (the envelope format `{"code":401,...}`
+means it is the application layer; the plugin is not in effect).
 
-### 匿名路径不可合并
+### Anonymous Paths Must Not Be Merged
 
-`devops-user-public.yaml` 里三条路径必须写全：
+The three paths in `devops-user-public.yaml` must be written in full:
 
-- 合并成 `/user/api/v1/auth` → `logout` 一并豁免（任何人都能踢人下线）
-- 合并成 `/user/api/v1` → `profile` 一并豁免（**严重越权**）
+- Merging into `/user/api/v1/auth` exempts `logout` too (anyone could kick others offline)
+- Merging into `/user/api/v1` exempts `profile` too (**severe privilege escalation**)
 
-### 跨端 token 隔离已实测
+### Cross-Side Token Isolation Is Verified
 
-C 端与 B 端 issuer 不同，B 端 token 访问 C 端接口返回 `Jwt verification fails`，
-反向同理——这是 issuer 隔离的真实效果，勿把任一方 issuer 改成相同值。
+The C-side and B-side issuers differ; a B-side token accessing C-side endpoints returns `Jwt verification fails`,
+and vice versa — this is the real effect of issuer isolation. Never set either issuer to the same value.
 
-## 快速开始
+## Quick Start
 
 ```bash
 cd devops-user
-cp config/.env.example config/.env   # 或手写，见下
+cp config/.env.example config/.env   # or write it by hand, see below
 go run . server
-# 打开 http://127.0.0.1:10000/apidoc 查看交互式接口文档
+# Open http://127.0.0.1:10000/apidoc to view the interactive API docs
 ```
 
-`config/.env` 需要设置 `NACOS_REGISTER_IP`（网关据此回连本进程）：
+`config/.env` needs `NACOS_REGISTER_IP` set (the gateway uses it to call back to this process):
 
 ```bash
 # Windows + Docker Desktop
 NACOS_REGISTER_IP=host.docker.internal
 ```
 
-> ⚠️ **不能填网桥网关（如 172.19.0.1）**：实测容器访问 `172.19.0.1:10000` 返回 000
-> （不可达），而 `host.docker.internal:10000` 返回 200。
-> Linux 下改填宿主机内网 IP（`ip addr` 查到的非回环地址）。
+> ⚠️ **Do not use the bridge gateway (e.g. 172.19.0.1)**: tested — container access to `172.19.0.1:10000` returns 000
+> (unreachable), while `host.docker.internal:10000` returns 200.
+> On Linux, use the host's intranet IP instead (the non-loopback address found via `ip addr`).
 
-`.env` 已被 `.gitignore` 的 `**/config/.env` 覆盖，不会误提交。
+`.env` is already covered by `.gitignore`'s `**/config/.env` and will not be committed by mistake.
 
-## 与 devops-system 的关系
+## Relationship with devops-system
 
-**框架能力完全复用 `devops-infra`，零复制**：
+**Framework capabilities fully reuse `devops-infra`, zero copying**:
 
-| 能力 | 位置 |
+| Capability | Location |
 |---|---|
-| HTTP 引擎 / 优雅关闭 / `/metrics` | `devops-infra/http` |
-| 表基模型 BaseModel（主键+审计+软删+发号钩子） | `devops-common/model`（与 devops-system 共用） |
-| OpenAPI 装配与文档端点 | `devops-infra/http/apidoc` |
-| 统一响应信封 | `devops-common/response` |
-| 错误出口与状态码 | `devops-infra/errs` + `http/humaerr` |
-| JWT 中间件套件 `Kit` | `devops-infra/security/humakit` |
-| RS256 签发验签 | `devops-infra/security/jwt` |
-| Redis 会话态 | `devops-infra/security/session` |
-| 流量入口守卫 | `devops-infra/security/gateway` |
+| HTTP engine / graceful shutdown / `/metrics` | `devops-infra/http` |
+| BaseModel (primary key + audit + soft delete + ID-generation hook) | `devops-common/model` (shared with devops-system) |
+| OpenAPI assembly and doc endpoints | `devops-infra/http/apidoc` |
+| Unified response envelope | `devops-common/response` |
+| Error exits and status codes | `devops-infra/errs` + `http/humaerr` |
+| JWT middleware suite `Kit` | `devops-infra/security/humakit` |
+| RS256 signing/verification | `devops-infra/security/jwt` |
+| Redis session state | `devops-infra/security/session` |
+| Traffic-ingress guard | `devops-infra/security/gateway` |
 
-**业务形态上的差异（有意为之，不是遗漏）**：
+**Business-shape differences (intentional, not omissions)**:
 
-| 维度 | devops-system（B 端） | devops-user（C 端） |
+| Dimension | devops-system (B side) | devops-user (C side) |
 |---|---|---|
-| 接口前缀 | `/system/api/v1/*` | `/user/api/v1/*` |
-| 端口 | 9999 | 10000 |
-| Redis 库 | db 0 | db 1（避免键空间污染） |
-| 租户模型 | 单库多租户（`TenantPlugin` + casbin） | **无**（单租户） |
-| 权限 | RBAC 权限点（`kit.Perm("system:user:list")`） | **无**，用 `kit.Logged()` + service 层按 `claims.UID` 行级过滤 |
+| API prefix | `/system/api/v1/*` | `/user/api/v1/*` |
+| Port | 9999 | 10000 |
+| Redis DB | db 0 | db 1 (avoids keyspace pollution) |
+| Tenant model | single-database multi-tenant (`TenantPlugin` + casbin) | **none** (single tenant) |
+| Permissions | RBAC permission points (`kit.Perm("system:user:list")`) | **none**; uses `kit.Logged()` + service-layer row-level filtering by `claims.UID` |
 | JWT issuer / kid | `devops` / `devops-system-rs256-1` | `devops-user` / `devops-user-rs256-1` |
 
-> ⚠️ **issuer 必须与 devops-system 不同**。两者 issuer 相同时，在网关 jwt-auth 的
-> consumers 里会互相匹配，导致 B 端 token 能访问 C 端接口（反之亦然）。
+> ⚠️ **The issuer must differ from devops-system's**. When the two issuers are the same, they match each other
+> in the gateway jwt-auth's consumers, letting a B-side token access C-side endpoints (and vice versa).
 
-## C 端行级归属校验
+## C-side Row-Level Ownership Checks
 
-不引入 RBAC。接口**不接受**客户端传入的用户 ID，身份只来自 JWT：
+No RBAC. Endpoints **do not accept** client-passed user IDs; identity comes only from the JWT:
 
 ```go
-//api/v1/profile.go —— updateBody 没有 id / user_id 字段
+//api/v1/profile.go —— updateBody has no id / user_id fields
 type updateBody struct {
     Nickname *string `json:"nickname" required:"false"`
     // ...
 }
 
-// service 从 ctx 取 claims，天然只能改自己的数据
+// service takes claims from ctx, so it can only modify its own data
 func (s *Profile) Update(claims *auth.AccessClaims, in UpdateInput) (...) {
     s.users.update(claims.UserID, func(u *model.User) { /* ... */ })
 }
 ```
 
-若允许客户端传 ID 再比对，等于把越权判断交给客户端参数。
+Allowing the client to pass an ID and then comparing it would amount to handing the privilege-escalation verdict to client parameters.
 
-## 当前实现状态
+## Current Implementation Status
 
-已跑通：**注册 → 登录 → 读资料 → 改资料 → 登出**，含 OpenAPI 文档与 JWKS 端点。
-数据已落到 MySQL `t_user` 表（启动期自动建表），主键由 devops-id 发号。
+Working end to end: **register → login → read profile → update profile → logout**, including OpenAPI docs and the JWKS endpoint.
+Data lands in the MySQL `t_user` table (auto-created at startup), with primary keys generated by devops-id.
 
-### 已完成
+### Completed
 
-- **GORM 接入**：`model`（表模型 + 发号钩子）、`dao`（数据访问）、
-  `dbinit`（启动期建表，内嵌 SQL 脚本）。
-- **bcrypt 口令哈希**（cost=10），并显式拒绝超过 72 字节的口令（bcrypt 上限）。
-- **三个唯一约束**：`uk_username` / `uk_email` / `uk_mobile`，
-  冲突时按**具体约束**给出不同文案（不笼统报「用户名已被注册」）。
+- **GORM integration**: `model` (table models + ID-generation hook), `dao` (data access),
+  `dbinit` (startup-time table creation, embedded SQL scripts).
+- **bcrypt password hashing** (cost=10), with explicit rejection of passwords longer than 72 bytes (bcrypt's limit).
+- **Three unique constraints**: `uk_username` / `uk_email` / `uk_mobile`,
+  with conflicts reported by **specific constraint** rather than a blanket "username already registered".
 
-### 待补齐
+### To Be Completed
 
-- **三方 token 未加密入库**：`t_user_oauth.access_token` / `refresh_token`
-  当前明文存储，生产必须改应用层 AES-GCM 加密（主密钥进密钥管理）。
-- **改密「保留本设备」不完全**：`ChangePassword` 支持保留当前设备的 refresh，
-  但 **access 侧仍会全踢**（`session.Store` 只有 `user → sids` 正向索引，
-  没有 `sid → refreshHash` 反查，无法定位要保留的那个会话），
-  故保留设备的用户仍需重新登录一次，只是 refresh 还在可直接换新 access。
-- **封禁无管理端入口**：`Profile.SetDisabled` / `SetDisabledByUsername` 已在
-  service 层就绪并强制全端下线，但**故意不暴露 HTTP 端点**——
-  C 端用户若能自助解封等于封禁无效。待管理端（devops-system）或运营后台接入。
+- **Third-party tokens not encrypted at rest**: `t_user_oauth.access_token` / `refresh_token`
+  are currently stored in plaintext; production must switch to application-layer AES-GCM encryption (master key in secrets management).
+- **"Keep this device" on password change is incomplete**: `ChangePassword` supports keeping the current device's refresh,
+  but **the access side still kicks everything** (`session.Store` only has the forward index `user → sids`,
+  with no `sid → refreshHash` reverse lookup, so the session to keep cannot be located),
+  so users keeping their device still need to log in once; only the refresh can be exchanged for a new access directly.
+- **No admin entry for bans**: `Profile.SetDisabled` / `SetDisabledByUsername` are ready
+  in the service layer and force all sides offline, but **deliberately expose no HTTP endpoint** —
+  if C-side users could self-unban, bans would be meaningless. Waiting for integration with the admin side (devops-system) or an ops backend.
 
-## 三方登录（OAuth2）
+## Third-Party Login (OAuth2)
 
-支持 GitHub / Google / 微信（开放平台网站应用扫码）三种提供方，标准授权码流程。
+Three providers supported: GitHub / Google / WeChat (open platform website app QR scan), standard authorization-code flow.
 
-### 接口
+### Endpoints
 
-| 端点 | 鉴权 | 说明 |
+| Endpoint | Auth | Description |
 |---|---|---|
-| `GET /user/api/v1/oauth/providers` | 匿名 | 列出可用提供方与授权地址（含一次性 state） |
-| `GET /user/api/v1/oauth/{provider}/callback` | 匿名 | query 模式回调（**三家均走这个**） |
-| `POST /user/api/v1/oauth/{provider}/callback` | 匿名 | form_post 模式回调（当前无提供方使用，留作预留） |
-| `POST /user/api/v1/oauth/bind/start` | 需登录 | 已登录用户发起绑定 |
-| `GET /user/api/v1/oauth/bind` | 需登录 | 列出已绑定（不含任何 token） |
-| `DELETE /user/api/v1/oauth/bind` | 需登录 | 解绑 |
+| `GET /user/api/v1/oauth/providers` | anonymous | list available providers and authorization URLs (with one-time state) |
+| `GET /user/api/v1/oauth/{provider}/callback` | anonymous | query-mode callback (**all three use this**) |
+| `POST /user/api/v1/oauth/{provider}/callback` | anonymous | form_post-mode callback (unused by any provider currently, reserved) |
+| `POST /user/api/v1/oauth/bind/start` | login required | logged-in user initiates binding |
+| `GET /user/api/v1/oauth/bind` | login required | list bindings (no tokens included) |
+| `DELETE /user/api/v1/oauth/bind` | login required | unbind |
 
-### 两种登录路径
+### Two Login Paths
 
-由 state 里的 `BindUserID` 决定：
+Determined by `BindUserID` in the state:
 
-- **登录**（`BindUserID == 0`）：已有绑定 → 直接签发双 token；无绑定 → 按
-  `auto_register` 决定自动建号还是报「请先登录后绑定」。
-- **绑定**（`BindUserID > 0`）：挂到当前登录用户。若三方账号已绑给别人则拒绝
-  （`uk_provider_provider_id` 唯一索引双重保障）。
+- **Login** (`BindUserID == 0`): existing binding → sign dual tokens directly; no binding → auto-create the account or report "please log in before binding" per
+  `auto_register`.
+- **Binding** (`BindUserID > 0`): attach to the current logged-in user. If the third-party account is already bound to someone else, reject
+  (double guarantee via the `uk_provider_provider_id` unique index).
 
-### 五个安全要点
+### Five Security Essentials
 
-1. **state 必须校验且一次性**（Lua `GETDEL` 原子实现）——不校验则登录可被 CSRF 劫持；
-   不一次性则同一 state 可重放。实测伪造/无 state 均 401。
-2. **`provider_user_id` 用三方稳定标识**（GitHub 数字 ID、Google `sub`、微信 `unionid`），
-   **不用 username/email/nickname**——前两者可改可换，微信昵称可重复，
-   用作绑定键会引发错绑与冒用。
-3. **Google 走 tokeninfo 校验 aud/iss**；**微信必须显式判 `errcode`**——
-   ⚠️ 微信**所有接口出错也返回 HTTP 200**，错误只写在 body 的 `errcode` 里。
-   只判状态码会把「invalid code」当成功，进而写入空绑定键使账号互相错绑。
-4. **跳回地址必须过白名单**（`oauth.redirect_whitelist`）——否则 open redirect 钓鱼：
-   受害者登录后被跳到攻击者站点偷 token。白名单为空时**一律拒绝**。
-5. **自动建号的账号无可用口令**：生成 32 字节随机强密码，杜绝「空密码/默认密码」被登录。
+1. **state must be verified and one-time** (atomic via Lua `GETDEL`) — without verification, login can be CSRF-hijacked;
+   without one-time use, the same state can be replayed. Tested: forged/no state both return 401.
+2. **`provider_user_id` uses the third party's stable identifier** (GitHub numeric ID, Google `sub`, WeChat `unionid`),
+   **not username/email/nickname** — the first two can be changed, WeChat nicknames can be duplicated,
+   and using them as the binding key causes mis-binding and impersonation.
+3. **Google verifies aud/iss via tokeninfo**; **WeChat must explicitly check `errcode`** —
+   ⚠️ WeChat **returns HTTP 200 even when all APIs error**, with the error only in the body's `errcode`.
+   Checking only the status code would treat "invalid code" as success, then write an empty binding key and mis-bind accounts to each other.
+4. **Redirect URLs must go through a whitelist** (`oauth.redirect_whitelist`) — otherwise open-redirect phishing:
+   the victim is redirected to the attacker's site after login to steal tokens. When the whitelist is empty, **always deny**.
+5. **Auto-created accounts have no usable password**: a 32-byte random strong password is generated, eliminating logins with an "empty/default password".
 
-### 微信的四个特殊约束
+### Four Special WeChat Constraints
 
-微信授权端点**不是标准 OAuth2 端点**，故 `WeChatProvider` 手工拼 URL，
-不使用 `oauth2.Config.AuthCodeURL`：
+The WeChat authorization endpoint is **not a standard OAuth2 endpoint**, so `WeChatProvider` constructs the URL manually,
+without using `oauth2.Config.AuthCodeURL`:
 
-| 约束 | 说明 |
+| Constraint | Description |
 |---|---|
-| 端点是 `/connect/qrconnect` | 不是常见的 `/oauth2/authorize` |
-| URL 末尾须带 `#wechat_redirect` | **缺了微信直接提示「该链接无法访问」** |
-| `redirect_uri` 只编码一层 | `url.Values.Encode()` 会把 `%` 编成 `%25` 造成双重编码，故手工拼 |
-| `scope` 固定 `snsapi_login` | 其他值一律被拒；配了 `scopes` 也会被内部强制覆盖 |
+| The endpoint is `/connect/qrconnect` | not the common `/oauth2/authorize` |
+| The URL must end with `#wechat_redirect` | **without it WeChat directly reports "the link cannot be accessed"** |
+| `redirect_uri` is encoded only once | `url.Values.Encode()` encodes `%` into `%25`, causing double encoding, hence manual construction |
+| `scope` is fixed at `snsapi_login` | any other value is rejected; configuring `scopes` is also forcibly overwritten internally |
 
-绑定键取 `unionid` 优先（同一开放平台账号下跨应用唯一），缺失时退回 `openid`；
-两者皆空则**拒绝登录**。
+The binding key prefers `unionid` (unique across apps under the same open platform account), falling back to `openid` when absent;
+if both are empty, **login is rejected**.
 
-⚠️ **微信不返回邮箱且不允许索取**，故纯微信用户的 `email` 恒为空——
-「邮箱找回密码」对其不可用，需另设绑定手机号/邮箱流程。
-头像 URL 在用户改头像后即失效，当前仅作展示快照。
+⚠️ **WeChat returns no email and does not allow requesting one**, so pure WeChat users' `email` is always empty —
+"recover password via email" is unavailable to them; a separate bind-phone/email flow is needed.
+The avatar URL expires once the user changes their avatar; it currently serves only as a display snapshot.
 
-### 数据表
+### Data Tables
 
-`t_user_oauth`，两个唯一索引缺一不可：
+`t_user_oauth`, with two unique indexes, neither dispensable:
 
-- `uk_provider_provider_id`——防「一个三方账号绑多个本地用户」（账号劫持）
-- `uk_user_provider`——防「同一用户重复绑定同一提供方」
+- `uk_provider_provider_id` — prevents "one third-party account bound to multiple local users" (account hijacking)
+- `uk_user_provider` — prevents "the same user binding the same provider repeatedly"
 
-另有本地用户表 `t_user`（与 `t_system_users` 的差异：**无 `tenant_id`**、
-无角色/部门、`disabled` 取代 `status`）。⚠️ 它的邮箱/手机号必须用指针字段
-（`*string`），未填写时存 `NULL` 而非空串——MySQL 唯一索引不约束多个 `NULL`，
-若用空串则第二个未绑定邮箱的用户即冲突（应用层 `model.NormalizePtr` 负责归一）。
+There is also the local user table `t_user` (differences from `t_system_users`: **no `tenant_id`**,
+no roles/departments, `disabled` replaces `status`). ⚠️ Its email/mobile fields must use pointer fields
+(`*string`), storing `NULL` rather than empty strings when unfilled — MySQL unique indexes do not constrain multiple `NULL`s,
+whereas empty strings would make the second user without a bound email conflict (the application-layer `model.NormalizePtr` handles normalization).
 
-### ⚠️ 当前限制
+### ⚠️ Current Limitations
 
-- **微信未用真实凭据跑通端到端**：接口实现与单元测试已完备（12 项，含 errcode
-  与空标识防护），但受「须企业资质 + 已备案域名」限制，尚无真实 AppID/Secret
-  做真实扫码验证。接入步骤见 `docs/oauth2-guide.md`。
-- **三方 token 未加密**：见「待补齐」。
-- **微信用户无邮箱**：见上文微信约束。
+- **WeChat not verified end to end with real credentials**: the API implementation and unit tests are complete (12 items, including errcode
+  and empty-identifier protection), but constrained by "requires business qualification + a registered domain", there are no real AppID/Secret
+  for real QR-scan verification. Integration steps are in `docs/oauth2-guide.md`.
+- **Third-party tokens not encrypted**: see "To Be Completed".
+- **WeChat users have no email**: see the WeChat constraints above.
 
-## 认证体系
+## Authentication System
 
-### 双 token（access + refresh）
+### Dual Tokens (access + refresh)
 
 | | access | refresh |
 |---|---|---|
-| 形态 | RS256 JWT | **256 位随机不透明串**（base64url 43 字符） |
-| 存储 | 无状态 | Redis，服务端**只存 SHA-256 哈希** |
-| 有效期 | `jwt.access_expire`（默认 2h） | `jwt.refresh_expire`（默认 168h） |
-| 失效方式 | 等过期 | 登出 / 轮换 / 改密时精确作废 |
+| Form | RS256 JWT | **256-bit random opaque string** (base64url, 43 chars) |
+| Storage | stateless | Redis, server stores **only the SHA-256 hash** |
+| Validity | `jwt.access_expire` (default 2h) | `jwt.refresh_expire` (default 168h) |
+| Invalidation | wait for expiry | precisely invalidated on logout / rotation / password change |
 
-> ⚠️ **切勿把 access 当 refresh 复用**：access 是无状态 JWT，拿到就能用到过期，
-> 等于给了攻击者无限续命的凭据，且登出/封禁无法真正作废它。
+> ⚠️ **Never reuse an access token as a refresh token**: an access token is a stateless JWT that works until expiry once obtained,
+> which amounts to giving an attacker an indefinitely renewable credential, and logout/ban cannot truly invalidate it.
 
-轮换（`POST /user/api/v1/auth/refresh`）用 **Lua 脚本原子**完成
-「查旧 → 删旧 → 写新」——分步执行会让并发刷新各自拿到同一个旧 token 并各自签发新
-token（重放漏洞）。实测：用过的 refresh 立即返回 401。
+Rotation (`POST /user/api/v1/auth/refresh`) uses a **Lua script atomically** to complete
+"query old → delete old → write new" — step-by-step execution would let concurrent refreshes each get the same old token and each sign a new
+token (a replay vulnerability). Tested: a used refresh immediately returns 401.
 
-登出时若带上 `refresh_token` 会一并作废，否则旧 refresh 仍能换新 token（等于没登出）。
+Logging out with the `refresh_token` invalidates it too; otherwise the old refresh can still exchange for a new token (equivalent to not logging out).
 
-### 登录失败限流与账号锁定
+### Login Failure Rate Limiting and Account Locking
 
-bcrypt 只能拖慢单次爆破，无法阻止高速尝试。C 端开放注册、用户名可枚举，
-故叠加两个维度（**缺一可被绕过**）：
+bcrypt can only slow down single brute-force attempts, not stop high-speed attempts. The C side has open registration and enumerable usernames,
+so two dimensions are stacked (**either alone can be bypassed**):
 
-| 维度 | 默认阈值 | 拦什么 |
+| Dimension | Default threshold | Blocks what |
 |---|---|---|
-| IP 限流 | 5 分钟内20 次失败 → 429 | 一个 IP 批量试不同用户名 |
-| 账号锁定 | 15 分钟内 5 次失败 → 锁定 15 分钟 | 多个 IP 集中试同一账号 |
+| IP rate limiting | 20 failures within 5 minutes → 429 | one IP batch-trying different usernames |
+| Account locking | 5 failures within 15 minutes → locked for 15 minutes | multiple IPs concentrating on one account |
 
-配置见 `login_lock`段。客户端 IP 经 `server.trusted_proxies` 校验 XFF 后才采用——
-否则攻击者伪造 `X-Forwarded-For` 即可绕过 IP 限流。
+Config is in the `login_lock` section. The client IP is validated against XFF via `server.trusted_proxies` before adoption —
+otherwise an attacker can forge `X-Forwarded-For` to bypass IP rate limiting.
 
-「用户不存在」也计一次失败（否则可无成本枚举用户名）；账号已封禁**不计**失败
-（不是用户输错，计入会误封正常用户的 IP 计数）。
+"User does not exist" also counts as one failure (otherwise usernames can be enumerated at no cost); an already-banned account does **not** count as a failure
+(it is not a user input error, and counting it would wrongly ban normal users' IP counts).
 
-### 匿名端点（必须网关豁免 + 应用层放行）
+### Anonymous Endpoints (Must Be Gateway-Exempted + Application-Allowed)
 
-| 路径 | 为什么匿名 |
+| Path | Why anonymous |
 |---|---|
-| `POST /user/api/v1/auth/register` | 注册 |
-| `POST /user/api/v1/auth/login` | 此刻还没有 token |
-| `POST /user/api/v1/auth/refresh` | **此刻 access 已过期**，要求携带 JWT 等于永远刷不出来 |
-| `GET /.well-known/jwks.json` | 公钥分发 |
+| `POST /user/api/v1/auth/register` | registration |
+| `POST /user/api/v1/auth/login` | no token yet at this moment |
+| `POST /user/api/v1/auth/refresh` | **access has already expired**; requiring a JWT would mean it can never be refreshed |
+| `GET /.well-known/jwks.json` | public key distribution |
 
-⚠️ logout / profile / profile/password **不可**合并进这些前缀：
-合并成 `/user/api/v1/auth` 会把 logout 一并豁免（任何人都能踢人下线）；
-合并成 `/user/api/v1` 会把 profile 与改密一并豁免（**严重越权**）。
+⚠️ logout / profile / profile/password **cannot** be merged into these prefixes:
+merging into `/user/api/v1/auth` would exempt logout too (anyone could kick others offline);
+merging into `/user/api/v1` would exempt profile and password change too (**severe privilege escalation**).
 
-## 目录结构
+## Directory Structure
 
 ```
 devops-user/
 ├── main.go                # humaerr.Install + banner + cmd.Execute
 ├── banner.txt             # go:embed
 ├── config/
-│   ├── bootstrap.yaml         # 公共基线（server/nacos）
-│   ├── devops-user-dev.yaml   # 环境覆盖（含 dev JWT 私钥）
-│   └── .env               # NACOS_REGISTER_IP（不提交）
+│   ├── bootstrap.yaml         # common baseline (server/nacos)
+│   ├── devops-user-dev.yaml   # environment overlay (incl. dev JWT private key)
+│   └── .env               # NACOS_REGISTER_IP (not committed)
 └── internal/
-    ├── cmd/root.go        # 装配：db → 建表 → 发号 → Redis → JWT → Kit → service
-    ├── config/            # 根 Config 与专有配置段
-    ├── auth/              # 认证门面（C 端语义适配）
-    ├── middleware/        # Kit 别名 + 中文信封文案
-    ├── model/             # GORM 表模型（BaseModel 复用 devops-common/model）
-    ├── dao/               # 数据访问（无租户过滤）
-    ├── dbinit/            # 启动期建表（内嵌 sql/schema）
-    ├── service/           # 业务用例 + bcrypt
-    ├── api/v1/            # huma handler（含 ClientIP 中间件）
-    ├── refreshtoken/      # refresh token 存取（不透明串 + 哈希，Lua 原子轮换）
-    ├── loginlock/         # 登录失败限流与账号锁定
-    ├── router/            # 路由注册
-    └── store/             # Redis 装配（委托 infra/cache/redis）
+    ├── cmd/root.go        # assembly: db → create tables → ID generation → Redis → JWT → Kit → service
+    ├── config/            # root Config and proprietary config sections
+    ├── auth/              # auth facade (C-side semantic adaptation)
+    ├── middleware/        # Kit aliases + English envelope text
+    ├── model/             # GORM table models (BaseModel reuses devops-common/model)
+    ├── dao/               # data access (no tenant filtering)
+    ├── dbinit/            # startup-time table creation (embedded sql/schema)
+    ├── service/           # business use cases + bcrypt
+    ├── api/v1/            # huma handlers (incl. ClientIP middleware)
+    ├── refreshtoken/      # refresh token storage (opaque string + hash, Lua atomic rotation)
+    ├── loginlock/         # login failure rate limiting and account locking
+    ├── router/            # route registration
+    └── store/             # Redis assembly (delegates to infra/cache/redis)
 ```
 
-## roadmap
+## Roadmap
 
-- [x] 用户登录注册，oauth2.0 三方登录 github, google, wechat
-- [ ] 用户信息管理，修改密码，修改邮箱，修改手机号，修改头像，修改昵称
-- [ ] 用户画像分析，例如
-  - [ ] 用户登录次数，登录时间，登录IP，登录设备，登录地理位置
-  - [ ] 用户注册时间，注册IP，注册设备，注册地理位置
-  - [ ] 用户活跃度分析，例如日活跃用户数，周活跃用户数，月活跃用户数
-  - [ ] 用户留存率分析，例如次日留存率，7日留存率，30日留存率
+- [x] User login/registration, OAuth2.0 third-party login: github, google, wechat
+- [ ] User profile management: change password, change email, change phone, change avatar, change nickname
+- [ ] User profile analytics, e.g.
+  - [ ] Login count, login time, login IP, login device, login geolocation
+  - [ ] Registration time, registration IP, registration device, registration geolocation
+  - [ ] User activity analytics, e.g. DAU, WAU, MAU
+  - [ ] User retention analytics, e.g. next-day retention, 7-day retention, 30-day retention

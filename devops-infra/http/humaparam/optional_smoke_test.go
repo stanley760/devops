@@ -15,7 +15,8 @@ import (
 	"github.com/stanley760/devops/devops-infra/http/humaparam"
 )
 
-// optInput 带 Optional query 参数的输入（复现分页筛选的 *int8 语义）。
+// optInput is the input with an Optional query parameter (reproducing the *int8
+// semantics of pagination filtering).
 type optInput struct {
 	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1"`
 }
@@ -28,7 +29,7 @@ type optOutput struct {
 
 func newOptAPI(t *testing.T) humatest.TestAPI {
 	cfg := huma.DefaultConfig("p", "v1")
-	cfg.CreateHooks = nil // 与生产 apidoc.New 对齐：禁用 $schema 注入
+	cfg.CreateHooks = nil // aligned with production apidoc.New: disable $schema injection
 	_, api := humatest.New(t, cfg)
 	registerOpt(api)
 	return api
@@ -50,7 +51,7 @@ func optStatus(t *testing.T, resp *httptest.ResponseRecorder) *int8 {
 		Status *int8 `json:"status"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
-		t.Fatalf("响应 JSON: %v", err)
+		t.Fatalf("response JSON: %v", err)
 	}
 	return out.Status
 }
@@ -60,24 +61,24 @@ func TestOptionalAbsent(t *testing.T) {
 
 	resp := api.Get("/opt")
 	if resp.Code != http.StatusOK {
-		t.Fatalf("缺省请求 status = %d, want 200, body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("default request status = %d, want 200, body=%s", resp.Code, resp.Body.String())
 	}
 	if s := optStatus(t, resp); s != nil {
-		t.Fatalf("缺省 status 应为 nil, got %v", *s)
+		t.Fatalf("default status should be nil, got %v", *s)
 	}
 }
 
 func TestOptionalExplicitZero(t *testing.T) {
 	api := newOptAPI(t)
 
-	// 显式传 0（有效业务值）→ IsSet=true、Ptr() 指向 0
+	// explicit 0 (a valid business value) → IsSet=true, Ptr() points at 0
 	resp := api.Get("/opt?status=0")
 	if resp.Code != http.StatusOK {
-		t.Fatalf("显式 0 status = %d, want 200, body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("explicit 0 status = %d, want 200, body=%s", resp.Code, resp.Body.String())
 	}
 	s := optStatus(t, resp)
 	if s == nil || *s != 0 {
-		t.Fatalf("显式 0 应 IsSet 且值 0, got %v", s)
+		t.Fatalf("explicit 0 should be IsSet with value 0, got %v", s)
 	}
 }
 
@@ -86,11 +87,11 @@ func TestOptionalExplicitOne(t *testing.T) {
 
 	resp := api.Get("/opt?status=1")
 	if resp.Code != http.StatusOK {
-		t.Fatalf("显式 1 status = %d, want 200, body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("explicit 1 status = %d, want 200, body=%s", resp.Code, resp.Body.String())
 	}
 	s := optStatus(t, resp)
 	if s == nil || *s != 1 {
-		t.Fatalf("显式 1 应 IsSet 且值 1, got %v", s)
+		t.Fatalf("explicit 1 should be IsSet with value 1, got %v", s)
 	}
 }
 
@@ -98,9 +99,9 @@ func TestOptionalConstraintRejected(t *testing.T) {
 	humaerr.Install()
 	api := newOptAPI(t)
 
-	// 显式传 2 违反 maximum:1 → 422→400 信封
+	// explicit 2 violates maximum:1 → 422→400 envelope
 	resp := api.Get("/opt?status=2")
 	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("越界 status = %d, want 400, body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("out-of-range status = %d, want 400, body=%s", resp.Code, resp.Body.String())
 	}
 }

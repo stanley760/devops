@@ -1,7 +1,7 @@
-// Package mysql 提供 MySQL 数据库适配器：连接池、事务与健康检查。
+// Package mysql provides a MySQL database adapter: connection pool, transactions, and health checks.
 //
-// 推荐在新代码中使用 Client 并在 cmd 层显式注入；
-// Init/Get/Close 是兼容现有调用方的过渡接口。
+// Prefer Client in new code with explicit injection at the cmd layer;
+// Init/Get/Close are transitional interfaces kept for existing callers.
 package mysql
 
 import (
@@ -16,12 +16,12 @@ import (
 	database "github.com/stanley760/devops/devops-infra/database"
 )
 
-// Client 封装 GORM MySQL 连接池。
+// Client wraps a GORM MySQL connection pool.
 type Client struct {
 	db *gorm.DB
 }
 
-// New 建立连接并应用连接池与 GORM 日志配置。
+// New establishes a connection and applies connection pool and GORM log settings.
 func New(cfg Config) (*Client, error) {
 	cfg, err := normalizeConfig(cfg)
 	if err != nil {
@@ -32,24 +32,24 @@ func New(cfg Config) (*Client, error) {
 		Logger: gormlogger.Default.LogMode(configGormLogLevel(cfg)),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("连接 MySQL 失败: %w", err)
+		return nil, fmt.Errorf("failed to connect to MySQL: %w", err)
 	}
 
 	pool, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("获取底层连接池失败: %w", err)
+		return nil, fmt.Errorf("failed to obtain the underlying connection pool: %w", err)
 	}
 	pool.SetMaxIdleConns(cfg.MaxIdleConns)
 	pool.SetMaxOpenConns(cfg.MaxOpenConns)
 	pool.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	pool.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
-	slog.Info("MySQL 连接成功",
+	slog.Info("connected to MySQL",
 		"addr", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		"database", cfg.Database)
 	return &Client{db: db}, nil
 }
 
-// DB 返回底层 GORM 连接，供既有 Repository 或迁移工具使用。
+// DB returns the underlying GORM connection for existing Repositories or migration tools.
 func (c *Client) DB() *gorm.DB {
 	if c == nil {
 		return nil
@@ -57,7 +57,7 @@ func (c *Client) DB() *gorm.DB {
 	return c.db
 }
 
-// Session 返回当前 context 中的事务；无事务时返回连接池会话。
+// Session returns the transaction in the current context; when there is no transaction, returns a connection pool session.
 func (c *Client) Session(ctx context.Context) *gorm.DB {
 	if tx, ok := database.ExecutorFromContext(ctx); ok {
 		return tx
@@ -65,15 +65,15 @@ func (c *Client) Session(ctx context.Context) *gorm.DB {
 	return c.db.WithContext(ctx)
 }
 
-// Transaction 开启事务并把 tx 注入 fn 的 context，Repository 通过 Session 复用。
+// Transaction starts a transaction and injects tx into fn's context, which Repositories reuse via Session.
 func (c *Client) Transaction(ctx context.Context, fn database.TxFunc) error {
 	if c == nil || c.db == nil {
-		return fmt.Errorf("MySQL 客户端未初始化")
+		return fmt.Errorf("MySQL client not initialized")
 	}
 	return database.Transaction(ctx, c.db.WithContext(ctx), fn)
 }
 
-// Close 关闭连接池。
+// Close closes the connection pool.
 func (c *Client) Close() error {
 	if c == nil || c.db == nil {
 		return nil
@@ -87,7 +87,7 @@ func (c *Client) Close() error {
 
 var current *Client
 
-// Init 建立全局连接，兼容现有命令与旧调用方。
+// Init establishes the global connection, compatible with existing commands and legacy callers.
 func Init(cfg Config) error {
 	client, err := New(cfg)
 	if err != nil {
@@ -97,15 +97,15 @@ func Init(cfg Config) error {
 	return nil
 }
 
-// Default 返回当前全局客户端。
+// Default returns the current global client.
 func Default() *Client { return current }
 
-// Get 返回当前底层 GORM 连接；未 Init 时为 nil。
+// Get returns the current underlying GORM connection; nil when Init has not been called.
 func Get() *gorm.DB {
 	return current.DB()
 }
 
-// Close 关闭全局连接池。
+// Close closes the global connection pool.
 func Close() error {
 	client := current
 	current = nil

@@ -21,12 +21,12 @@ func newTestClient(batch int, fetchFn func(ctx context.Context, bizTag string) (
 }
 
 func TestSingleFlightOneRPCPerTag(t *testing.T) {
-	// P1-3: 并发 Next 空缓冲时只发一次 RPC
+	// P1-3: concurrent Next on an empty buffer issues only one RPC
 	var calls atomic.Int32
 	start := make(chan struct{})
 	c := newTestClient(100, func(ctx context.Context, bizTag string) ([]int64, error) {
 		calls.Add(1)
-		<-start // 所有 goroutine 到达后才返回
+		<-start // returns only after all goroutines have arrived
 		ids := make([]int64, 100)
 		for i := range ids {
 			ids[i] = int64(i + 1)
@@ -43,7 +43,7 @@ func TestSingleFlightOneRPCPerTag(t *testing.T) {
 			_, _ = c.Next(context.Background(), "tag")
 		}()
 	}
-	time.Sleep(50 * time.Millisecond) // 等所有 goroutine 进入
+	time.Sleep(50 * time.Millisecond) // wait for all goroutines to enter
 	close(start)
 	wg.Wait()
 
@@ -53,7 +53,7 @@ func TestSingleFlightOneRPCPerTag(t *testing.T) {
 }
 
 func TestSyncWaitsForInflightAsyncNoReorder(t *testing.T) {
-	// P1-3: 异步补充 in-flight 时，同步补充必须等待而不是并行发起
+	// P1-3: while an async refill is in flight, a sync refill must wait rather than start in parallel
 	var calls atomic.Int32
 	var mu sync.Mutex
 	batches := [][]int64{}
@@ -63,7 +63,7 @@ func TestSyncWaitsForInflightAsyncNoReorder(t *testing.T) {
 	c := newTestClient(10, func(ctx context.Context, bizTag string) ([]int64, error) {
 		n := calls.Add(1)
 		if n == 1 {
-			// 第一次：返回慢速异步批次 [100..109]
+			// first call: return a slow async batch [100..109]
 			close(asyncStarted)
 			<-asyncProceed
 			ids := make([]int64, 10)
@@ -75,7 +75,7 @@ func TestSyncWaitsForInflightAsyncNoReorder(t *testing.T) {
 			mu.Unlock()
 			return ids, nil
 		}
-		// 第二次（不应发生）
+		// second call (should not happen)
 		ids := []int64{1, 2, 3}
 		mu.Lock()
 		batches = append(batches, ids)
@@ -83,26 +83,26 @@ func TestSyncWaitsForInflightAsyncNoReorder(t *testing.T) {
 		return ids, nil
 	})
 
-	// 先取一个 ID 触发异步补充
+	// first take one ID to trigger the async refill
 	c.cfg.Batch = 10
 	tb := c.get("tag")
-	// 手动触发 asyncRefill（需要低于水位：1 < 10*0.2=2）
+	// manually trigger asyncRefill (must be below the watermark: 1 < 10*0.2=2)
 	tb.mu.Lock()
 	tb.ids = []int64{50}
 	c.asyncRefill(tb, "tag")
 	tb.mu.Unlock()
 
-	<-asyncStarted // 等异步发起
+	<-asyncStarted // wait for the async refill to start
 
-	// 现在清空缓冲并调用 Next（同步路径）——应该等待而不是另发请求
+	// now clear the buffer and call Next (sync path) -- it should wait rather than issue another request
 	tb.mu.Lock()
 	tb.ids = nil
 	tb.mu.Unlock()
 
-	// 在异步完成前调用 Next——应等待 in-flight
+	// call Next before the async refill finishes -- it should wait for the in-flight request
 	go func() {
 		time.Sleep(20 * time.Millisecond)
-		close(asyncProceed) // 释放异步
+		close(asyncProceed) // release the async refill
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -118,7 +118,7 @@ func TestSyncWaitsForInflightAsyncNoReorder(t *testing.T) {
 	if totalCalls != 1 {
 		t.Fatalf("total fetch calls = %d, want 1 (no reorder)", totalCalls)
 	}
-	// ID 应该来自异步批次 [100..109]
+	// the ID should come from the async batch [100..109]
 	if id < 100 || id > 109 {
 		t.Fatalf("id = %d, want in [100..109]", id)
 	}
@@ -128,7 +128,7 @@ func TestMergeRejectsNonMonotonicBatch(t *testing.T) {
 	tb := &tagBuffer{}
 	err := mergeLocked(tb, []int64{5, 3, 7})
 	if err == nil {
-		t.Fatal("非递增批次应被拒绝")
+		t.Fatal("non-monotonic batch should be rejected")
 	}
 }
 
@@ -136,7 +136,7 @@ func TestMergeRejectsEmptyBatch(t *testing.T) {
 	tb := &tagBuffer{}
 	err := mergeLocked(tb, []int64{})
 	if err == nil {
-		t.Fatal("空批次应被拒绝")
+		t.Fatal("empty batch should be rejected")
 	}
 }
 
@@ -144,7 +144,7 @@ func TestMergeRejectsStaleBatch(t *testing.T) {
 	tb := &tagBuffer{lastIssued: 100}
 	err := mergeLocked(tb, []int64{50, 60})
 	if err == nil {
-		t.Fatal("过期批次（首 ID <= lastIssued）应被拒绝")
+		t.Fatal("stale batch (first ID <= lastIssued) should be rejected")
 	}
 }
 
@@ -152,7 +152,7 @@ func TestMergeAcceptsValidBatch(t *testing.T) {
 	tb := &tagBuffer{lastIssued: 10}
 	err := mergeLocked(tb, []int64{11, 12, 13})
 	if err != nil {
-		t.Fatalf("合法批次被拒绝: %v", err)
+		t.Fatalf("valid batch rejected: %v", err)
 	}
 	if len(tb.ids) != 3 {
 		t.Fatalf("buffer len = %d, want 3", len(tb.ids))
@@ -160,7 +160,7 @@ func TestMergeAcceptsValidBatch(t *testing.T) {
 }
 
 func TestNextStrictlyIncreasing(t *testing.T) {
-	// 端到端：Next 发出的 ID 必须严格递增
+	// end-to-end: IDs issued by Next must be strictly increasing
 	var next int64
 	c := newTestClient(10, func(ctx context.Context, bizTag string) ([]int64, error) {
 		base := next
@@ -179,14 +179,14 @@ func TestNextStrictlyIncreasing(t *testing.T) {
 			t.Fatalf("Next #%d error = %v", i, err)
 		}
 		if id <= prev {
-			t.Fatalf("ID 未递增: %d <= %d (i=%d)", id, prev, i)
+			t.Fatalf("ID not increasing: %d <= %d (i=%d)", id, prev, i)
 		}
 		prev = id
 	}
 }
 
 func TestWaiterRetriesAfterFailedFlight(t *testing.T) {
-	// 第一次补充失败，第二次重试成功
+	// the first refill fails, the second retry succeeds
 	var calls atomic.Int32
 	c := newTestClient(5, func(ctx context.Context, bizTag string) ([]int64, error) {
 		if calls.Add(1) == 1 {
@@ -197,16 +197,16 @@ func TestWaiterRetriesAfterFailedFlight(t *testing.T) {
 
 	tb := c.get("tag")
 
-	// 第一次补充失败
+	// the first refill fails
 	err := c.refill(context.Background(), tb, "tag", "sync")
 	if err == nil {
-		t.Fatal("第一次补充应失败")
+		t.Fatal("the first refill should fail")
 	}
 
-	// 第二次补充应成功
+	// the second refill should succeed
 	err = c.refill(context.Background(), tb, "tag", "sync")
 	if err != nil {
-		t.Fatalf("第二次补充 error = %v", err)
+		t.Fatalf("second refill error = %v", err)
 	}
 	tb.mu.Lock()
 	n := len(tb.ids)

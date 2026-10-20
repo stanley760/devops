@@ -1,7 +1,8 @@
-// Package cmd 定义 devops-id 的命令行入口。
+// Package cmd defines the devops-id command-line entrypoint.
 //
-// 配置管理：路径由 -f/--config-file 绑定，加载与读取封装在 devops-infra/config，
-// cobra.OnInitialize 中完成加载，PersistentPreRunE 中完成组件初始化。
+// Configuration management: the path is bound via -f/--config-file, and loading and
+// reading are encapsulated in devops-infra/config -- loading happens in
+// cobra.OnInitialize, component initialization in PersistentPreRunE.
 package cmd
 
 import (
@@ -23,9 +24,9 @@ var obsRuntime *observability.Runtime
 
 var rootCmd = &cobra.Command{
 	Use:   "devops-id",
-	Short: "devops 分布式 ID 发号服务",
+	Short: "devops distributed ID generation service",
 
-	// 所有子命令执行前都会先跑这里：初始化日志
+	// Runs before every subcommand: initializes logging
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var cfg config.Config
 		if err := infracfg.LoadInto(&cfg); err != nil {
@@ -49,7 +50,7 @@ var rootCmd = &cobra.Command{
 		}
 		obsRuntime = obs
 
-		slog.Debug("初始化完成",
+		slog.Debug("initialization complete",
 			"service", "devops-id",
 			"config", infracfg.Files(),
 			"env", infracfg.Env(),
@@ -58,7 +59,7 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 
-	// 所有子命令执行后统一收尾，保证日志不丢
+	// Unified cleanup after every subcommand, ensuring no logs are lost
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		_ = nacos.Close()
 		if obsRuntime != nil {
@@ -73,10 +74,11 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// loadNacosConfig 拉取远程 Nacos 配置并合并，远程优先：
-// 命中远程 dataID 即以远程为准；仅当远程未命中 profile dataID
-// （<service>-<env>.yaml）时，才合并本地同名环境文件兜底。
-// bootstrap.yaml 始终作为公共基线。
+// loadNacosConfig fetches remote Nacos config and merges it, remote taking precedence:
+// when a remote dataID hits, the remote value wins; the local same-named environment
+// file is only merged as a fallback when the remote profile dataID
+// (<service>-<env>.yaml) misses.
+// bootstrap.yaml always serves as the shared baseline.
 func loadNacosConfig(cfg *config.Config) error {
 	if !cfg.Nacos.Enabled {
 		return nil
@@ -108,10 +110,10 @@ func loadNacosConfig(cfg *config.Config) error {
 		}
 	}
 	if cfg.Nacos.ConfigCenter.Required && !loaded {
-		return fmt.Errorf("nacos 配置中心未返回配置")
+		return fmt.Errorf("nacos config center returned no configuration")
 	}
 	if !profileLoaded {
-		// 远程未命中 profile 配置：合并本地 <service>-<env>.yaml 兜底
+		// Remote profile config not found: merge the local <service>-<env>.yaml as a fallback
 		if err := infracfg.MergeEnvConfig(); err != nil {
 			return err
 		}
@@ -125,11 +127,11 @@ func init() {
 	)
 }
 
-// Execute 执行根命令。version 用于 --version 输出。
+// Execute runs the root command. version is used for --version output.
 func Execute(version string) {
 	rootCmd.Version = version
 
-	// cobra.OnInitialize 会在每个命令的 Run 之前执行，此处完成配置加载
+	// cobra.OnInitialize runs before each command's Run; configuration loading happens here
 	cobra.OnInitialize(func() {
 		if err := infracfg.Init(confFile); err != nil {
 			panic(err)

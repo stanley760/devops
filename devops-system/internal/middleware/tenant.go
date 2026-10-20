@@ -1,8 +1,8 @@
-// 租户可用性判定：供 Kit 的租户中间件（securityTenant，huma.go）使用。
+// Tenant usability judgment: used by the Kit's tenant middleware (securityTenant, huma.go).
 //
-// 状态校验带 Redis 缓存（tenant:{id}，5min）：
-// 即时失效由「停用租户时 RevokeAllSessions」保证（停用 → 全员 401），
-// 缓存仅避免每个请求回源查库。
+// Status validation is cached in Redis (tenant:{id}, 5min):
+// immediate invalidation is guaranteed by "RevokeAllSessions when disabling a tenant" (disable → everyone 401),
+// and the cache only avoids a DB lookup per request.
 package middleware
 
 import (
@@ -17,11 +17,11 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/model"
 )
 
-// tenantCacheTTL 租户状态缓存时长。
+// tenantCacheTTL is the tenant status cache duration.
 const tenantCacheTTL = 5 * time.Minute
 
-// newTenantChecker 租户可用性判定闭包工厂：DB 与缓存经依赖注入（不再依赖全局单例）。
-// 返回 true 表示租户存在、未停用、未过期；结果缓存 5min。
+// newTenantChecker is the tenant usability judgment closure factory: DB and cache are dependency-injected (no global singleton).
+// Returns true if the tenant exists, is not disabled, and is not expired; the result is cached for 5min.
 func newTenantChecker(gdb *gorm.DB, c cache.Cache) func(ctx context.Context, tenantID int64) bool {
 	return func(ctx context.Context, tenantID int64) bool {
 		cacheKey := fmt.Sprintf("tenant:%d", tenantID)
@@ -31,17 +31,17 @@ func newTenantChecker(gdb *gorm.DB, c cache.Cache) func(ctx context.Context, ten
 			}
 		}
 		if gdb == nil {
-			return false // fail-closed：未注入 DB（测试/装配缺失）时拒绝
+			return false // fail-closed: deny when DB is not injected (test/assembly missing)
 		}
 
 		var t model.Tenant
 		if err := gdb.WithContext(ctx).Where("id = ?", tenantID).First(&t).Error; err != nil {
 			return false
 		}
-		if t.Status != 1 { // 停用
+		if t.Status != 1 { // disabled
 			return false
 		}
-		if t.ExpireTime != nil && t.ExpireTime.Before(time.Now()) { // 过期
+		if t.ExpireTime != nil && t.ExpireTime.Before(time.Now()) { // expired
 			return false
 		}
 

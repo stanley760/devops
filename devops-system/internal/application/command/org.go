@@ -9,7 +9,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// RoleCommand 角色写侧命令处理器。
+// RoleCommand is the write-side role command handler.
 type RoleCommand struct {
 	roles iam.RoleRepository
 	menus iam.MenuRepository
@@ -17,12 +17,12 @@ type RoleCommand struct {
 	now   shared.NowFunc
 }
 
-// NewRoleCommand 构造角色命令处理器。
+// NewRoleCommand constructs the role command handler.
 func NewRoleCommand(roles iam.RoleRepository, menus iam.MenuRepository, txs shared.TxManager) *RoleCommand {
 	return &RoleCommand{roles: roles, menus: menus, txs: txs, now: shared.SystemNow}
 }
 
-// CreateRoleCmd 创建角色命令。
+// CreateRoleCmd is the create-role command.
 type CreateRoleCmd struct {
 	TenantID         int64
 	Name             string
@@ -34,16 +34,17 @@ type CreateRoleCmd struct {
 	Remark           string
 }
 
-// CreateRole 创建角色。
+// CreateRole creates a role.
 //
-// 规则：code 非空 + 租户内唯一 + 数据权限口径合法（均在聚合内校验）。
+// Rules: the code must be non-empty, unique within the tenant, and a valid
+// data-scope value (all validated inside the aggregate).
 func (c *RoleCommand) Create(ctx context.Context, cmd CreateRoleCmd) error {
 	exists, err := c.roles.CodeExists(ctx, cmd.Code, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errParam("角色编码已存在")
+		return errParam("role code already exists")
 	}
 
 	scope := cmd.DataScope
@@ -72,11 +73,13 @@ func (c *RoleCommand) Create(ctx context.Context, cmd CreateRoleCmd) error {
 	})
 }
 
-// UpdateRoleCmd 更新角色命令。
+// UpdateRoleCmd is the update-role command.
 //
-// 注意：不含 Code 字段——编码创建后不可变，避免 casbin p/g 行失联。
-// 改造前 service/role.go:126 靠「updates map 里不写 code 键」隐式忽略，
-// 隐式约定极易在后续迭代中被误改，故由类型层面根除。
+// Note: no Code field — the code is immutable after creation, preventing
+// casbin p/g rows from losing their anchor. Before the refactor,
+// service/role.go:126 implicitly ignored it by omitting the code key from
+// the updates map; that implicit convention was easy to break in later
+// iterations, so it is now eliminated at the type level.
 type UpdateRoleCmd struct {
 	TenantID         int64
 	RoleID           int64
@@ -88,7 +91,7 @@ type UpdateRoleCmd struct {
 	Remark           string
 }
 
-// UpdateRole 更新角色。
+// UpdateRole updates a role.
 func (c *RoleCommand) Update(ctx context.Context, cmd UpdateRoleCmd) error {
 	r, err := c.roles.Get(ctx, cmd.RoleID)
 	if err != nil {
@@ -112,24 +115,25 @@ func (c *RoleCommand) Update(ctx context.Context, cmd UpdateRoleCmd) error {
 	})
 }
 
-// AssignRoleMenusCmd 分配菜单命令。
+// AssignRoleMenusCmd is the assign-menus command.
 type AssignRoleMenusCmd struct {
 	TenantID int64
 	RoleID   int64
 	MenuIDs  []int64
 }
 
-// AssignMenus 分配菜单（重建 role_menu + 派生 casbin p 行）。
+// AssignMenus assigns menus (rebuilds role_menu and derives the casbin p rows).
 //
-// 内置角色不派生 p 行——该判断在聚合内（Role.AssignMenus），
-// 保证「超管不被菜单分配锁死」这条规则无法在应用层被绕过。
+// Built-in roles derive no p rows — that decision lives inside the aggregate
+// (Role.AssignMenus), ensuring the rule "the super admin is never locked
+// down by menu assignment" cannot be bypassed at the application layer.
 func (c *RoleCommand) AssignMenus(ctx context.Context, cmd AssignRoleMenusCmd) error {
 	r, err := c.roles.Get(ctx, cmd.RoleID)
 	if err != nil {
 		return err
 	}
 
-	// 取权限标识而非加载完整菜单聚合：写路径上的高频操作。
+	// Fetch permission identifiers instead of loading the full menu aggregates: a frequent operation on the write path.
 	perms, err := c.roles.PermissionsByMenuIDs(ctx, cmd.MenuIDs)
 	if err != nil {
 		return err
@@ -143,16 +147,17 @@ func (c *RoleCommand) AssignMenus(ctx context.Context, cmd AssignRoleMenusCmd) e
 	})
 }
 
-// DeleteRoleCmd 删除角色命令。
+// DeleteRoleCmd is the delete-role command.
 type DeleteRoleCmd struct {
 	TenantID int64
 	RoleID   int64
 }
 
-// DeleteRole 软删角色（内置角色拒绝）。
+// DeleteRole soft-deletes a role (built-in roles are rejected).
 //
-// 角色行 + user_role + role_menu 在同一事务内清理，
-// casbin p 行与 g 行清理由 RoleDeleted 事件的投影器完成。
+// The role row, user_role, and role_menu rows are cleaned up in the same
+// transaction; casbin p- and g-row cleanup is done by the projector for the
+// RoleDeleted event.
 func (c *RoleCommand) Delete(ctx context.Context, cmd DeleteRoleCmd) error {
 	r, err := c.roles.Get(ctx, cmd.RoleID)
 	if err != nil {
@@ -168,7 +173,7 @@ func (c *RoleCommand) Delete(ctx context.Context, cmd DeleteRoleCmd) error {
 	})
 }
 
-// OrgCommand 部门与岗位写侧命令处理器。
+// OrgCommand is the write-side command handler for departments and posts.
 type OrgCommand struct {
 	depts iam.DeptRepository
 	posts iam.PostRepository
@@ -177,15 +182,15 @@ type OrgCommand struct {
 	now   shared.NowFunc
 }
 
-// NewOrgCommand 构造组织架构命令处理器。
+// NewOrgCommand constructs the org-structure command handler.
 func NewOrgCommand(depts iam.DeptRepository, posts iam.PostRepository, menus iam.MenuRepository, txs shared.TxManager) *OrgCommand {
 	return &OrgCommand{depts: depts, posts: posts, menus: menus, txs: txs, now: shared.SystemNow}
 }
 
-// SaveDeptCmd 保存部门命令（创建与更新合一：code 不可变，故可合流）。
+// SaveDeptCmd is the save-department command (create and update are unified: the code is immutable, so they can share one path).
 type SaveDeptCmd struct {
 	TenantID     int64
-	DeptID       int64 // 0 表示创建
+	DeptID       int64 // 0 means create
 	ParentID     int64
 	Name         string
 	Sort         int
@@ -195,7 +200,7 @@ type SaveDeptCmd struct {
 	Status       int8
 }
 
-// SaveDept 创建或更新部门。
+// SaveDept creates or updates a department.
 func (c *OrgCommand) SaveDept(ctx context.Context, cmd SaveDeptCmd) error {
 	if cmd.DeptID == 0 {
 		d := &iam.Dept{
@@ -237,13 +242,13 @@ func (c *OrgCommand) SaveDept(ctx context.Context, cmd SaveDeptCmd) error {
 	})
 }
 
-// DeleteDeptCmd 删除部门命令。
+// DeleteDeptCmd is the delete-department command.
 type DeleteDeptCmd struct {
 	TenantID int64
 	DeptID   int64
 }
 
-// DeleteDept 软删部门（有下级或成员时拒绝）。
+// DeleteDept soft-deletes a department (rejected when it has children or members).
 func (c *OrgCommand) DeleteDept(ctx context.Context, cmd DeleteDeptCmd) error {
 	d, err := c.depts.Get(ctx, cmd.DeptID)
 	if err != nil {
@@ -254,24 +259,24 @@ func (c *OrgCommand) DeleteDept(ctx context.Context, cmd DeleteDeptCmd) error {
 		return err
 	}
 	if hasChildren {
-		return errParam("存在下级部门，不能删除")
+		return errParam("department has children and cannot be deleted")
 	}
 	hasMembers, err := c.depts.HasMembers(ctx, d.ID)
 	if err != nil {
 		return err
 	}
 	if hasMembers {
-		return errParam("部门下存在用户，不能删除")
+		return errParam("department has users and cannot be deleted")
 	}
 	return c.txs.WithinTx(ctx, func(ctx context.Context) error {
 		return c.depts.Delete(ctx, d, d.Name)
 	})
 }
 
-// SavePostCmd 保存岗位命令。
+// SavePostCmd is the save-post command.
 type SavePostCmd struct {
 	TenantID int64
-	PostID   int64 // 0 表示创建
+	PostID   int64 // 0 means create
 	Code     string
 	Name     string
 	Sort     int
@@ -279,7 +284,7 @@ type SavePostCmd struct {
 	Remark   string
 }
 
-// SavePost 创建或更新岗位。
+// SavePost creates or updates a post.
 func (c *OrgCommand) SavePost(ctx context.Context, cmd SavePostCmd) error {
 	if cmd.PostID == 0 {
 		exists, err := c.posts.CodeExists(ctx, cmd.Code, 0)
@@ -287,7 +292,7 @@ func (c *OrgCommand) SavePost(ctx context.Context, cmd SavePostCmd) error {
 			return err
 		}
 		if exists {
-			return errParam("岗位编码已存在")
+			return errParam("post code already exists")
 		}
 		p := &iam.Post{
 			TenantID: cmd.TenantID,
@@ -321,13 +326,13 @@ func (c *OrgCommand) SavePost(ctx context.Context, cmd SavePostCmd) error {
 	})
 }
 
-// DeletePostCmd 删除岗位命令。
+// DeletePostCmd is the delete-post command.
 type DeletePostCmd struct {
 	TenantID int64
 	PostID   int64
 }
 
-// DeletePost 软删岗位。
+// DeletePost soft-deletes a post.
 func (c *OrgCommand) DeletePost(ctx context.Context, cmd DeletePostCmd) error {
 	p, err := c.posts.Get(ctx, cmd.PostID)
 	if err != nil {
@@ -338,9 +343,9 @@ func (c *OrgCommand) DeletePost(ctx context.Context, cmd DeletePostCmd) error {
 	})
 }
 
-// SaveMenuCmd 保存菜单命令。
+// SaveMenuCmd is the save-menu command.
 type SaveMenuCmd struct {
-	MenuID        int64 // 0 表示创建
+	MenuID        int64 // 0 means create
 	Name          string
 	Permission    string
 	Type          int8
@@ -357,7 +362,7 @@ type SaveMenuCmd struct {
 	Remark        string
 }
 
-// SaveMenu 创建或更新菜单。
+// SaveMenu creates or updates a menu.
 func (c *OrgCommand) SaveMenu(ctx context.Context, cmd SaveMenuCmd) error {
 	if cmd.MenuID == 0 {
 		m := &iam.Menu{
@@ -387,7 +392,7 @@ func (c *OrgCommand) SaveMenu(ctx context.Context, cmd SaveMenuCmd) error {
 	if err != nil {
 		return err
 	}
-	// 防环：不可挂到自己的子树下（改造前缺此校验，有死循环风险）。
+	// Cycle prevention: a menu cannot be attached under its own subtree (this check was missing before the refactor, risking an infinite loop).
 	all, err := c.menus.ListAll(ctx, iam.MenuFilter{})
 	if err != nil {
 		return err
@@ -416,12 +421,12 @@ func (c *OrgCommand) SaveMenu(ctx context.Context, cmd SaveMenuCmd) error {
 	})
 }
 
-// DeleteMenuCmd 删除菜单命令。
+// DeleteMenuCmd is the delete-menu command.
 type DeleteMenuCmd struct {
 	MenuID int64
 }
 
-// DeleteMenu 删除菜单。
+// DeleteMenu deletes a menu.
 func (c *OrgCommand) DeleteMenu(ctx context.Context, cmd DeleteMenuCmd) error {
 	return c.txs.WithinTx(ctx, func(ctx context.Context) error {
 		return c.menus.Delete(ctx, cmd.MenuID)

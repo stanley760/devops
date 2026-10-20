@@ -1,7 +1,8 @@
-// gRPC 层发号性能基准：bufconn 进程内回环，覆盖 protobuf 编解码 +
-// gRPC 栈开销。与 domain/idgen 的 bench_test.go 对照，可分离出传输成本。
+// gRPC layer ID generation benchmark: bufconn in-process loopback, covering protobuf
+// codec + gRPC stack overhead. Compared with domain/idgen's bench_test.go, it isolates
+// the transport cost.
 //
-// 运行：
+// Run:
 //
 //	go test ./internal/interfaces/grpc -run '^$' -bench . -benchmem
 package grpc
@@ -24,19 +25,20 @@ import (
 	"github.com/stanley760/devops/devops-id/pkg/idgenpb"
 )
 
-// quietLogsOnce 保证只在首个基准初始化时屏蔽一次日志。
+// quietLogsOnce ensures logs are silenced only once, at the first benchmark's initialization.
 var quietLogsOnce sync.Once
 
-// quietLogs 屏蔽发号器 info 日志：每轮 b.N 标定都会重建 Manager，
-// ready/closed 会刷屏污染基准输出。仅基准路径调用。
+// quietLogs silences the generator's info logs: each b.N calibration round rebuilds the
+// Manager, and ready/closed messages would flood the benchmark output. Benchmark path only.
 func quietLogs() {
 	quietLogsOnce.Do(func() {
 		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	})
 }
 
-// newBenchClient 启动进程内 IdGen 服务并返回客户端。
-// Manager 走本地模式（无 etcd），让基准只测发号与传输栈，不含协调 I/O。
+// newBenchClient starts an in-process IdGen service and returns a client.
+// The Manager runs in local mode (no etcd) so the benchmark only measures ID generation
+// and the transport stack, excluding coordination I/O.
 func newBenchClient(b *testing.B) idgenpb.IdGenClient {
 	b.Helper()
 	quietLogs()
@@ -66,12 +68,12 @@ func newBenchClient(b *testing.B) idgenpb.IdGenClient {
 	return idgenpb.NewIdGenClient(conn)
 }
 
-// BenchmarkGRPCNextSerial 串行 Next RPC：单次调用端到端成本。
+// BenchmarkGRPCNextSerial serial Next RPCs: end-to-end cost of a single call.
 func BenchmarkGRPCNextSerial(b *testing.B) {
 	client := newBenchClient(b)
 	ctx := context.Background()
 	req := &idgenpb.NextRequest{BizTag: "bench"}
-	// 预热：触发 biz_tag 懒初始化并建立 HTTP/2 流量。
+	// Warm-up: trigger biz_tag lazy initialization and establish HTTP/2 traffic.
 	if _, err := client.Next(ctx, req); err != nil {
 		b.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func BenchmarkGRPCNextSerial(b *testing.B) {
 	}
 }
 
-// BenchmarkGRPCNextParallel 并行 Next RPC：传输栈 + 服务端锁竞争的合成吞吐。
+// BenchmarkGRPCNextParallel parallel Next RPCs: synthetic throughput of the transport stack plus server-side lock contention.
 func BenchmarkGRPCNextParallel(b *testing.B) {
 	client := newBenchClient(b)
 	ctx := context.Background()
@@ -104,7 +106,7 @@ func BenchmarkGRPCNextParallel(b *testing.B) {
 	})
 }
 
-// BenchmarkGRPCBatchNext 批量 RPC：摊掉单次调用成本后接近领域层天花板。
+// BenchmarkGRPCBatchNext batch RPCs: after amortizing the per-call cost, close to the domain layer's ceiling.
 func BenchmarkGRPCBatchNext(b *testing.B) {
 	for _, size := range []int{100, 1000} {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {

@@ -1,4 +1,4 @@
-# 构建产物
+# Build artifacts
 *.exe
 *.exe~
 *.dll
@@ -7,34 +7,34 @@
 dist/
 /server
 .*/
-# 测试与覆盖率
+# Tests and coverage
 *.test
 *.out
 coverage.txt
 
-# 依赖备份文件
+# Dependency backup files
 *.bak
 
-# 日志
+# Logs
 logs/
 tmp/
-# 本地开发脚本运行产物（dev.sh 后台服务 pid/日志、watch 状态文件）
+# Local dev script outputs (dev.sh background service pid/logs, watch state files)
 deploy/.dev-logs/
 
-# 运行时状态（snowflake worker 槽位/发号水位缓存）
+# Runtime state (snowflake worker slots / ID watermark cache)
 data/
 
-# 编辑器 / IDE
+# Editors / IDEs
 .idea/
 .vscode/
 
-# 操作系统
+# Operating systems
 .DS_Store
 Thumbs.db
 
 
-# 本地开发工具（Redis 等）
+# Local dev tools (Redis, etc.)
 .tools/
 
-# 本地环境变量（含 APP_ENV / NACOS_REGISTER_IP 等，不提交）
+# Local environment variables (incl. APP_ENV / NACOS_REGISTER_IP, etc.; not committed)
 **/config/.env

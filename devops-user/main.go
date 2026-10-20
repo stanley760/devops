@@ -13,25 +13,29 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/cmd"
 )
 
-// banner 在编译期由 //go:embed 从 banner.txt 嵌入，运行时无需读文件；
-// 镜像里也不必携带 banner.txt（多阶段构建只 COPY 二进制即可）。
+// banner is embedded from banner.txt at compile time by //go:embed, so no file
+// read is needed at runtime; the image does not need to ship banner.txt either
+// (a multi-stage build only has to COPY the binary).
 //
 //go:embed banner.txt
 var banner string
 
-// ui 用于打印 banner 与版本信息这类“程序输出”。
-// 独立 log 实例（Flags=0、输出到 color.Output），多行 banner 不被时间前缀顶歪，
-// 终端正常显色、重定向自动去转义。
+// ui prints program output such as the banner and version info.
+// It is a standalone log instance (Flags=0, output to color.Output): multi-line
+// banners are not pushed askew by a timestamp prefix, the terminal gets proper
+// colors, and redirection strips escape codes automatically.
 var ui = log.New(color.Output, "", 0)
 
 func main() {
-	// 提前加载 config/.env：resolveVersion 依赖 APP_VERSION，
-	// 而 config.Init（cobra.OnInitialize）要等到 cmd.Execute 才执行。
-	// godotenv.Load 不覆盖已设置的 OS 环境变量，CI/容器注入安全。
+	// Load config/.env early: ResolveVersion depends on APP_VERSION, while
+	// config.Init (cobra.OnInitialize) only runs once cmd.Execute is called.
+	// godotenv.Load does not override already-set OS environment variables,
+	// so CI/container injection is safe.
 	_ = godotenv.Load("config/.env")
 
-	// huma 错误信封装配：必须在任何 huma 请求处理前完成，
-	// 覆盖 huma.NewError 使 4xx/5xx 输出 BaseResponse 信封而非 problem+json。
+	// huma error envelope wiring: must complete before any huma request is
+	// handled. It overrides huma.NewError so 4xx/5xx responses emit the
+	// BaseResponse envelope instead of problem+json.
 	humaerr.Install()
 
 	ver := utils.ResolveVersion()

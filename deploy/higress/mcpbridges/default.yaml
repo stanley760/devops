@@ -12,9 +12,9 @@ spec:
       nacosNamespaceId: public
       nacosGroups:
         - DEVOPS_GROUP
-    # 限流插件（cluster-key-rate-limit）的 Redis：dns 服务来源。
-    # protocol 用 tcp——McpBridge 2.2.3 不认 redis 协议（报 invalid protocol:redis）。
-    # domain 必须是带点的完整域名，对应 compose 里 redis 的网络别名。
+    # Redis for the rate-limit plugin (cluster-key-rate-limit): dns service source.
+    # protocol uses tcp — McpBridge 2.2.3 does not recognize the redis protocol (reports invalid protocol:redis).
+    # domain must be a full dotted domain name, corresponding to the redis network alias in compose.
     - name: devops-redis
       type: dns
       protocol: tcp

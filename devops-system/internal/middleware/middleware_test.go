@@ -28,12 +28,12 @@ import (
 	"time"
 )
 
-// testEnv 构建共享安全实现支撑的中间件测试环境（huma 版）。
-// 返回 auth 门面、casbin authorizer、底层 sqlite 连接（租户表种子用）。
+// testEnv builds the middleware test environment backed by shared security implementations (huma version).
+// Returns the auth facade, casbin authorizer, and the underlying sqlite connection (for tenant table seeding).
 func testEnv(t *testing.T) (*auth.Manager, securityauthz.Authorizer, *gorm.DB, func()) {
 	t.Helper()
 
-	// Redis 会话存储
+	// Redis session store
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func testEnv(t *testing.T) (*auth.Manager, securityauthz.Authorizer, *gorm.DB, f
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	sessions := securitysession.NewRedisClientStore(client, 24*time.Hour)
 
-	// RS256 共享 JWT 管理器
+	// RS256 shared JWT manager
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -67,9 +67,10 @@ func testEnv(t *testing.T) (*auth.Manager, securityauthz.Authorizer, *gorm.DB, f
 		t.Fatal(err)
 	}
 
-	// 共享 Casbin authorizer（authz 门面持有）。
-	// 库名带 t.Name() 隔离：cache=shared 的内存库在同一进程内同名共享，
-	// 固定名会让不同用例的种子数据互相污染（如租户状态断言）。
+	// shared Casbin authorizer (held by the authz facade).
+	// the DB name carries t.Name() for isolation: a cache=shared in-memory DB with the same name
+	// is shared within the same process, and a fixed name would let different cases' seed data
+	// pollute each other (e.g. tenant status assertions).
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func testEnv(t *testing.T) (*auth.Manager, securityauthz.Authorizer, *gorm.DB, f
 	return mgr, authorizer, db, cleanup
 }
 
-// login 用门面签发真实 token（RS256 + 会话）。
+// login signs a real token (RS256 + session) with the facade.
 func login(t *testing.T, m *auth.Manager, uid int64, tid int64) (*auth.AccessClaims, string) {
 	t.Helper()
 	access, _, _, err := m.Issue(context.Background(), uid, "alice", tid, "tenant-x")
@@ -103,7 +104,7 @@ func login(t *testing.T, m *auth.Manager, uid int64, tid int64) (*auth.AccessCla
 	return claims, access
 }
 
-// newMWAPI 组装挂载指定中间件的 humatest API（与生产 apidoc.New 对齐：禁用 $schema 注入）。
+// newMWAPI assembles a humatest API with the specified middleware mounted (aligned with production apidoc.New: $schema injection disabled).
 func newMWAPI(t *testing.T, m ...func(huma.Context, func(huma.Context))) humatest.TestAPI {
 	t.Helper()
 	cfg := huma.DefaultConfig("mw-test", "v1")
@@ -119,7 +120,7 @@ func newMWAPI(t *testing.T, m ...func(huma.Context, func(huma.Context))) humates
 	return api
 }
 
-// perform 带可选 Bearer 头发请求。
+// perform makes a request with an optional Bearer header.
 func perform(t *testing.T, api humatest.TestAPI, token string) int {
 	t.Helper()
 	if token == "" {
@@ -135,29 +136,29 @@ func TestHumaJWTMiddlewareRegressions(t *testing.T) {
 	kit := NewKit(m, Deps{Authorizer: authorizer})
 	api := newMWAPI(t, kit.JWT())
 
-	// 缺失 Authorization 头 → 401 + 原文案信封
+	// missing Authorization header → 401 + original copy envelope
 	resp := api.Get("/")
-	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "未登录或会话已过期") {
+	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "not logged in or session expired") {
 		t.Fatalf("missing header: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 非法 token → 401 + 原文案
+	// invalid token → 401 + original copy
 	resp = api.Get("/", "Authorization: Bearer garbage-token")
-	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "未登录或会话已过期") {
+	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "not logged in or session expired") {
 		t.Fatalf("bad token: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 有效 token → 204（中间件放行，handler 执行）
+	// valid token → 204 (middleware passes through, handler executes)
 	_, access := login(t, m, 42, 7)
 	if code := perform(t, api, access); code != http.StatusNoContent {
 		t.Fatalf("valid token: %d", code)
 	}
 
-	// 会话被撤销（logout/踢下线）→ 401 + 失效文案
+	// session revoked (logout/kick offline) → 401 + invalid copy
 	claims, access2 := login(t, m, 42, 7)
 	m.Logout(context.Background(), claims)
 	resp = api.Get("/", "Authorization: Bearer "+access2)
-	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "登录状态已失效，请重新登录") {
+	if resp.Code != http.StatusUnauthorized || !strings.Contains(resp.Body.String(), "login state invalid, please log in again") {
 		t.Fatalf("revoked session: %d %s", resp.Code, resp.Body.String())
 	}
 }
@@ -195,7 +196,7 @@ func TestHumaPermMiddlewareRegressions(t *testing.T) {
 	m, authorizer, _, cleanup := testEnv(t)
 	defer cleanup()
 
-	// 用户 42 在租户 7 无权限；用户 43 持 editor 角色（system:user:query）
+	// user 42 has no permission in tenant 7; user 43 holds the editor role (system:user:query)
 	if err := authz.RebuildRolePolicies("editor", 7, []string{"system:user:query"}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,14 +207,14 @@ func TestHumaPermMiddlewareRegressions(t *testing.T) {
 	kit := NewKit(m, Deps{Authorizer: authorizer})
 	api := newMWAPI(t, kit.JWT(), kit.Perm("system:user:query"))
 
-	// 无权限 → 403 + 原文案
+	// no permission → 403 + original copy
 	_, access42 := login(t, m, 42, 7)
 	resp := api.Get("/", "Authorization: Bearer "+access42)
-	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "无操作权限") {
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "no operation permission") {
 		t.Fatalf("denied: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 持权限 → 204
+	// with permission → 204
 	_, access43 := login(t, m, 43, 7)
 	resp = api.Get("/", "Authorization: Bearer "+access43)
 	if resp.Code != http.StatusNoContent {
@@ -225,7 +226,7 @@ func TestHumaPlatformPermMiddlewareRegressions(t *testing.T) {
 	m, authorizer, _, cleanup := testEnv(t)
 	defer cleanup()
 
-	// 用户 44 为平台管理员；45 仅租户角色
+	// user 44 is a platform admin; 45 only a tenant role
 	if err := authz.SeedPolicies(7, 44); err != nil {
 		t.Fatal(err)
 	}
@@ -236,14 +237,14 @@ func TestHumaPlatformPermMiddlewareRegressions(t *testing.T) {
 	kit := NewKit(m, Deps{Authorizer: authorizer})
 	api := newMWAPI(t, kit.JWT(), kit.Plat("platform:tenant:query"))
 
-	// 非平台管理员 → 403 + 原文案（g2 门禁在 Enforce 之前）
+	// non-platform admin → 403 + original copy (g2 gate is before Enforce)
 	_, access45 := login(t, m, 45, 7)
 	resp := api.Get("/", "Authorization: Bearer "+access45)
-	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "需要平台管理员权限") {
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "platform administrator permission required") {
 		t.Fatalf("non-admin: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 平台管理员 → 204
+	// platform admin → 204
 	_, access44 := login(t, m, 44, 7)
 	resp = api.Get("/", "Authorization: Bearer "+access44)
 	if resp.Code != http.StatusNoContent {
@@ -251,7 +252,7 @@ func TestHumaPlatformPermMiddlewareRegressions(t *testing.T) {
 	}
 }
 
-// seedTenants 在 sqlite 中建租户表并种入三态租户：7 正常、8 停用、9 过期。
+// seedTenants creates the tenant table in sqlite and seeds three-state tenants: 7 normal, 8 disabled, 9 expired.
 func seedTenants(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	if err := db.AutoMigrate(&model.Tenant{}); err != nil {
@@ -268,8 +269,8 @@ func seedTenants(t *testing.T, db *gorm.DB) {
 	}
 }
 
-// TestHumaTenantMiddlewareStates 租户可用性三态回归：正常放行、停用/过期 403 信封；
-// 顺带验证 Redis 缓存命中路径（正常租户二次请求走缓存）。
+// TestHumaTenantMiddlewareStates: tenant usability three-state regression: normal passes, disabled/expired 403 envelope;
+// also verifies the Redis cache hit path (a second request for a normal tenant hits the cache).
 func TestHumaTenantMiddlewareStates(t *testing.T) {
 	m, authorizer, db, cleanup := testEnv(t)
 	defer cleanup()
@@ -279,31 +280,31 @@ func TestHumaTenantMiddlewareStates(t *testing.T) {
 	kit := NewKit(m, Deps{TenantUsable: newTenantChecker(db, c), Authorizer: authorizer})
 	api := newMWAPI(t, kit.JWT(), kit.Tenant())
 
-	// 正常租户 → 204（首次回源查库并写缓存）
+	// normal tenant → 204 (first request queries the DB and writes the cache)
 	_, access7 := login(t, m, 42, 7)
 	if code := perform(t, api, access7); code != http.StatusNoContent {
 		t.Fatalf("usable tenant: %d", code)
 	}
-	// 缓存命中路径：同租户二次请求
+	// cache hit path: a second request for the same tenant
 	if code := perform(t, api, access7); code != http.StatusNoContent {
 		t.Fatalf("usable tenant (cache hit): %d", code)
 	}
 
-	// 停用租户 → 403 + 原文案
+	// disabled tenant → 403 + original copy
 	_, access8 := login(t, m, 42, 8)
 	resp := api.Get("/", "Authorization: Bearer "+access8)
-	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "租户不可用（停用或已过期）") {
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "tenant is unavailable (disabled or expired)") {
 		t.Fatalf("disabled tenant: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 过期租户 → 403 + 原文案
+	// expired tenant → 403 + original copy
 	_, access9 := login(t, m, 42, 9)
 	resp = api.Get("/", "Authorization: Bearer "+access9)
-	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "租户不可用（停用或已过期）") {
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "tenant is unavailable (disabled or expired)") {
 		t.Fatalf("expired tenant: %d %s", resp.Code, resp.Body.String())
 	}
 
-	// 无租户记录（不存在）→ 403
+	// no tenant record (does not exist) → 403
 	_, access99 := login(t, m, 42, 99)
 	resp = api.Get("/", "Authorization: Bearer "+access99)
 	if resp.Code != http.StatusForbidden {

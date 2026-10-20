@@ -1,36 +1,36 @@
-# JWT 认证（C 端 devops-user）—— 与 devops-system 的 jwt-auth-2.0.0.yaml 平行且独立
+# JWT authentication (C-side devops-user) — parallel to and independent from devops-system's jwt-auth-2.0.0.yaml
 #
-# ## 为什么必须是独立插件实例（而非合入 devops-system 那份）
+# ## Why it must be a separate plugin instance (rather than merged into the devops-system one)
 #
-# 两者签发方不同（issuer: devops vs devops-user，kid 也不同），若合进同一个
-# consumers 列表，则两边的 token 都会命中该插件的验签流程：
-#   - consumer 匹配是按 issuer + kid，理论上互不命中；
-#   - 但一旦配置写错（issuer 抄成同一个），就是 B 端 token 能访问 C 端接口，
-#     且**没有任何报错**——这是最危险的一类配置漂移。
-# 独立文件 + 独立 plugin-server 路径，也让 matchRules 能分别控制生效范围。
+# The two have different signers (issuer: devops vs devops-user, and different kids). If merged into one
+# consumers list, tokens from both sides would go through this plugin's verification:
+#   - consumer matching is by issuer + kid, so in theory they would not match each other;
+#   - but once the config is written wrong (the issuer copied as the same value), a B-side token could
+#     access C-side endpoints, with **no error at all** — the most dangerous kind of config drift.
+# Separate files + separate plugin-server paths also let matchRules control the effective scope separately.
 #
-# ## 本插件的三个不可改项（都踩过坑）
+# ## Three must-not-change items in this plugin (all have caused pitfalls)
 #
-# 1. `metadata.name` **不能叫 jwt-auth**：pilot 会走 Istio 原生分支
-#    （日志出现 `--tokenManagerPlugin=""` 与 `JwtRule: ""`），而 all-in-one 2.2.3
-#    既不识别 security.istio.io 资源、envoy 也无 jwt_authn filter，一律不加载。
-#    这里用 `jwt-auth-user-2.0.0`。
-# 2. `url` **必须用本地 plugin-server**：`oci://` 需 controller 主动拉取并落盘，
-#    file 后端 + all-in-one 下不触发。与本目录其余插件保持一致。
-# 3. `matchRules.config` 里**不能内联 consumers 数组**（pilot 解析失败并静默跳过整个
-#    插件，无任何日志）；也不能只写 `{}`（会整体替换 defaultConfig，真 token 也被
-#    403 Access Denied）。必须带 allow 指回 defaultConfig 的 consumer。
+# 1. `metadata.name` **cannot be jwt-auth**: pilot would take the Istio native branch
+#    (logs show `--tokenManagerPlugin=""` and `JwtRule: ""`), and all-in-one 2.2.3
+#    recognizes neither security.istio.io resources nor an envoy jwt_authn filter, so nothing loads.
+#    Here it is named `jwt-auth-user-2.0.0`.
+# 2. `url` **must use the local plugin-server**: `oci://` requires the controller to actively pull and persist,
+#    which does not trigger under the file backend + all-in-one. Consistent with the other plugins in this directory.
+# 3. **The consumers array cannot be inlined in `matchRules.config`** (pilot fails to parse and silently skips the whole
+#    plugin, with no logs); nor can it be just `{}` (that replaces defaultConfig entirely, so even real tokens get
+#    403 Access Denied). It must carry allow pointing back to the consumer in defaultConfig.
 #
-# 验证插件是否真的加载：
+# To verify the plugin is really loaded:
 #   docker compose -f deploy/docker-compose-dev.yml exec higress \
 #     sh -c 'grep -c "fetching image plugins/jwt-auth" /var/log/higress/gateway.log'
-# 或看无 token 请求是否返回**纯文本** `Jwt is missing`
-# （信封格式 {"code":401,...} 说明是应用层，插件没生效）。
+# Or check whether a token-less request returns the **plain text** `Jwt is missing`
+# (the envelope format {"code":401,...} means it is the application layer; the plugin is not in effect).
 #
-# 公钥来源：devops-user/config/devops-user-dev.yaml 的 jwt.signing_key
-# （PKCS#8 RSA 2048）导出 n，e=65537(AQAB)，kid=devops-user-rs256-1、
-# iss=devops-user 与签发方严格一致，并做「私钥签名→公钥验签」闭环自校验
-# （Verified OK）。生产换密钥后必须重新导出本段，否则全量 401。
+# Public key source: the jwt.signing_key in devops-user/config/devops-user-dev.yaml
+# (PKCS#8 RSA 2048) with n exported, e=65537 (AQAB); kid=devops-user-rs256-1 and
+# iss=devops-user match the signer exactly, verified end to end with a "private sign → public verify"
+# closed loop (Verified OK). After a production key rotation this block must be re-exported, otherwise everything returns 401.
 apiVersion: extensions.higress.io/v1alpha1
 kind: WasmPlugin
 metadata:
@@ -42,16 +42,16 @@ metadata:
     higress.io/wasm-plugin-built-in: "true"
 spec:
   url: http://localhost:8002/plugins/jwt-auth/2.0.0/plugin.wasm
-  # 显式写 false：与 matchRules.config 的关系必须钉死在配置里，避免后来者误加 true。
+  # Explicitly false: the relationship with matchRules.config must be pinned in the config to avoid future editors mistakenly adding true.
   defaultConfigDisable: false
   defaultConfig:
-    # ⚠️ 必须为 false：true 会让插件对网关内**所有**路由全局生效，
-    #   包括 devops-user-public 承载的登录/注册 → 用户此时还没有 token → 无人能登录。
+    # ⚠️ Must be false: true makes the plugin apply globally to **all** routes in the gateway,
+    #    including the login/register carried by devops-user-public → the user has no token yet → nobody can log in.
     global_auth: false
     consumers:
       - name: devops-user
-        # 必须与 payload 里的 iss 逐字一致，否则 401 Jwt verification fails。
-        # ⚠️ 不可改成 devops：那会与 B 端 token 互相匹配，造成跨端越权。
+        # Must match the iss in the payload verbatim, otherwise 401 Jwt verification fails.
+        # ⚠️ Must not be changed to devops: that would make it match B-side tokens, causing cross-side privilege escalation.
         issuer: devops-user
         jwks: |
           {
@@ -66,9 +66,9 @@ spec:
               }
             ]
           }
-        # claims → 内部请求头。override 默认 true，客户端伪造同名头会被覆盖。
-        # ⚠️ C 端**刻意不注入 tid/tcode**：devops-user 无租户模型，
-        # 注入租户头反而会诱使后端误以为存在租户上下文。
+        # claims → internal request headers. override defaults to true, so client-forged headers with the same name get overwritten.
+        # ⚠️ The C side **deliberately does not inject tid/tcode**: devops-user has no tenant model,
+        # and injecting tenant headers would instead mislead the backend into thinking a tenant context exists.
         claims_to_headers:
           - claim: uid
             header: X-Jwt-Uid
@@ -78,16 +78,16 @@ spec:
           - name: Authorization
             value_prefix: "Bearer "
         clock_skew_seconds: 60
-        # 必须为 true：后端仍要校验 Redis 会话态（登出/封禁后立即失效），
-        # 不能仅凭网关注入的身份头信任请求。
+        # Must be true: the backend still needs to verify the Redis session state (immediately invalid after logout/ban),
+        # and must not trust requests based solely on the gateway-injected identity headers.
         keep_token: true
-  # ⚠️ ingress 名不带 namespace 前缀（all-in-one file 后端以文件名作资源名）。
+  # ⚠️ The ingress name carries no namespace prefix (the all-in-one file backend uses the filename as the resource name).
   matchRules:
-    # 只挂 C 端主路由；刻意不含 devops-user-public（登录/注册/jwks 必须匿名）。
+    # Mount only on the C-side main route; deliberately excludes devops-user-public (login/register/jwks must be anonymous).
     - ingress:
         - devops-user
-      # 官方明确：同一规则内「鉴权配置」与「认证配置」不可共存。
-      # 故规则内只写 allow，认证配置统一在 defaultConfig。
+      # The docs are explicit: within one rule "authz config" and "authn config" cannot coexist.
+      # So the rule only writes allow; the authn config lives entirely in defaultConfig.
       config:
         allow:
           - devops-user

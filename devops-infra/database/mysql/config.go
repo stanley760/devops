@@ -7,23 +7,23 @@ import (
 	"time"
 )
 
-// Config MySQL 连接配置。这里保留类型别名，
-// 使服务配置继续由 devops-infra/config 统一加载。
+// Config is the MySQL connection config. The type alias is kept here
+// so that service config continues to be loaded uniformly by devops-infra/config.
 type Config = config.MysqlConfig
 
-// normalize 填充默认值并校验必填项，避免把连接错误延迟到拨号阶段。
+// normalize fills in defaults and validates required fields, avoiding deferring connection errors to the dialing stage.
 func normalizeConfig(cfg Config) (Config, error) {
 	if cfg.Host == "" {
-		return cfg, fmt.Errorf("mysql.host 不能为空")
+		return cfg, fmt.Errorf("mysql.host must not be empty")
 	}
 	if cfg.Port <= 0 {
-		return cfg, fmt.Errorf("mysql.port 必须大于 0")
+		return cfg, fmt.Errorf("mysql.port must be greater than 0")
 	}
 	if cfg.Username == "" {
-		return cfg, fmt.Errorf("mysql.username 不能为空")
+		return cfg, fmt.Errorf("mysql.username must not be empty")
 	}
 	if cfg.Database == "" {
-		return cfg, fmt.Errorf("mysql.database 不能为空")
+		return cfg, fmt.Errorf("mysql.database must not be empty")
 	}
 	if cfg.Charset == "" {
 		cfg.Charset = "utf8mb4"
@@ -40,7 +40,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 	return cfg, nil
 }
 
-// dsn 生成 Go MySQL Driver 的 DSN。
+// dsn builds the Go MySQL Driver DSN.
 func configDSN(cfg Config) string {
 	return fmt.Sprintf(
 		"%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
@@ -48,7 +48,7 @@ func configDSN(cfg Config) string {
 	)
 }
 
-// gormLogLevel 解析 GORM 日志级别，空值默认 warn。
+// gormLogLevel parses the GORM log level; empty defaults to warn.
 func configGormLogLevel(cfg Config) logger.LogLevel {
 	switch cfg.LogLevel {
 	case "silent":

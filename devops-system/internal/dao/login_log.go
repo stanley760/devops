@@ -1,4 +1,4 @@
-// 登录审计：写入（service.Auth.login defer 调用）+ 管理端查询/删除/清空。
+// Login audit: write path (invoked via defer in service.Auth.login) + admin query/delete/clean.
 package dao
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// 审计行列宽（与 model.LoginLog gorm tag 对齐；超长截断保行不丢）。
+// Audit column widths (aligned with model.LoginLog gorm tags; overlong values are truncated so rows are never lost).
 const (
 	loginLogMaxUsername  = 30
 	loginLogMaxIP        = 50
@@ -22,11 +22,14 @@ const (
 	loginLogMaxGeo       = 64
 )
 
-// CreateLoginLog 落一行登录审计。尽力而为：审计写入失败不影响登录，
-// 仅 slog 告警（与 TouchLogin 同语义，但审计丢行需要可见性）。
-// 调用方须已注入租户 ctx（TenantPlugin fail-closed，无租户 ctx 会报错并被此处吞掉）。
-// 入参来自请求头（UA/Geo）与请求体（用户名），网关侧无长度约束：落库前按列宽
-// 截断，杜绝 MySQL 严格模式下整行被拒（审计行丢失比截断更不可接受）。
+// CreateLoginLog persists one login audit row. Best-effort: a failed audit write must not
+// break login; it only logs a slog warning (same semantics as TouchLogin, but a lost audit
+// row needs visibility).
+// The caller must have injected a tenant ctx (TenantPlugin is fail-closed; a missing tenant
+// ctx errors out and is swallowed here).
+// Inputs come from request headers (UA/Geo) and the request body (username) with no gateway-side
+// length limits: values are truncated to the column width before persistence to avoid the whole
+// row being rejected under MySQL strict mode (losing the audit row is worse than truncating it).
 func CreateLoginLog(ctx context.Context, log *model.LoginLog) {
 	if log == nil {
 		return
@@ -40,11 +43,11 @@ func CreateLoginLog(ctx context.Context, log *model.LoginLog) {
 	log.GeoIsp = clipRunes(log.GeoIsp, loginLogMaxGeo)
 
 	if err := tenantdb.DB(ctx).Create(log).Error; err != nil {
-		slog.WarnContext(ctx, "登录审计落库失败", "username", log.Username, "err", err)
+		slog.WarnContext(ctx, "failed to persist login audit", "username", log.Username, "err", err)
 	}
 }
 
-// ListLoginLogs 分页查询登录审计（筛选 username/ip/result/时间范围，新行在前）。
+// ListLoginLogs paginates login audit rows (filter by username/ip/result/time range, newest first).
 func ListLoginLogs(ctx context.Context, q types.LoginLogPageQuery) (domain.PageResult[model.LoginLog], error) {
 	db := tenantdb.DB(ctx).Model(&model.LoginLog{})
 	if q.Username != "" {
@@ -68,13 +71,13 @@ func ListLoginLogs(ctx context.Context, q types.LoginLogPageQuery) (domain.PageR
 		domain.PageParam{PageNum: q.PageNum, PageSize: q.PageSize},
 	)
 	if err != nil {
-		return domain.PageResult[model.LoginLog]{}, errs.Wrap(err, errs.CodeInternal, "查询登录审计列表失败")
+		return domain.PageResult[model.LoginLog]{}, errs.Wrap(err, errs.CodeInternal, "failed to query login audit list")
 	}
 	return page, nil
 }
 
-// DeleteLoginLogs 批量物理删除审计行（tenant_id 由 TenantPlugin 注入，跨租户 ID 不可达）。
-// 返回实际删除行数。
+// DeleteLoginLogs batch-deletes audit rows (tenant_id is injected by TenantPlugin, so cross-tenant IDs are unreachable).
+// Returns the number of rows actually deleted.
 func DeleteLoginLogs(ctx context.Context, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -82,13 +85,13 @@ func DeleteLoginLogs(ctx context.Context, ids []int64) (int64, error) {
 	res := tenantdb.DB(ctx).Unscoped().
 		Where("id IN ?", ids).Delete(&model.LoginLog{})
 	if res.Error != nil {
-		return 0, errs.Wrap(res.Error, errs.CodeInternal, "删除登录审计失败")
+		return 0, errs.Wrap(res.Error, errs.CodeInternal, "failed to delete login audit rows")
 	}
 	return res.RowsAffected, nil
 }
 
-// CleanLoginLogs 清空本租户全部审计行（运维留存量管控入口），返回删除行数。
-// 物理删除：审计行无软删语义，留下 deleted_at 行只会让表继续膨胀。
+// CleanLoginLogs deletes all audit rows of the current tenant (ops retention-control entry point), returning the deleted row count.
+// Physical delete: audit rows have no soft-delete semantics; keeping deleted_at rows would only keep the table growing.
 func CleanLoginLogs(ctx context.Context) (int64, error) {
 	tid, err := tenantOf(ctx)
 	if err != nil {
@@ -97,13 +100,14 @@ func CleanLoginLogs(ctx context.Context) (int64, error) {
 	res := tenantdb.DB(ctx).Unscoped().
 		Where("tenant_id = ?", tid).Delete(&model.LoginLog{})
 	if res.Error != nil {
-		return 0, errs.Wrap(res.Error, errs.CodeInternal, "清空登录审计失败")
+		return 0, errs.Wrap(res.Error, errs.CodeInternal, "failed to clean login audit rows")
 	}
 	return res.RowsAffected, nil
 }
 
-// clipRunes 按字符数截断（MySQL varchar 按字符计长；按字节截会截出非法 UTF-8，
-// 中文归属地如「黑龙江省」正是高风险场景）。len(s) 字节数不超 n 时必不超 n 字符，快路径直接返回。
+// clipRunes truncates by rune count (MySQL varchar lengths count characters; byte-wise
+// truncation would cut invalid UTF-8 — Chinese place names like "黑龙江省" (Heilongjiang Province) are exactly the
+// high-risk case). If len(s) bytes is already within n, n characters is guaranteed, so the fast path returns directly.
 func clipRunes(s string, n int) string {
 	if len(s) <= n {
 		return s

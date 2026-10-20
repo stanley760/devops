@@ -1,4 +1,4 @@
-// Package service 业务逻辑层：认证（登录/刷新/登出/用户信息/个人中心）。
+// Package service is the business logic layer: authentication (login/refresh/logout/user info/profile).
 package service
 
 import (
@@ -20,14 +20,15 @@ import (
 	"time"
 )
 
-// loginCounter 业务指标：登录尝试计数（auth_login_total）。
-// 标签均为有界集：result=success|failure，code=失败业务码（成功恒 200）。
-// 惰性创建：首次登录时全局 MeterProvider 已由 observability.Init 装配完毕；
-// 未初始化（单测/探针）自动落到 noop 仪表。
+// loginCounter business metric: login attempt count (auth_login_total).
+// All labels are bounded sets: result=success|failure, code=failure business code (always 200 on success).
+// Lazily created: by the time the first login happens, the global MeterProvider
+// has been assembled by observability.Init; when uninitialized (unit tests/probes)
+// it falls back to the noop meter automatically.
 var loginCounter = sync.OnceValue(func() metric.Int64Counter {
 	c, err := otel.Meter("github.com/stanley760/devops/devops-system/service").Int64Counter(
 		"auth_login",
-		metric.WithDescription("登录尝试计数；result=success|failure，code 为失败业务码（成功=200）"),
+		metric.WithDescription("login attempt count; result=success|failure, code is the failure business code (200 on success)"),
 	)
 	if err != nil {
 		otel.Handle(err)
@@ -35,7 +36,7 @@ var loginCounter = sync.OnceValue(func() metric.Int64Counter {
 	return c
 })
 
-// loginResultAttr 登录结果标签值。
+// loginResultAttr holds the login result label value.
 func loginResultAttr(err error) attribute.KeyValue {
 	if err != nil {
 		return attribute.String("result", "failure")
@@ -43,14 +44,17 @@ func loginResultAttr(err error) attribute.KeyValue {
 	return attribute.String("result", "success")
 }
 
-// loginCodeAttr 失败原因码：BizError 携带的有界业务码，非 BizError 按 500 归类。
-// 失败的具体细节（密码错误/租户停用/过期等）走访问日志与 slog，不进指标标签控制基数。
+// loginCodeAttr failure reason code: the bounded business code carried by a
+// BizError; non-BizError failures are classified as 500. The specific failure
+// details (wrong password/tenant disabled/expired, etc.) go to the access log
+// and slog, never into metric labels, to keep label cardinality in check.
 func loginCodeAttr(err error) attribute.KeyValue {
 	return attribute.Int("code", loginErrCode(err))
 }
 
-// loginErrCode 登录结果业务码（成功 200；失败取 BizError 的 4xx/5xx，非业务错误按 500）。
-// 指标标签与 t_system_login_log.code 同源。
+// loginErrCode login result business code (200 on success; on failure the
+// BizError's 4xx/5xx, or 500 for non-business errors).
+// The metric label shares its source with t_system_login_log.code.
 func loginErrCode(err error) int {
 	if err == nil {
 		return errs.CodeOK
@@ -62,9 +66,11 @@ func loginErrCode(err error) int {
 	return errs.CodeInternal
 }
 
-// LoginMeta 登录审计元数据：请求侧解析（withClientMeta 中间件注入 ctx），
-// 随登录写入 t_system_login_log。Geo 字段来自 higress geo-ip 插件注入的
-// X-Higress-Geo-* 头（未启用插件时为空，内网 IP 为「内网IP」）。
+// LoginMeta login audit metadata: parsed on the request side (injected into the
+// ctx by the withClientMeta middleware), persisted to t_system_login_log with
+// the login record. The Geo fields come from the X-Higress-Geo-* headers
+// injected by the higress geo-ip plugin (empty when the plugin is disabled;
+// an intranet IP yields the literal "内网IP").
 type LoginMeta struct {
 	IP          string
 	UserAgent   string
@@ -74,27 +80,30 @@ type LoginMeta struct {
 	GeoIsp      string
 }
 
-// Auth 认证服务。
+// Auth is the authentication service.
 type Auth struct {
 	cfg   config.Config
 	authM *auth.Manager
 }
 
-// NewAuth 创建认证服务。
+// NewAuth creates the authentication service.
 func NewAuth(cfg config.Config, authM *auth.Manager) *Auth {
 	return &Auth{cfg: cfg, authM: authM}
 }
 
-// Login 登录：租户校验（存在/停用/过期）→ 用户校验（密码/停用）→ 签发双 token。
-// 业务指标：无论成败记一次 auth_login_total{result, code}，指标故障不影响登录。
+// Login: tenant validation (exists/disabled/expired) → user validation
+// (password/disabled) → issue a token pair.
+// Business metric: one auth_login_total{result, code} is recorded regardless of
+// the outcome; metric failures never affect the login itself.
 func (s *Auth) Login(ctx context.Context, req types.LoginReq, meta LoginMeta) (*types.LoginResp, error) {
 	resp, err := s.login(ctx, req, meta)
 	loginCounter().Add(ctx, 1, metric.WithAttributes(loginResultAttr(err), loginCodeAttr(err)))
 	return resp, err
 }
 
-// login 登录主流程。defer 落一行登录审计（t_system_login_log）：闭包捕获的 ctx
-// 是租户注入后的富化 ctx、err 是最终结果，覆盖全部出口（含失败路径）。
+// login is the main login flow. A deferred call writes one login audit row
+// (t_system_login_log): the closure captures the tenant-enriched ctx and the
+// final err, covering every exit (including failure paths).
 func (s *Auth) login(ctx context.Context, req types.LoginReq, meta LoginMeta) (resp *types.LoginResp, err error) {
 	audit := &model.LoginLog{
 		Username:    req.Username,
@@ -118,31 +127,32 @@ func (s *Auth) login(ctx context.Context, req types.LoginReq, meta LoginMeta) (r
 		code = s.cfg.Tenant.DefaultCode
 	}
 
-	// 公开路由：无租户 ctx，直接查全局表
+	// Public route: no tenant ctx, query the global table directly
 	t, err := dao.GetTenantByCode(ctx, code)
 	if err != nil {
 		return nil, err
 	}
 	if t.Status != 1 {
-		return nil, errs.New(errs.CodeForbidden, "租户已停用")
+		return nil, errs.New(errs.CodeForbidden, "tenant is disabled")
 	}
 	if t.ExpireTime != nil && t.ExpireTime.Before(time.Now()) {
-		return nil, errs.New(errs.CodeForbidden, "租户已过期")
+		return nil, errs.New(errs.CodeForbidden, "tenant has expired")
 	}
 
-	// 公开路由无 Tenant 中间件：解析出租户后显式注入 ctx，供 TenantPlugin 使用。
+	// The public route has no Tenant middleware: after resolving the tenant,
+	// inject it into the ctx explicitly for TenantPlugin to use.
 	ctx = infratenant.With(ctx, t.ID, t.Code)
 
 	u, err := dao.GetUserByUsername(ctx, req.Username)
 	if err != nil {
 		return nil, err
 	}
-	audit.UserID = u.ID // 用户命中：审计行带上 user_id（后续失败路径也可追溯）
+	audit.UserID = u.ID // user hit: the audit row carries user_id (traceable on later failure paths too)
 	if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.Password)) != nil {
-		return nil, errs.New(errs.CodeUnauthorized, "用户名或密码错误")
+		return nil, errs.New(errs.CodeUnauthorized, "incorrect username or password")
 	}
 	if u.Status != 1 {
-		return nil, errs.New(errs.CodeForbidden, "用户已停用")
+		return nil, errs.New(errs.CodeForbidden, "user is disabled")
 	}
 
 	access, refresh, expiresIn, err := s.authM.Issue(ctx, u.ID, u.Username, t.ID, t.Code)
@@ -159,29 +169,30 @@ func (s *Auth) login(ctx context.Context, req types.LoginReq, meta LoginMeta) (r
 	}, nil
 }
 
-// Refresh 轮换会话：sid 定位 → 会话校验 → 用户/租户复检 → 新双 token。
+// Refresh rotates the session: sid lookup → session validation → user/tenant
+// recheck → new token pair.
 func (s *Auth) Refresh(ctx context.Context, req types.RefreshReq) (*types.TokenResp, error) {
 	tid, uid, ok := s.authM.LookupSID(ctx, req.RefreshToken)
 	if !ok || !s.authM.SIDMatch(ctx, tid, req.RefreshToken, uid) {
-		return nil, errs.New(errs.CodeUnauthorized, "刷新令牌无效或已过期")
+		return nil, errs.New(errs.CodeUnauthorized, "refresh token is invalid or has expired")
 	}
 
-	// 公开路由：先校验租户可用，再注入租户 ctx。
+	// Public route: validate the tenant is available first, then inject the tenant ctx.
 	t, err := dao.GetTenantByID(ctx, tid)
 	if err != nil || t.Status != 1 {
-		return nil, errs.New(errs.CodeForbidden, "租户不可用")
+		return nil, errs.New(errs.CodeForbidden, "tenant is unavailable")
 	}
 	if t.ExpireTime != nil && t.ExpireTime.Before(time.Now()) {
-		return nil, errs.New(errs.CodeForbidden, "租户已过期")
+		return nil, errs.New(errs.CodeForbidden, "tenant has expired")
 	}
 	ctx = infratenant.With(ctx, tid, t.Code)
 
 	u, err := dao.GetUserByID(ctx, uid)
 	if err != nil {
-		return nil, errs.New(errs.CodeUnauthorized, "用户不存在或已删除")
+		return nil, errs.New(errs.CodeUnauthorized, "user does not exist or has been deleted")
 	}
 	if u.Status != 1 {
-		return nil, errs.New(errs.CodeForbidden, "用户已停用")
+		return nil, errs.New(errs.CodeForbidden, "user is disabled")
 	}
 
 	access, refresh, expiresIn, err := s.authM.Rotate(
@@ -197,12 +208,12 @@ func (s *Auth) Refresh(ctx context.Context, req types.RefreshReq) (*types.TokenR
 	}, nil
 }
 
-// Logout 登出（撤销当前会话）。
+// Logout revokes the current session.
 func (s *Auth) Logout(ctx context.Context, claims *auth.AccessClaims) {
 	s.authM.Logout(ctx, claims)
 }
 
-// Info 用户信息 + 租户 + 角色 + 权限标识。
+// Info returns the user info + tenant + roles + permission identifiers.
 func (s *Auth) Info(ctx context.Context, claims *auth.AccessClaims) (*types.UserInfoResp, error) {
 	u, err := dao.GetUserByID(ctx, claims.UserID)
 	if err != nil {
@@ -257,7 +268,7 @@ func (s *Auth) Info(ctx context.Context, claims *auth.AccessClaims) (*types.User
 	}, nil
 }
 
-// Routers 前端路由树（本租户可见菜单 type 1/2）。
+// Routers returns the frontend route tree (menus of type 1/2 visible to this tenant).
 func (s *Auth) Routers(ctx context.Context, claims *auth.AccessClaims) ([]types.RouterNode, error) {
 	menus, err := dao.GetUserMenus(ctx, claims.UserID, []int8{1, 2})
 	if err != nil {
@@ -281,7 +292,7 @@ func (s *Auth) Routers(ctx context.Context, claims *auth.AccessClaims) ([]types.
 		}
 		byID[m.ID] = node
 	}
-	// 组树：parent 不在可见集合（或为根）→ 根节点
+	// Tree assembly: a parent outside the visible set (or a root) → root node
 	for _, m := range menus {
 		node := byID[m.ID]
 		if parent, ok := byID[m.ParentID]; ok && m.ParentID != m.ID {
@@ -293,7 +304,7 @@ func (s *Auth) Routers(ctx context.Context, claims *auth.AccessClaims) ([]types.
 	return derefNodes(roots), nil
 }
 
-// UpdateProfile 个人信息更新（仅本人可改的字段）。
+// UpdateProfile updates the profile (only fields the user themselves may change).
 func (s *Auth) UpdateProfile(ctx context.Context, claims *auth.AccessClaims, req types.UpdateProfileReq) error {
 	updates := map[string]any{
 		"nickname": req.Nickname,
@@ -305,7 +316,7 @@ func (s *Auth) UpdateProfile(ctx context.Context, claims *auth.AccessClaims, req
 	if req.Mobile != "" {
 		updates["mobile"] = req.Mobile
 	} else {
-		updates["mobile"] = nil // 清空走 NULL，保 uk_tenant_mobile 多空值不冲突
+		updates["mobile"] = nil // clearing goes through NULL, so multiple NULLs never conflict on uk_tenant_mobile
 	}
 	if req.Gender != 0 {
 		updates["gender"] = req.Gender
@@ -320,19 +331,20 @@ func (s *Auth) UpdateProfile(ctx context.Context, claims *auth.AccessClaims, req
 	return nil
 }
 
-// UpdatePassword 改密：校验旧密 → 更新 → 撤销全部会话（踢下线，重新登录）。
+// UpdatePassword changes the password: verify the old password → update →
+// revoke all sessions (force re-login).
 func (s *Auth) UpdatePassword(ctx context.Context, claims *auth.AccessClaims, req types.UpdatePasswordReq) error {
 	u, err := dao.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		return err
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.OldPassword)) != nil {
-		return errs.New(errs.CodeParam, "原密码错误")
+		return errs.New(errs.CodeParam, "old password is incorrect")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 10)
 	if err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "密码加密失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to hash password")
 	}
 	if err := dao.UpdateUser(ctx, claims.UserID, map[string]any{
 		"password": string(hash),
@@ -345,7 +357,7 @@ func (s *Auth) UpdatePassword(ctx context.Context, claims *auth.AccessClaims, re
 	return nil
 }
 
-// derefString 安全解引用。
+// derefString safely dereferences the string pointer.
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -353,7 +365,7 @@ func derefString(s *string) string {
 	return *s
 }
 
-// parsePostIDs 解析 post_ids JSON 数组。
+// parsePostIDs parses the post_ids JSON array.
 func parsePostIDs(s string) []types.ID {
 	if s == "" {
 		return []types.ID{}
@@ -365,7 +377,7 @@ func parsePostIDs(s string) []types.ID {
 	return ids
 }
 
-// derefNodes 指针树转值树（ Children 已为值切片）。
+// derefNodes converts a pointer tree to a value tree (Children is already a value slice).
 func derefNodes(nodes []*types.RouterNode) []types.RouterNode {
 	out := make([]types.RouterNode, 0, len(nodes))
 	for _, n := range nodes {

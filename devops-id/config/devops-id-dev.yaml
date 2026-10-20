@@ -1,4 +1,4 @@
-# dev 环境覆盖：只保留差异项，bootstrap.yaml 作为公共配置基线
+# dev environment overrides: only differences; bootstrap.yaml is the shared baseline
 
 log:
   level: debug
@@ -7,15 +7,15 @@ log:
 idgen:
   leaf_name: devops-id
   worker_cache: ../data
-  allow_local_fallback: true   # dev 单实例：etcd 不可用时允许本地降级
+  allow_local_fallback: true   # dev single instance: allow local fallback when etcd is unavailable
 
-etcd:                    # snowflake worker 协调（dev compose 映射到宿主机 2379）
+etcd:                    # snowflake worker coordination (mapped to host port 2379 by the dev compose setup)
   endpoints:
     - "127.0.0.1:2379"
   dial_timeout: 5s
-  lease_ttl: 10s         # 宕机后槽位释放延迟
+  lease_ttl: 10s         # slot release delay after a crash
 
-# 本地进程开发：Jaeger 由 dev compose 暴露在宿主机 4318；指标走独立 HTTP 端口 9991。
+# Local development: Jaeger is exposed on host port 4318 by the dev compose setup; metrics use a separate HTTP port 9991.
 observability:
   otlp_endpoint: "http://127.0.0.1:4318"
   sampler_ratio: 1.0

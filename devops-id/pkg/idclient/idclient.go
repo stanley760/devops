@@ -1,15 +1,18 @@
-// Package idclient 是 devops-id 发号服务的客户端 SDK（预取缓冲）。
+// Package idclient is the client SDK (prefetch buffer) for the devops-id ID generation service.
 //
-// 关键设计：把「每 ID 一次 RPC」摊薄到 1/batch——进程内持本地预取缓冲，
-// 一次 BatchNext 取回一批（默认 100），本地零网络发号：
-//   - devops-id 重启不影响已预取的号（号已原子分配到本进程，弹性窗口 = batch）
-//   - 剩余低于水位 → 异步单飞补充
-//   - 缓冲耗尽且补充失败 → fail-fast 返回错误（同服务端哲学：宁可拒发不可重号）
+// Key design: amortize "one RPC per ID" down to 1/batch -- the process holds a local
+// prefetch buffer, and one BatchNext fetches a batch (100 by default) for zero-network
+// local issuance:
+//   - a devops-id restart does not affect already-prefetched IDs (they were atomically allocated to this process; the resilience window = batch)
+//   - when the remaining count drops below the watermark -> async single-flight refill
+//   - buffer exhausted and refill failed -> fail-fast error (same philosophy as the server: refusing is preferable to duplicates)
 //
-// 补充采用 per-tag 单飞（single-flight）：同一 biz_tag 的同步和异步补充
-// 共享同一个 in-flight 请求，杜绝批次重排导致本地 ID 递减。
+// Refills use per-tag single-flight: synchronous and asynchronous refills of the same
+// biz_tag share one in-flight request, eliminating local ID regressions caused by
+// batch reordering.
 //
-// 多副本消费方各持独立缓冲：同一 biz_tag 内 ID 趋势递增，但跨副本交错。
+// Multiple consumer replicas each hold independent buffers: within the same biz_tag IDs
+// trend upward, but they interleave across replicas.
 package idclient
 
 import (
@@ -27,14 +30,14 @@ import (
 	"github.com/stanley760/devops/devops-id/pkg/idgenpb"
 )
 
-// BufferConfig 预取缓冲配置。
+// BufferConfig is the prefetch buffer config.
 type BufferConfig struct {
-	Batch       int           // 预取批量（1 = 关闭预取，逐次 RPC）
-	LowWater    float64       // 剩余比例低于该值时异步补充
-	CallTimeout time.Duration // fetch 单次调用超时（0 = 不限时，跟随传入 ctx）
+	Batch       int           // prefetch batch size (1 = prefetching off, one RPC per ID)
+	LowWater    float64       // async refill when the remaining ratio drops below this value
+	CallTimeout time.Duration // per-call timeout for fetch (0 = no limit, follows the passed ctx)
 }
 
-// Client 发号客户端：一个 gRPC 连接 + 按 biz_tag 的本地预取缓冲。
+// Client is the ID generation client: one gRPC connection + per-biz_tag local prefetch buffers.
 type Client struct {
 	conn   *grpc.ClientConn
 	stub   idgenpb.IdGenClient
@@ -55,18 +58,18 @@ type inflightFetch struct {
 	done chan struct{}
 }
 
-// tagBuffer 单个 biz_tag 的缓冲状态。
-// attrs 为预构建的 biz_tag 属性集：发号热路径零属性分配。
+// tagBuffer is the buffer state of a single biz_tag.
+// attrs is the pre-built biz_tag attribute set: zero attribute allocation on the ID generation hot path.
 type tagBuffer struct {
 	mu         sync.Mutex
 	ids        []int64
-	inflight   *inflightFetch // 单飞：同时最多一个补充请求
-	lastIssued int64          // 最近发出的 ID，用于入队校验
+	inflight   *inflightFetch // single-flight: at most one refill request at a time
+	lastIssued int64          // most recently issued ID, used for enqueue validation
 	attrs      metric.MeasurementOption
 }
 
-// bufferMetrics 发号缓冲指标集。仪表创建失败时 OTel 返回 noop 仪表（非 nil），
-// 观测故障不影响发号。
+// bufferMetrics is the ID generation buffer metric set. When instrument creation fails OTel returns a noop instrument (not nil),
+// so observability failures do not affect ID generation.
 type bufferMetrics struct {
 	remaining  metric.Int64ObservableGauge
 	capacity   metric.Int64ObservableGauge
@@ -75,9 +78,9 @@ type bufferMetrics struct {
 	refillDur  metric.Float64Histogram
 }
 
-// New 创建发号客户端。conn 由调用方创建（devops-infra/grpc.Dial）并管理生命周期。
-// 指标经全局 MeterProvider 导出：服务方应在调用 New 前完成 observability.Init；
-// 未初始化时（探针/测试）自动落到 noop 仪表，无任何开销副作用。
+// New creates the ID generation client. conn is created and lifecycled by the caller (devops-infra/grpc.Dial).
+// Metrics are exported via the global MeterProvider: the service side should finish observability.Init
+// before calling New; when uninitialized (probes/tests) it falls back to noop instruments with zero overhead side effects.
 func New(conn *grpc.ClientConn, cfg BufferConfig) *Client {
 	if cfg.Batch < 1 {
 		cfg.Batch = 1
@@ -97,41 +100,42 @@ func New(conn *grpc.ClientConn, cfg BufferConfig) *Client {
 	return c
 }
 
-// initMetrics 创建缓冲指标并注册抓取时回调（水位 gauge 无需热路径写）。
-// 回调持锁读取各缓冲剩余量：Next 空缓冲同步补充时最长阻塞 CallTimeout，
-// 抓取因此可能短暂等锁，量级（秒）远小于 Prometheus 抓取超时，可接受。
+// initMetrics creates the buffer metrics and registers the scrape-time callback (watermark gauges need no hot-path writes).
+// The callback holds the lock to read each buffer's remaining count: when Next synchronously refills an empty buffer it
+// blocks for at most CallTimeout, so a scrape may briefly wait on the lock -- that magnitude (seconds) is far below
+// the Prometheus scrape timeout and is acceptable.
 func (c *Client) initMetrics() {
 	meter := otel.Meter("devops-id/idclient")
 	m := &bufferMetrics{}
 	var err error
 	if m.remaining, err = meter.Int64ObservableGauge(
 		"idgen_buffer_remaining",
-		metric.WithDescription("发号本地预取缓冲剩余号量（0 = 耗尽，下一次发号将同步 RPC）"),
+		metric.WithDescription("remaining IDs in the local prefetch buffer (0 = exhausted; the next ID triggers a synchronous RPC)"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if m.capacity, err = meter.Int64ObservableGauge(
 		"idgen_buffer_capacity",
-		metric.WithDescription("发号预取单批容量（BufferConfig.Batch）"),
+		metric.WithDescription("prefetch batch capacity (BufferConfig.Batch)"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if m.issued, err = meter.Int64Counter(
 		"idgen_issued",
-		metric.WithDescription("本地缓冲发出的 ID 累计数"),
+		metric.WithDescription("cumulative count of IDs issued from the local buffer"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if m.refillFail, err = meter.Int64Counter(
 		"idgen_refill_failures",
-		metric.WithDescription("缓冲补充失败次数；trigger=sync 表示已阻塞业务请求，async 为后台预取失败"),
+		metric.WithDescription("buffer refill failure count; trigger=sync means a business request was already blocked, async means a background prefetch failed"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if m.refillDur, err = meter.Float64Histogram(
 		"idgen_refill_duration",
 		metric.WithUnit("s"),
-		metric.WithDescription("BatchNext 补充耗时"),
+		metric.WithDescription("BatchNext refill duration"),
 	); err != nil {
 		otel.Handle(err)
 	}
@@ -162,14 +166,14 @@ func (c *Client) initMetrics() {
 	}
 }
 
-// Next 从本地预取缓冲取一个 ID。
-// bizTag 用于选择独立的 snowflake worker 空间。
+// Next takes one ID from the local prefetch buffer.
+// bizTag selects an independent snowflake worker space.
 func (c *Client) Next(ctx context.Context, bizTag string) (int64, error) {
 	tb := c.get(bizTag)
 	for {
 		tb.mu.Lock()
 		if len(tb.ids) > 0 {
-			// 从头部弹出：服务端返回的批内单调递增，头部弹出保证本地发号也递增
+			// pop from the head: the server returns monotonically increasing batches, so head-popping keeps local issuance increasing too
 			id := tb.ids[0]
 			tb.ids = tb.ids[1:]
 			tb.lastIssued = id
@@ -180,15 +184,15 @@ func (c *Client) Next(ctx context.Context, bizTag string) (int64, error) {
 		}
 		tb.mu.Unlock()
 
-		// 缓冲空：同步补充（单飞，不会与异步补充并行导致重排）
+		// buffer empty: synchronous refill (single-flight, never runs in parallel with async refill to cause reordering)
 		if err := c.refill(ctx, tb, bizTag, "sync"); err != nil {
-			return 0, fmt.Errorf("ID 生成失败(biz_tag=%s): %w", bizTag, err)
+			return 0, fmt.Errorf("ID generation failed (biz_tag=%s): %w", bizTag, err)
 		}
-		// 补充完成后循环重检缓冲（可能被并发消费）
+		// after refill completes, loop to re-check the buffer (it may have been consumed concurrently)
 	}
 }
 
-// get 取（或惰性创建）biz_tag 缓冲。
+// get fetches (or lazily creates) the biz_tag buffer.
 func (c *Client) get(bizTag string) *tagBuffer {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -202,17 +206,17 @@ func (c *Client) get(bizTag string) *tagBuffer {
 	return tb
 }
 
-// refill 单飞补充：同一 biz_tag 的同步和异步补充共享同一个 in-flight 请求。
-// 有 in-flight 时等待其完成；否则发起新请求。fetch 不持有 tb.mu。
+// refill single-flight refill: synchronous and asynchronous refills of the same biz_tag share one in-flight request.
+// When one is in flight, wait for it to finish; otherwise start a new request. fetch does not hold tb.mu.
 func (c *Client) refill(ctx context.Context, tb *tagBuffer, bizTag, trigger string) error {
 	tb.mu.Lock()
 	if tb.inflight != nil {
-		// 已有补充在进行，等待其完成（不并行发起第二个请求）
+		// a refill is already in progress; wait for it to finish (do not start a second request in parallel)
 		done := tb.inflight.done
 		tb.mu.Unlock()
 		select {
 		case <-done:
-			return nil // 先行者已完成，调用方重检缓冲
+			return nil // the first caller finished; the caller re-checks the buffer
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -244,8 +248,8 @@ func (c *Client) refill(ctx context.Context, tb *tagBuffer, bizTag, trigger stri
 	return err
 }
 
-// mergeLocked 校验并合并补充批次。必须持有 tb.mu。
-// 校验规则：非空、严格递增、首 ID 大于最近发出的 ID 和缓冲尾部 ID。
+// mergeLocked validates and merges a refill batch. tb.mu must be held.
+// Validation rules: non-empty, strictly increasing, and the first ID greater than both the most recently issued ID and the buffer's tail ID.
 func mergeLocked(tb *tagBuffer, ids []int64) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("empty batch from server")
@@ -265,18 +269,18 @@ func mergeLocked(tb *tagBuffer, ids []int64) error {
 	return nil
 }
 
-// asyncRefill 剩余低于水位时异步补充（调用方持有 tb.mu）。
+// asyncRefill refills asynchronously when the remaining count drops below the watermark (the caller holds tb.mu).
 func (c *Client) asyncRefill(tb *tagBuffer, bizTag string) {
-	if c.cfg.Batch <= 1 { // 预取关闭
+	if c.cfg.Batch <= 1 { // prefetching off
 		return
 	}
 	if len(tb.ids) >= int(float64(c.cfg.Batch)*c.cfg.LowWater) {
 		return
 	}
 	if tb.inflight != nil {
-		return // 已有补充在进行
+		return // a refill is already in progress
 	}
-	// 标记 in-flight 防止 goroutine 启动前重复触发
+	// mark in-flight to prevent duplicate triggering before the goroutine starts
 	call := &inflightFetch{done: make(chan struct{})}
 	tb.inflight = call
 	go func() {
@@ -301,7 +305,7 @@ func (c *Client) asyncRefill(tb *tagBuffer, bizTag string) {
 	}()
 }
 
-// fetchFromStub 调用 BatchNext 取一批号（带 CallTimeout 限时）。
+// fetchFromStub calls BatchNext to fetch a batch of IDs (bounded by CallTimeout).
 func (c *Client) fetchFromStub(ctx context.Context, bizTag string) ([]int64, error) {
 	if c.cfg.CallTimeout > 0 {
 		var cancel context.CancelFunc
@@ -316,7 +320,7 @@ func (c *Client) fetchFromStub(ctx context.Context, bizTag string) ([]int64, err
 		return nil, err
 	}
 	ids := reply.GetIds()
-	// 服务端响应校验：非空 + 严格递增
+	// server response validation: non-empty + strictly increasing
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("server returned empty batch")
 	}
@@ -328,19 +332,19 @@ func (c *Client) fetchFromStub(ctx context.Context, bizTag string) ([]int64, err
 	return ids, nil
 }
 
-// Ping 探活：gRPC 标准健康检查（SERVING 状态）。
+// Ping liveness check: the standard gRPC health check (SERVING status).
 func (c *Client) Ping(ctx context.Context) error {
 	reply, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{})
 	if err != nil {
 		return err
 	}
 	if reply.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-		return fmt.Errorf("devops-id 健康状态异常: %s", reply.GetStatus())
+		return fmt.Errorf("devops-id health status abnormal: %s", reply.GetStatus())
 	}
 	return nil
 }
 
-// recordIssued 热路径：使用 tagBuffer 预构建属性集，零分配记录发号数。
+// recordIssued hot path: uses tagBuffer's pre-built attribute set to record the ID count with zero allocation.
 func (m *bufferMetrics) recordIssued(ctx context.Context, attrs metric.MeasurementOption) {
 	if m == nil {
 		return
@@ -348,7 +352,7 @@ func (m *bufferMetrics) recordIssued(ctx context.Context, attrs metric.Measureme
 	m.issued.Add(ctx, 1, attrs)
 }
 
-// recordRefill 冷路径（补充才发生）：失败计数 + 耗时直方图。
+// recordRefill cold path (only on refill): failure count + duration histogram.
 func (m *bufferMetrics) recordRefill(ctx context.Context, bizTag, trigger string, d time.Duration, failed bool) {
 	if m == nil {
 		return

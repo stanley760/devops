@@ -35,16 +35,16 @@ func NormalizeEtcdConfig(cfg EtcdConfig) (EtcdConfig, error) {
 		}
 	}
 	if len(endpoints) == 0 {
-		return cfg, fmt.Errorf("etcd.endpoints 不能为空")
+		return cfg, fmt.Errorf("etcd.endpoints must not be empty")
 	}
 	if cfg.DialTimeout < 0 {
-		return cfg, fmt.Errorf("etcd.dial_timeout 不能为负数")
+		return cfg, fmt.Errorf("etcd.dial_timeout cannot be negative")
 	}
 	if cfg.LeaseTTL < 0 {
-		return cfg, fmt.Errorf("etcd.lease_ttl 不能为负数")
+		return cfg, fmt.Errorf("etcd.lease_ttl cannot be negative")
 	}
 	if (cfg.Username == "") != (cfg.Password == "") {
-		return cfg, fmt.Errorf("etcd.username 和 etcd.password 必须同时配置")
+		return cfg, fmt.Errorf("etcd.username and etcd.password must be configured together")
 	}
 	if err := cfg.ValidateTLS(); err != nil {
 		return cfg, err
@@ -65,7 +65,7 @@ func (cfg EtcdConfig) ValidateTLS() error {
 		return nil
 	}
 	if (cfg.TLS.CertFile == "") != (cfg.TLS.KeyFile == "") {
-		return fmt.Errorf("etcd.tls.cert_file 和 etcd.tls.key_file 必须同时配置")
+		return fmt.Errorf("etcd.tls.cert_file and etcd.tls.key_file must be configured together")
 	}
 	return nil
 }
@@ -85,18 +85,18 @@ func (cfg EtcdConfig) TLSConfig() (*tls.Config, error) {
 	if cfg.TLS.CAFile != "" {
 		caPEM, err := os.ReadFile(cfg.TLS.CAFile)
 		if err != nil {
-			return nil, fmt.Errorf("读取 etcd CA 证书失败: %w", err)
+			return nil, fmt.Errorf("failed to read etcd CA certificate: %w", err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("解析 etcd CA 证书 %s 失败", cfg.TLS.CAFile)
+			return nil, fmt.Errorf("failed to parse etcd CA certificate %s", cfg.TLS.CAFile)
 		}
 		tlsConfig.RootCAs = pool
 	}
 	if cfg.TLS.CertFile != "" {
 		certificate, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("加载 etcd 客户端证书失败: %w", err)
+			return nil, fmt.Errorf("failed to load etcd client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{certificate}
 	}

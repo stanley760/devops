@@ -1,10 +1,13 @@
-// 租户管理服务：CRUD + 启停/过期 + 租户初始超管。
+// Tenant management service: CRUD + enable/disable/expiry + tenant initial super admin.
 //
-// 平台路由 ctx 无租户：t_tenant 为全局表可直接访问；创建租户初始超管时
-// 显式注入新租户 ctx，user/role 行由 TenantPlugin 填充 tenant_id。
+// Platform route ctx carries no tenant: t_tenant is a global table and can be
+// accessed directly; when creating a tenant's initial super admin, inject the
+// new tenant ctx explicitly so TenantPlugin fills tenant_id on the user/role rows.
 //
-// 停用语义：状态落库 + 撤销租户全部会话（RevokeTenantSessions，
-// 全员 access 立即 401）+ 清除 Tenant 中间件的 Redis 状态缓存（防 5min 缓存误放行）。
+// Disable semantics: persist the status + revoke all of the tenant's sessions
+// (RevokeTenantSessions, every access token immediately 401s) + clear the Redis
+// status cache of the Tenant middleware (guarding against a 5min cache letting
+// requests through).
 package service
 
 import (
@@ -24,17 +27,17 @@ import (
 	"time"
 )
 
-// Tenant 租户管理服务。
+// Tenant is the tenant management service.
 type Tenant struct {
 	authM *auth.Manager
 }
 
-// NewTenant 创建服务。
+// NewTenant creates the service.
 func NewTenant(authM *auth.Manager) *Tenant {
 	return &Tenant{authM: authM}
 }
 
-// List 分页查询。
+// List returns a paginated query.
 func (s *Tenant) List(ctx context.Context, q types.TenantPageQuery) (domain.PageResult[types.TenantDTO], error) {
 	page, err := dao.ListTenants(ctx, q)
 	if err != nil {
@@ -45,7 +48,7 @@ func (s *Tenant) List(ctx context.Context, q types.TenantPageQuery) (domain.Page
 	}), nil
 }
 
-// Get 租户详情。
+// Get returns the tenant details.
 func (s *Tenant) Get(ctx context.Context, id types.ID) (*types.TenantDTO, error) {
 	t, err := dao.GetTenantByID(ctx, id.Int64())
 	if err != nil {
@@ -55,19 +58,19 @@ func (s *Tenant) Get(ctx context.Context, id types.ID) (*types.TenantDTO, error)
 	return &dto, nil
 }
 
-// Create 创建租户 + 租户初始超管（super_admin 角色 + casbin 域内全通 p/g 行）。
+// Create creates a tenant + the tenant's initial super admin (super_admin role + casbin domain-wide allow-all p/g rows).
 func (s *Tenant) Create(ctx context.Context, claims *auth.AccessClaims, req types.TenantCreateReq) (*types.TenantDTO, error) {
 	exists, err := dao.TenantCodeExists(ctx, req.Code, 0)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, errs.New(errs.CodeParam, "租户编码已存在")
+		return nil, errs.New(errs.CodeParam, "tenant code already exists")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), 10)
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "密码加密失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to hash password")
 	}
 
 	t := &model.Tenant{
@@ -84,7 +87,8 @@ func (s *Tenant) Create(ctx context.Context, claims *auth.AccessClaims, req type
 		return nil, err
 	}
 
-	// 租户初始超管写入共享数据库时仍需注入租户上下文，以填充 tenant_id。
+	// Writing the tenant's initial super admin to the shared database still
+	// requires the tenant context to be injected, to fill tenant_id.
 	tctx := infratenant.With(ctx, t.ID, t.Code)
 	admin := &model.User{
 		BaseTenantModel: model.BaseTenantModel{
@@ -102,19 +106,19 @@ func (s *Tenant) Create(ctx context.Context, claims *auth.AccessClaims, req type
 		Name: "超级管理员", Code: authz.Roles().SuperAdmin, Type: 1, DataScope: 1, Status: 1,
 	}
 	if err := dao.SeedTenantAdmin(tctx, role, admin); err != nil {
-		// 补偿：回滚租户行，避免「有租户无超管」的中间态。
+		// Compensation: roll back the tenant row, avoiding the intermediate state of "tenant without super admin".
 		_ = dao.HardDeleteTenant(ctx, t.ID)
 		return nil, err
 	}
 
 	if err := authz.SeedTenantAdmin(t.ID, admin.ID); err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "租户已创建，但超管授权写入失败，请重试")
+		return nil, errs.Wrap(err, errs.CodeInternal, "tenant created, but the super admin authorization write failed; please retry")
 	}
 	dto := toTenantDTO(t)
 	return &dto, nil
 }
 
-// Update 更新租户（name/contact/expire_time/remark；code 不可改）。
+// Update updates a tenant (name/contact/expire_time/remark; the code cannot be changed).
 func (s *Tenant) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.TenantUpdateReq) error {
 	t, err := dao.GetTenantByID(ctx, id.Int64())
 	if err != nil {
@@ -136,22 +140,22 @@ func (s *Tenant) Update(ctx context.Context, claims *auth.AccessClaims, id types
 			updates["status"] = 0
 		}
 	} else {
-		updates["expire_time"] = nil // 永不过期
+		updates["expire_time"] = nil // never expires
 	}
 	return dao.UpdateTenant(ctx, t.ID, updates)
 }
 
-// UpdateStatus 启停租户：停用即全员下线（会话全量撤销 + 状态缓存清除）。
+// UpdateStatus enables/disables a tenant: disabling kicks everyone offline (all sessions revoked + status cache cleared).
 func (s *Tenant) UpdateStatus(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.TenantStatusReq) error {
 	t, err := dao.GetTenantByID(ctx, id.Int64())
 	if err != nil {
 		return err
 	}
 	if t.ID == 1 && req.Status != 1 {
-		return errs.New(errs.CodeParam, "默认租户不可停用")
+		return errs.New(errs.CodeParam, "the default tenant cannot be disabled")
 	}
 	if t.Status == req.Status {
-		return nil // 幂等：状态未变直接成功
+		return nil // idempotent: an unchanged status succeeds directly
 	}
 
 	if err := dao.UpdateTenant(ctx, t.ID, map[string]any{
@@ -161,7 +165,8 @@ func (s *Tenant) UpdateStatus(ctx context.Context, claims *auth.AccessClaims, id
 		return err
 	}
 
-	// 清除 Tenant 中间件状态缓存（停用防 5min 缓存误放行；启用防读到旧停用态）
+	// Clear the Tenant middleware status cache (on disable, guard against a 5min
+	// cache letting requests through; on enable, guard against reading a stale disabled state)
 	if c := store.Cache(); c != nil {
 		_ = c.Delete(ctx, fmt.Sprintf("tenant:%d", t.ID))
 	}
@@ -171,33 +176,34 @@ func (s *Tenant) UpdateStatus(ctx context.Context, claims *auth.AccessClaims, id
 	return nil
 }
 
-// Delete 删除租户：默认租户不可删；未停用不可删；逻辑删除后保留数据。
+// Delete deletes a tenant: the default tenant cannot be deleted; a tenant that
+// is not disabled cannot be deleted; data is retained after logical deletion.
 func (s *Tenant) Delete(ctx context.Context, claims *auth.AccessClaims, id types.ID) error {
 	t, err := dao.GetTenantByID(ctx, id.Int64())
 	if err != nil {
 		return err
 	}
 	if t.ID == 1 {
-		return errs.New(errs.CodeParam, "默认租户不可删除")
+		return errs.New(errs.CodeParam, "the default tenant cannot be deleted")
 	}
 	if t.Status == 1 {
-		return errs.New(errs.CodeParam, "租户未停用，请先停用再删除")
+		return errs.New(errs.CodeParam, "tenant is not disabled; disable it before deleting")
 	}
 
 	if err := dao.SoftDeleteTenant(ctx, t.ID, t.Code); err != nil {
 		return err
 	}
 
-	// 保险：清残余会话与状态缓存（停用时已撤，此处兜底）
+	// Safety net: clear residual sessions and the status cache (already revoked on disable; this is the fallback)
 	s.authM.RevokeTenantSessions(ctx, t.ID)
 	if c := store.Cache(); c != nil {
 		_ = c.Delete(ctx, fmt.Sprintf("tenant:%d", t.ID))
 	}
-	// casbin g/p 行与业务数据保留（租户已删不可登录），清理工具列 Roadmap。
+	// The casbin g/p rows and business data are retained (a deleted tenant cannot log in); a cleanup tool is on the Roadmap.
 	return nil
 }
 
-// toTenantDTO model.Tenant → DTO。
+// toTenantDTO maps model.Tenant → DTO.
 func toTenantDTO(t *model.Tenant) types.TenantDTO {
 	return types.TenantDTO{
 		ID:            types.ID(t.ID),

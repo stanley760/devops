@@ -1,6 +1,6 @@
--- t_system_user_role 用户-角色关联（租户表）。
--- 复合主键、无独立 ID、不走发号；物理删除（无 deleted_at）——
--- 分配/取消分配是幂等操作，软删会使复合主键无法重建同组合行。
+-- t_system_user_role user-role association (tenant table).
+-- Composite primary key, no standalone ID, no ID issuance; physical deletion (no deleted_at) —
+-- assign/unassign are idempotent operations, and soft deletion would prevent rebuilding the same composite-key row.
 CREATE TABLE IF NOT EXISTS t_system_user_role (
     tenant_id BIGINT NOT NULL,
     user_id   BIGINT NOT NULL,

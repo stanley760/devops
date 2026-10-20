@@ -21,7 +21,7 @@ func TestInitSkipsEnvFileUntilMergeEnvConfig(t *testing.T) {
 	}
 	t.Cleanup(viper.Reset)
 
-	// Init 只加载 bootstrap，本地环境文件不自动合并（远程优先）
+	// Init loads bootstrap only; the local environment file is not merged automatically (remote first)
 	if got := viper.GetString("log.level"); got != "info" {
 		t.Fatalf("log.level = %q, want %q", got, "info")
 	}
@@ -29,7 +29,7 @@ func TestInitSkipsEnvFileUntilMergeEnvConfig(t *testing.T) {
 		t.Fatalf("ProfileDataID() = %q, want %q", got, "devops-id-test.yaml")
 	}
 
-	// 远程未命中时的本地兜底
+	// Local fallback when the remote side misses
 	if err := MergeEnvConfig(); err != nil {
 		t.Fatalf("MergeEnvConfig() error = %v", err)
 	}

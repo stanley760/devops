@@ -1,5 +1,6 @@
-// operations.go devops-system 全部业务接口的 huma 注册（按模块拆分）。
-// gin 与 huma 同路径不能共存：模块迁移时必须先删 router.go 对应 gin 注册块再在此注册。
+// operations.go registers huma for all business interfaces of devops-system (split by module).
+// gin and huma cannot coexist on the same path: when migrating a module, the corresponding gin
+// registration block in router.go must be deleted first before registering here.
 package router
 
 import (
@@ -18,23 +19,25 @@ import (
 
 const systemAPIPrefix = "/system"
 
-// 匿名端点全路径。必须由 router 包导出、且与下方 huma 注册共用同一份定义，
-// 避免与 deploy/higress/ingresses/devops-system-public.yaml 或守卫放行名单
-// 各写一份字符串而悄悄漂移（漂移后果是登录被锁死或被误放行）。
+// Full paths of the anonymous endpoints. Must be exported by the router package and share the
+// same definition with the huma registration below, avoiding each of them writing a separate
+// copy of the string against deploy/higress/ingresses/devops-system-public.yaml or the guard
+// pass-through list and silently drifting (drifting means login gets locked out or wrongly let through).
 //
-// 这三个端点必须匿名：调用方此时还没有 token。Higress jwt-auth 的 matchRules
-// 以 Ingress 资源为粒度、不支持按路径匹配，故它们由独立 ingress 承载；
-// 应用层守卫也必须同步放行，否则直连（绕过网关）时登录同样会被拦。
+// These three endpoints must be anonymous: callers have no token at this point. Higress jwt-auth's
+// matchRules is per Ingress resource and does not support path matching, so they are carried by a
+// separate ingress; the application-layer guard must also let them through in sync, otherwise
+// direct connections (bypassing the gateway) would also have login blocked.
 const (
-	// AuthLoginPath 登录端点，签发 access + refresh token。
+	// AuthLoginPath is the login endpoint, issuing access + refresh tokens.
 	AuthLoginPath = systemAPIPrefix + "/api/v1/auth/login"
-	// AuthRefreshPath 刷新端点，access token 过期后的唯一出路。
+	// AuthRefreshPath is the refresh endpoint, the only way out after the access token expires.
 	AuthRefreshPath = systemAPIPrefix + "/api/v1/auth/refresh"
-	// JWKSPath 验签公钥，供其他服务自验签与人工排查。
+	// JWKSPath is the verification public key, for other services to self-verify and manual troubleshooting.
 	JWKSPath = "/.well-known/jwks.json"
 )
 
-// with 合并公共 Operation 字段并添加 devops-system 的接口前缀。
+// with merges common Operation fields and adds the devops-system API prefix.
 func with(common huma.Operation, op huma.Operation) huma.Operation {
 	op.Path = systemAPIPrefix + op.Path
 	if op.Tags == nil {
@@ -46,14 +49,15 @@ func with(common huma.Operation, op huma.Operation) huma.Operation {
 	return op
 }
 
-// withClientMeta 登录接口提取客户端元数据（经 gin 适配器解包；可信代理已配置时
-// ClientIP 为真实 IP）。Geo 四项来自 higress geo-ip 插件注入的 X-Higress-Geo-* 头
-// （插件按 URL 转义写入，此处还原），随登录落 t_system_login_log 审计表。
+// withClientMeta extracts client metadata on the login interface (unwrapped via the gin adapter;
+// ClientIP is the real IP when trusted proxies are configured). The four Geo fields come from the
+// X-Higress-Geo-* headers injected by the higress geo-ip plugin (the plugin writes URL-escaped
+// values, restored here), and are persisted to the t_system_login_log audit table along with login.
 func withClientMeta(hctx huma.Context, next func(huma.Context)) {
 	c := humagin.Unwrap(hctx)
 	geo := func(name string) string {
 		v, err := url.QueryUnescape(c.GetHeader(name))
-		if err != nil { // 非法转义序列：用原值兜底，审计不因脏头失败
+		if err != nil { // invalid escape sequence: fall back to the raw value, so the audit does not fail on a dirty header
 			return c.GetHeader(name)
 		}
 		return v
@@ -68,7 +72,7 @@ func withClientMeta(hctx huma.Context, next func(huma.Context)) {
 	}))
 }
 
-// registerPosts posts 模块 5 接口（P2，迁移 SOP 样板）。
+// registerPosts posts module 5 interfaces (P2, migration SOP template).
 func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"posts"},
@@ -79,7 +83,7 @@ func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 		OperationID: "post-list",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/posts",
-		Summary:     "岗位列表",
+		Summary:     "post list",
 		Middlewares: kit.Biz("system:post:list"),
 	}), h.List)
 
@@ -87,7 +91,7 @@ func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 		OperationID: "post-get",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/posts/{id}",
-		Summary:     "岗位详情",
+		Summary:     "post detail",
 		Middlewares: kit.Biz("system:post:query"),
 	}), h.Get)
 
@@ -95,8 +99,8 @@ func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 		OperationID: "post-create",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/posts",
-		Summary:     "创建岗位",
-		Description: "code 创建后不可改。",
+		Summary:     "create post",
+		Description: "code cannot be changed after creation.",
 		Middlewares: kit.Biz("system:post:create"),
 	}), h.Create)
 
@@ -104,7 +108,7 @@ func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 		OperationID: "post-update",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/posts/{id}",
-		Summary:     "更新岗位",
+		Summary:     "update post",
 		Middlewares: kit.Biz("system:post:update"),
 	}), h.Update)
 
@@ -112,12 +116,12 @@ func registerPosts(api huma.API, h *apiv1.PostHandler, kit *middleware.Kit) {
 		OperationID: "post-delete",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/posts/{id}",
-		Summary:     "删除岗位",
+		Summary:     "delete post",
 		Middlewares: kit.Biz("system:post:delete"),
 	}), h.Delete)
 }
 
-// registerRoles roles 模块 6 接口（P3）。
+// registerRoles roles module 6 interfaces (P3).
 func registerRoles(api huma.API, h *apiv1.RoleHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"roles"},
@@ -126,33 +130,33 @@ func registerRoles(api huma.API, h *apiv1.RoleHandler, kit *middleware.Kit) {
 
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-list", Method: http.MethodGet, Path: "/api/v1/roles",
-		Summary: "角色列表", Middlewares: kit.Biz("system:role:list"),
+		Summary: "role list", Middlewares: kit.Biz("system:role:list"),
 	}), h.List)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-get", Method: http.MethodGet, Path: "/api/v1/roles/{id}",
-		Summary: "角色详情", Middlewares: kit.Biz("system:role:query"),
+		Summary: "role detail", Middlewares: kit.Biz("system:role:query"),
 	}), h.Get)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-create", Method: http.MethodPost, Path: "/api/v1/roles",
-		Summary: "创建角色", Description: "code 创建后不可改。",
+		Summary: "create role", Description: "code cannot be changed after creation.",
 		Middlewares: kit.Biz("system:role:create"),
 	}), h.Create)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-update", Method: http.MethodPut, Path: "/api/v1/roles/{id}",
-		Summary: "更新角色", Middlewares: kit.Biz("system:role:update"),
+		Summary: "update role", Middlewares: kit.Biz("system:role:update"),
 	}), h.Update)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-assign-menus", Method: http.MethodPut, Path: "/api/v1/roles/{id}/menus",
-		Summary: "分配角色菜单", Description: "重建 role_menu 与角色 p 行快照。",
+		Summary: "assign role menus", Description: "rebuilds the role_menu and the role's p row snapshot.",
 		Middlewares: kit.Biz("system:role:update"),
 	}), h.AssignMenus)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-delete", Method: http.MethodDelete, Path: "/api/v1/roles/{id}",
-		Summary: "删除角色", Middlewares: kit.Biz("system:role:delete"),
+		Summary: "delete role", Middlewares: kit.Biz("system:role:delete"),
 	}), h.Delete)
 }
 
-// registerMenus menus 模块 5 接口（P3）。
+// registerMenus menus module 5 interfaces (P3).
 func registerMenus(api huma.API, h *apiv1.MenuHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"menus"},
@@ -161,28 +165,28 @@ func registerMenus(api huma.API, h *apiv1.MenuHandler, kit *middleware.Kit) {
 
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "menu-list", Method: http.MethodGet, Path: "/api/v1/menus",
-		Summary: "菜单树", Middlewares: kit.Biz("system:menu:list"),
+		Summary: "menu tree", Middlewares: kit.Biz("system:menu:list"),
 	}), h.List)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "menu-get", Method: http.MethodGet, Path: "/api/v1/menus/{id}",
-		Summary: "菜单详情", Middlewares: kit.Biz("system:menu:query"),
+		Summary: "menu detail", Middlewares: kit.Biz("system:menu:query"),
 	}), h.Get)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "menu-create", Method: http.MethodPost, Path: "/api/v1/menus",
-		Summary: "创建菜单", Middlewares: kit.Biz("system:menu:create"),
+		Summary: "create menu", Middlewares: kit.Biz("system:menu:create"),
 	}), h.Create)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "menu-update", Method: http.MethodPut, Path: "/api/v1/menus/{id}",
-		Summary: "更新菜单", Description: "permission 变更联动重建引用角色 p 行。",
+		Summary: "update menu", Description: "permission changes trigger a rebuild of referencing roles' p rows.",
 		Middlewares: kit.Biz("system:menu:update"),
 	}), h.Update)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "menu-delete", Method: http.MethodDelete, Path: "/api/v1/menus/{id}",
-		Summary: "删除菜单", Middlewares: kit.Biz("system:menu:delete"),
+		Summary: "delete menu", Middlewares: kit.Biz("system:menu:delete"),
 	}), h.Delete)
 }
 
-// registerDepts depts 模块 5 接口（P3）。
+// registerDepts depts module 5 interfaces (P3).
 func registerDepts(api huma.API, h *apiv1.DeptHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"depts"},
@@ -191,27 +195,27 @@ func registerDepts(api huma.API, h *apiv1.DeptHandler, kit *middleware.Kit) {
 
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "dept-list", Method: http.MethodGet, Path: "/api/v1/depts",
-		Summary: "部门树", Middlewares: kit.Biz("system:dept:list"),
+		Summary: "dept tree", Middlewares: kit.Biz("system:dept:list"),
 	}), h.List)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "dept-get", Method: http.MethodGet, Path: "/api/v1/depts/{id}",
-		Summary: "部门详情", Middlewares: kit.Biz("system:dept:query"),
+		Summary: "dept detail", Middlewares: kit.Biz("system:dept:query"),
 	}), h.Get)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "dept-create", Method: http.MethodPost, Path: "/api/v1/depts",
-		Summary: "创建部门", Middlewares: kit.Biz("system:dept:create"),
+		Summary: "create dept", Middlewares: kit.Biz("system:dept:create"),
 	}), h.Create)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "dept-update", Method: http.MethodPut, Path: "/api/v1/depts/{id}",
-		Summary: "更新部门", Middlewares: kit.Biz("system:dept:update"),
+		Summary: "update dept", Middlewares: kit.Biz("system:dept:update"),
 	}), h.Update)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "dept-delete", Method: http.MethodDelete, Path: "/api/v1/depts/{id}",
-		Summary: "删除部门", Middlewares: kit.Biz("system:dept:delete"),
+		Summary: "delete dept", Middlewares: kit.Biz("system:dept:delete"),
 	}), h.Delete)
 }
 
-// registerUsers users 模块 6 接口（P4；行级数据权限受控资源，走 scopedBiz 链）。
+// registerUsers users module 6 interfaces (P4; row-level data-permission controlled resources, via the scopedBiz chain).
 func registerUsers(api huma.API, h *apiv1.UserHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"users"},
@@ -220,34 +224,34 @@ func registerUsers(api huma.API, h *apiv1.UserHandler, kit *middleware.Kit) {
 
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-list", Method: http.MethodGet, Path: "/api/v1/users",
-		Summary: "用户列表", Middlewares: kit.ScopedBiz("system:user:list"),
+		Summary: "user list", Middlewares: kit.ScopedBiz("system:user:list"),
 	}), h.List)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-get", Method: http.MethodGet, Path: "/api/v1/users/{id}",
-		Summary: "用户详情", Middlewares: kit.ScopedBiz("system:user:query"),
+		Summary: "user detail", Middlewares: kit.ScopedBiz("system:user:query"),
 	}), h.Get)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-create", Method: http.MethodPost, Path: "/api/v1/users",
-		Summary: "创建用户", Description: "角色分配联动 Casbin g 行。",
+		Summary: "create user", Description: "role assignment triggers a Casbin g row sync.",
 		Middlewares: kit.ScopedBiz("system:user:create"),
 	}), h.Create)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-update", Method: http.MethodPut, Path: "/api/v1/users/{id}",
-		Summary: "更新用户", Middlewares: kit.ScopedBiz("system:user:update"),
+		Summary: "update user", Middlewares: kit.ScopedBiz("system:user:update"),
 	}), h.Update)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-reset-password", Method: http.MethodPut, Path: "/api/v1/users/{id}/password",
-		Summary: "重置用户密码", Description: "重置后踢下线该用户全部会话。",
+		Summary: "reset user password", Description: "kicks all sessions of that user offline after reset.",
 		Middlewares: kit.ScopedBiz("system:user:update-password"),
 	}), h.ResetPassword)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-delete", Method: http.MethodDelete, Path: "/api/v1/users/{id}",
-		Summary: "删除用户", Middlewares: kit.ScopedBiz("system:user:delete"),
+		Summary: "delete user", Middlewares: kit.ScopedBiz("system:user:delete"),
 	}), h.Delete)
 }
 
-// registerLoginLogs 登录审计模块 3 接口（查询侧；写入侧随登录 defer 落库）。
-// 删除/清空为留存量管控入口，独立权限；行按租户隔离（TenantPlugin 注入 tenant_id）。
+// registerLoginLogs login audit module 3 interfaces (query side; the write side is persisted via login defer).
+// Delete/clean are the retention-control entry points with independent permissions; rows are isolated by tenant (TenantPlugin injects tenant_id).
 func registerLoginLogs(api huma.API, h *apiv1.LoginLogHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"login-logs"},
@@ -258,8 +262,8 @@ func registerLoginLogs(api huma.API, h *apiv1.LoginLogHandler, kit *middleware.K
 		OperationID: "loginlog-list",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/login-logs",
-		Summary:     "登录日志列表",
-		Description: "登录审计分页查询（成功与失败尝试各一行），支持用户名/IP/结果/时间范围筛选。",
+		Summary:     "login log list",
+		Description: "paginated login audit query (one row per success and failure attempt), with username/IP/result/time-range filtering.",
 		Middlewares: kit.Biz("system:loginlog:list"),
 	}), h.List)
 
@@ -267,8 +271,8 @@ func registerLoginLogs(api huma.API, h *apiv1.LoginLogHandler, kit *middleware.K
 		OperationID: "loginlog-delete",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/login-logs",
-		Summary:     "删除登录日志",
-		Description: "按 ID 批量物理删除（ids 逗号分隔，如 ?ids=12,34,56）。",
+		Summary:     "delete login logs",
+		Description: "batch physical delete by ID (ids comma-separated, e.g. ?ids=12,34,56).",
 		Middlewares: kit.Biz("system:loginlog:delete"),
 	}), h.Delete)
 
@@ -276,15 +280,15 @@ func registerLoginLogs(api huma.API, h *apiv1.LoginLogHandler, kit *middleware.K
 		OperationID: "loginlog-clean",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/login-logs/clean",
-		Summary:     "清空登录日志",
-		Description: "清空本租户全部登录审计行（留存量管控，独立权限门控）。",
+		Summary:     "clean login logs",
+		Description: "deletes all login audit rows of the current tenant (retention control, independent permission gated).",
 		Middlewares: kit.Biz("system:loginlog:clean"),
 	}), h.Clean)
 }
 
-// registerOperationLogs 操作审计模块 3 接口（查询侧；写入侧由审计采集中间件
-// 经 audit.Sink 自动落库，无对应写入接口）。
-// 删除/清空为留存量管控入口，独立权限；行按租户隔离（TenantPlugin 注入 tenant_id）。
+// registerOperationLogs operation audit module 3 interfaces (query side; the write side is
+// persisted automatically by the audit-collection middleware via audit.Sink, with no write interface).
+// Delete/clean are the retention-control entry points with independent permissions; rows are isolated by tenant (TenantPlugin injects tenant_id).
 func registerOperationLogs(api huma.API, h *apiv1.OperationLogHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"operation-logs"},
@@ -295,8 +299,8 @@ func registerOperationLogs(api huma.API, h *apiv1.OperationLogHandler, kit *midd
 		OperationID: "operationlog-list",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/operation-logs",
-		Summary:     "操作日志列表",
-		Description: "操作审计分页查询（B 端管理写操作），支持模块/操作者/IP/结果/时间范围筛选。",
+		Summary:     "operation log list",
+		Description: "paginated operation audit query (B-side admin write operations), with module/operator/IP/result/time-range filtering.",
 		Middlewares: kit.Biz("system:operationlog:list"),
 	}), h.List)
 
@@ -304,8 +308,8 @@ func registerOperationLogs(api huma.API, h *apiv1.OperationLogHandler, kit *midd
 		OperationID: "operationlog-delete",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/operation-logs",
-		Summary:     "删除操作日志",
-		Description: "按 ID 批量物理删除（ids 逗号分隔，如 ?ids=12,34,56）。",
+		Summary:     "delete operation logs",
+		Description: "batch physical delete by ID (ids comma-separated, e.g. ?ids=12,34,56).",
 		Middlewares: kit.Biz("system:operationlog:delete"),
 	}), h.Delete)
 
@@ -313,13 +317,13 @@ func registerOperationLogs(api huma.API, h *apiv1.OperationLogHandler, kit *midd
 		OperationID: "operationlog-clean",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/operation-logs/clean",
-		Summary:     "清空操作日志",
-		Description: "清空本租户全部操作审计行（留存量管控，独立权限门控）。",
+		Summary:     "clean operation logs",
+		Description: "deletes all operation audit rows of the current tenant (retention control, independent permission gated).",
 		Middlewares: kit.Biz("system:operationlog:clean"),
 	}), h.Clean)
 }
 
-// registerTenants tenants 模块
+// registerTenants tenants module
 func registerTenants(api huma.API, h *apiv1.TenantHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"tenants"},
@@ -328,34 +332,34 @@ func registerTenants(api huma.API, h *apiv1.TenantHandler, kit *middleware.Kit) 
 
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-list", Method: http.MethodGet, Path: "/api/v1/tenants",
-		Summary: "租户列表", Middlewares: kit.PlatChain("platform:tenant:list"),
+		Summary: "tenant list", Middlewares: kit.PlatChain("platform:tenant:list"),
 	}), h.List)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-get", Method: http.MethodGet, Path: "/api/v1/tenants/{id}",
-		Summary: "租户详情", Middlewares: kit.PlatChain("platform:tenant:query"),
+		Summary: "tenant detail", Middlewares: kit.PlatChain("platform:tenant:query"),
 	}), h.Get)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-create", Method: http.MethodPost, Path: "/api/v1/tenants",
-		Summary: "创建租户", Description: "含租户初始超管。",
+		Summary: "create tenant", Description: "includes the tenant's initial super admin.",
 		Middlewares: kit.PlatChain("platform:tenant:create"),
 	}), h.Create)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-update", Method: http.MethodPut, Path: "/api/v1/tenants/{id}",
-		Summary: "更新租户", Middlewares: kit.PlatChain("platform:tenant:update"),
+		Summary: "update tenant", Middlewares: kit.PlatChain("platform:tenant:update"),
 	}), h.Update)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-update-status", Method: http.MethodPut, Path: "/api/v1/tenants/{id}/status",
-		Summary: "租户启停", Description: "停用即全员下线。",
+		Summary: "tenant enable/disable", Description: "disabling kicks everyone offline.",
 		Middlewares: kit.PlatChain("platform:tenant:update"),
 	}), h.UpdateStatus)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "tenant-delete", Method: http.MethodDelete, Path: "/api/v1/tenants/{id}",
-		Summary: "删除租户", Description: "默认租户不可删；需先停用。",
+		Summary: "delete tenant", Description: "the default tenant cannot be deleted; must be disabled first.",
 		Middlewares: kit.PlatChain("platform:tenant:delete"),
 	}), h.Delete)
 }
 
-// registerAuth auth 模块 7 接口（P1）。
+// registerAuth auth module 7 interfaces (P1).
 func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"auth"},
@@ -368,9 +372,9 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-login",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/login",
-		Summary:     "登录",
-		Description: "校验租户与用户后签发 access token 与 refresh token。",
-		Security:    []map[string][]string{}, // 公开接口覆盖全局安全要求
+		Summary:     "login",
+		Description: "issues an access token and a refresh token after validating the tenant and user.",
+		Security:    []map[string][]string{}, // public interface overrides the global security requirement
 		Middlewares: huma.Middlewares{withClientMeta},
 	}), h.Login)
 
@@ -378,8 +382,8 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-refresh",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/refresh",
-		Summary:     "刷新令牌",
-		Description: "轮换 refresh 会话并签发新的双 token。",
+		Summary:     "refresh token",
+		Description: "rotates the refresh session and issues a new pair of tokens.",
 		Security:    []map[string][]string{},
 	}), h.Refresh)
 
@@ -387,8 +391,8 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-logout",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/logout",
-		Summary:     "登出",
-		Description: "撤销当前会话（踢下线）。",
+		Summary:     "logout",
+		Description: "revokes the current session (kick offline).",
 		Middlewares: logged,
 	}), h.Logout)
 
@@ -396,8 +400,8 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-info",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/auth/info",
-		Summary:     "当前用户信息",
-		Description: "用户、租户、角色编码与权限标识。",
+		Summary:     "current user info",
+		Description: "user, tenant, role codes, and permission identifiers.",
 		Middlewares: biz,
 	}), h.Info)
 
@@ -405,8 +409,8 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-routers",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/auth/routers",
-		Summary:     "前端路由树",
-		Description: "按用户菜单权限生成的前端路由节点树。",
+		Summary:     "frontend route tree",
+		Description: "the frontend route node tree generated from the user's menu permissions.",
 		Middlewares: biz,
 	}), h.Routers)
 
@@ -414,7 +418,7 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-update-profile",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/auth/profile",
-		Summary:     "更新个人信息",
+		Summary:     "update profile",
 		Middlewares: biz,
 	}), h.UpdateProfile)
 
@@ -422,8 +426,8 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "auth-update-password",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/auth/profile/password",
-		Summary:     "修改密码",
-		Description: "校验旧密码后修改，并撤销该用户全部会话（重新登录）。",
+		Summary:     "change password",
+		Description: "changes after validating the old password, and revokes all sessions of that user (re-login).",
 		Middlewares: biz,
 	}), h.UpdatePassword)
 }

@@ -7,13 +7,14 @@ import (
 	"fmt"
 )
 
-// StaticKeySet 是一个固定的 kid → 公钥 集合，适用于单签发方部署或测试。
-// JWKS 轮换场景应实现 KeySet 接口，从远端 JWKS 文档刷新内部映射。
+// StaticKeySet is a fixed kid -> public key set, suitable for single-issuer
+// deployments or tests. For JWKS rotation, implement the KeySet interface and
+// refresh the internal map from a remote JWKS document.
 type StaticKeySet struct {
 	keys map[string]*rsa.PublicKey
 }
 
-// NewStaticKeySet 构建静态公钥集合。
+// NewStaticKeySet builds a static public key set.
 func NewStaticKeySet(keys map[string]*rsa.PublicKey) (*StaticKeySet, error) {
 	if len(keys) == 0 {
 		return nil, ErrInvalidConfig
@@ -28,7 +29,7 @@ func NewStaticKeySet(keys map[string]*rsa.PublicKey) (*StaticKeySet, error) {
 	return &StaticKeySet{keys: copied}, nil
 }
 
-// Lookup 按 kid 解析公钥。
+// Lookup resolves a public key by kid.
 func (s *StaticKeySet) Lookup(kid string) (*rsa.PublicKey, error) {
 	if s == nil {
 		return nil, ErrInvalidConfig
@@ -40,8 +41,9 @@ func (s *StaticKeySet) Lookup(kid string) (*rsa.PublicKey, error) {
 	return key, nil
 }
 
-// PublicKeyFromPrivatePEM 从 PKCS#1/PKCS#8 私钥 PEM 解析出配套公钥，
-// 供服务用自身私钥组装自验签 KeySet（单签发方部署）。
+// PublicKeyFromPrivatePEM parses the matching public key from a PKCS#1/PKCS#8
+// private key PEM, so a service can assemble a self-verifying KeySet from its
+// own private key (single-issuer deployment).
 func PublicKeyFromPrivatePEM(privatePEM []byte) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode(privatePEM)
 	if block == nil {

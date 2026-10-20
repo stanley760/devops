@@ -1,37 +1,51 @@
-// Package oauth2 实现 C 端三方登录（GitHub / Google / 微信）的授权码流程。
+// Package oauth2 implements the C-side third-party login (GitHub / Google /
+// WeChat) authorization code flow.
 //
-// ## 流程
+// ## Flow
 //
 //  1. GET  /user/api/v1/oauth/providers
-//     生成 state（防CSRF），拼授权 URL 返回前端；
-//  2. 前端跳转到三方页面，用户授权后三方回调
+//     generates a state (CSRF protection), builds the authorize URL and
+//     returns it to the frontend;
+//  2. the frontend redirects to the third-party page; after the user
+//     authorizes, the third party calls back
 //     GET /user/api/v1/oauth/{provider}/callback?code&state
-//     校验 state → 用 code 换 token → 拉三方用户信息；
-//  3. 按 (provider, provider_user_id) 查绑定：
-//     - 已有绑定 → 签发本地双token；
-//     - 无绑定 → 按配置决定「自动建号」或「要求先登录再绑定」。
+//     verify state → exchange code for a token → fetch third-party user info;
+//  3. look up the binding by (provider, provider_user_id):
+//     - already bound → issue a local token pair;
+//     - not bound → per config, decide between "auto-create an account" or
+//     "require login first, then bind".
 //
-// ## 安全要点
+// ## Security notes
 //
-//   - **state 必须校验且一次性**：不校验则登录可被 CSRF 劫持
-//     （攻击者把自己的 code 塞给受害者登录到自己账号）；
-//     不一次性则同一个 state 可被重放。
-//   - **provider_user_id 用三方稳定标识**，不用 username/email/nickname——
-//     前两者可改可换，微信昵称可重复，用作绑定键会引发错绑与冒用。
-//     各家取值：GitHub 数字 ID、Google `sub`、微信 `unionid`（缺失时退 openid）。
-//   - **Google / 微信必须校验响应真实性**：Google 走 tokeninfo 校验 aud/iss；
-//     微信无 id_token，安全性来自「code 一次性 + 10 分钟过期」+ 全程 HTTPS，
-//     故必须校验 openid 非空且显式判 errcode（**微信出错也返回 HTTP 200**）。
-//   - 拿到的三方 token 属高敏感凭据，生产须加密入库（见 model/oauth.go）。
+//   - **state must be verified and one-time**: without verification, login can
+//     be hijacked by CSRF (the attacker feeds their own code to the victim to
+//     log them into the attacker's account); without one-time use, the same
+//     state can be replayed.
+//   - **provider_user_id uses the third party's stable identifier**, not
+//     username/email/nickname — the first two can change or be swapped, and
+//     WeChat nicknames can repeat; using them as the binding key causes
+//     misbinding and impersonation. Values per provider: GitHub numeric ID,
+//     Google `sub`, WeChat `unionid` (falls back to openid when absent).
+//   - **Google / WeChat responses must be verified for authenticity**: Google
+//     goes through tokeninfo to verify aud/iss; WeChat has no id_token, so
+//     security comes from "one-time code + 10-minute expiry" + HTTPS
+//     throughout, hence openid must be verified non-empty and errcode checked
+//     explicitly (**WeChat returns HTTP 200 even on error**).
+//   - Third-party tokens obtained are highly sensitive credentials and must be
+//     encrypted before storage in production (see model/oauth.go).
 //
-// ## 依赖边界
+// ## Dependency boundary
 //
-// 本包只依赖golang.org/x/oauth2 与标准库，**不依赖本项目的 dao/model**，
-// 以便独立测试与复用。三方用户信息的解析差异也收敛在 provider.go 内。
+// This package depends only on golang.org/x/oauth2 and the standard library,
+// and **does not depend on this project's dao/model**, so it can be tested and
+// reused independently. The parsing differences of third-party user info are
+// also contained within provider.go.
 //
-// ⚠️ 微信的授权端点不是标准 OAuth2 端点（需 #wechat_redirect fragment、
-// redirect_uri 单层编码、scope 固定 snsapi_login），故 WeChatProvider
-// **不使用** oauth2.Config.AuthCodeURL，手工拼装——详见 provider.go。
+// ⚠️ WeChat's authorize endpoint is not a standard OAuth2 endpoint (it needs
+// the #wechat_redirect fragment, single-layer encoding of redirect_uri, and a
+// fixed scope of snsapi_login), so WeChatProvider **does not use**
+// oauth2.Config.AuthCodeURL and builds the URL by hand — see provider.go for
+// details.
 package oauth2
 
 import (
@@ -40,70 +54,85 @@ import (
 	"time"
 )
 
-// ErrStateInvalid state 无效、过期或已被使用（CSRF 防护失败）。
-var ErrStateInvalid = errors.New("state 无效或已过期")
+// ErrStateInvalid means the state is invalid, expired, or already used (CSRF
+// protection failure).
+var ErrStateInvalid = errors.New("state is invalid or has expired")
 
-// ErrProviderUnsupported 不支持的三方提供方。
-var ErrProviderUnsupported = errors.New("不支持的三方登录提供方")
+// ErrProviderUnsupported means the third-party provider is unsupported.
+var ErrProviderUnsupported = errors.New("unsupported third-party login provider")
 
-// ErrExchangeFailed 用授权码换 token 失败（通常是 code 过期或已用）。
-var ErrExchangeFailed = errors.New("授权码校验失败")
+// ErrExchangeFailed means exchanging the authorization code for a token failed
+// (usually the code expired or was already used).
+var ErrExchangeFailed = errors.New("authorization code verification failed")
 
-// UserInfo 三方侧的用户信息（已归一化，跨提供方统一）。
+// UserInfo is the third-party side's user info (normalized, uniform across
+// providers).
 //
-// ⚠️ Email 未必已验证：GitHub 的公开邮箱就属于此类。
-// **不可用它做账号关联或找回密码**，仅作展示。需邮箱的场景必须走
-// 各提供方的「已验证邮箱」接口或让用户自行验证。
+// ⚠️ Email may not be verified: GitHub's public email is a case in point.
+// **It must not be used for account association or password recovery**, only
+// for display. Scenarios needing an email must go through each provider's
+// "verified email" endpoint or have the user verify it themselves.
 type UserInfo struct {
-	// ProviderUserID 提供方内的稳定用户标识（绑定键）。
+	// ProviderUserID is the stable user identifier within the provider (the
+	// binding key).
 	ProviderUserID string
 	Nickname       string
-	Email          string // 可能未验证，仅展示用
+	Email          string // may be unverified, for display only
 	AvatarURL      string
 }
 
-// Config 单个提供方的配置。
+// Config is the configuration for a single provider.
 type Config struct {
-	// ClientID / ClientSecret 三方应用凭据。Secret 由密钥管理注入，禁止入库。
+	// ClientID / ClientSecret are third-party app credentials. Secret is
+	// injected by secret management and must not be committed.
 	ClientID     string
 	ClientSecret string
-	// RedirectURL 回调地址，须与三方后台登记的完全一致。
+	// RedirectURL is the callback URL; it must match exactly what is
+	// registered in the third-party console.
 	RedirectURL string
-	// Scopes 申请的权限范围。
+	// Scopes are the requested permission scopes.
 	Scopes []string
-	// AutoRegister 未绑定三方账号时是否自动创建本地用户。
+	// AutoRegister controls whether to auto-create a local user when the
+	// third-party account is not bound.
 	//
-	// ⚠️ 自动建号会把「任何能登录该三方的人」变成本地用户。
-	// 若产品不希望账号被随意创建，置false：未绑定时返回「请先登录并绑定」，
-	// 由已登录用户主动绑定（此时可做「登录用户与三方账号一致性」校验）。
+	// ⚠️ Auto-creating accounts turns "anyone who can log into that third
+	// party" into a local user. If the product does not want accounts created
+	// at will, set it to false: when not bound, return "please log in and bind
+	// first", and let an already-logged-in user bind actively (which allows a
+	// "logged-in user vs third-party account consistency" check).
 	AutoRegister bool
-	// NicknamePrefix 自动建号时昵称前缀，便于识别来源（如 "GitHub:"）。
+	// NicknamePrefix is the nickname prefix when auto-creating accounts, to
+	// identify the source (e.g. "GitHub:").
 	NicknamePrefix string
 }
 
-// Enabled 该提供方是否可用（凭据齐备）。
+// Enabled reports whether the provider is usable (credentials complete).
 func (c Config) Enabled() bool {
 	return c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
 }
 
-// StateStore state 的存取（防 CSRF）。
+// StateStore is the storage of the state (CSRF protection).
 //
-// 必须「一次性」消费：Verify 成功后立即删除。允许重放等于没有防护。
+// It must be consumed "one-time": deleted immediately after a successful
+// Verify. Allowing replay is equivalent to no protection.
 type StateStore interface {
-	// Save 存入 state（携带 state → provider / 跳转后目标地址的映射）。
+	// Save stores the state (carrying the state → provider /
+	// post-redirect target mapping).
 	Save(ctx context.Context, state string, val StateValue, ttl time.Duration) error
-	// Verify 校验并**一次性**取出。无效/已用过都返回 ErrStateInvalid。
+	// Verify verifies and **one-time** retrieves it. Invalid or already-used
+	// both return ErrStateInvalid.
 	Verify(ctx context.Context, state string) (StateValue, error)
 }
 
-// StateValue state 关联的数据。
+// StateValue is data associated with the state.
 type StateValue struct {
 	Provider string
-	// RedirectAfter 登录成功后跳回的前端地址。
+	// RedirectAfter is the frontend URL to return to after a successful login.
 	//
-	// ⚠️ 必须校验白名单：未校验则攻击者可用 open redirect 钓鱼
-	// （跳转到自己的站点偷取 token）。
+	// ⚠️ A whitelist must be enforced: without it, an attacker can use an open
+	// redirect to phish (redirecting to their own site to steal the token).
 	RedirectAfter string
-	// BindUserID > 0 表示「已登录用户主动绑定三方账号」，回调后绑到该用户。
+	// BindUserID > 0 means "a logged-in user actively binding a third-party
+	// account"; after the callback it is bound to that user.
 	BindUserID int64
 }

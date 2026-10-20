@@ -1,4 +1,4 @@
-# Grafana 数据源一次性配置：Prometheus（默认）+ Jaeger（trace ↔ metrics 互跳）。
+# Grafana datasource one-shot config: Prometheus (default) + Jaeger (trace ↔ metrics cross-navigation).
 apiVersion: 1
 datasources:
   - name: Prometheus
@@ -7,11 +7,11 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     jsonData:
-      timeInterval: 15s          # 与 Prometheus scrape_interval 对齐
+      timeInterval: 15s          # aligned with the Prometheus scrape_interval
   - name: Jaeger
     type: jaeger
     uid: jaeger
     url: http://jaeger:16686
     jsonData:
       tracesToMetrics:
-        datasourceUid: prometheus   # 从 span 跳转到对应指标面板
+        datasourceUid: prometheus   # jump from a span to the corresponding metrics dashboard

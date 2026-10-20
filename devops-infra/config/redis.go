@@ -1,6 +1,6 @@
 package config
 
-// RedisConfig Redis 连接配置
+// RedisConfig is the Redis connection config.
 type RedisConfig struct {
 	Host     string `mapstructure:"host"`
 	Port     int    `mapstructure:"port"`

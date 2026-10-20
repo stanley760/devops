@@ -1,6 +1,6 @@
--- t_system_menu 初始数据（全局表）：菜单母本全量 34 行。
--- 目录/菜单 1-9，按钮 = 父菜单 ID*10+序号；按钮 always_show=FALSE。
--- 显式 ID、不走发号。ON DUPLICATE KEY UPDATE id = id 保证重复执行无副作用。
+-- t_system_menu initial data (global table): the full menu master set, 34 rows.
+-- Directories/menus 1-9, buttons = parent menu ID*10 + sequence number; buttons have always_show=FALSE.
+-- Explicit ID, no ID issuance. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_menu
     (id, creator, create_time, updater, update_time,
      name, permission, type, sort, parent_id, path, icon, component,

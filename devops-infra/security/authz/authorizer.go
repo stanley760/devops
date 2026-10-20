@@ -32,14 +32,14 @@ type CasbinAuthorizer struct {
 	roles    RoleConfig
 }
 
-// Option 构造期可选配置。
+// Option is construction-time optional configuration.
 type Option func(*options)
 
 type options struct {
 	roles RoleConfig
 }
 
-// WithRoles 自定义角色名（零值字段回填默认）。
+// WithRoles customizes role names (zero-value fields fall back to defaults).
 func WithRoles(c RoleConfig) Option {
 	return func(o *options) { o.roles = c }
 }
@@ -76,7 +76,7 @@ func New(gdb *gorm.DB, opts ...Option) (*CasbinAuthorizer, error) {
 	return &CasbinAuthorizer{enforcer: enforcer, roles: roles}, nil
 }
 
-// Roles 当前生效的角色名配置（种子与判定同源）。
+// Roles returns the role name configuration currently in effect (single source for seeding and checks).
 func (a *CasbinAuthorizer) Roles() RoleConfig {
 	if a == nil {
 		return DefaultRoleConfig()

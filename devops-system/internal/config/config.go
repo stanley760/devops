@@ -1,7 +1,9 @@
-// Package config 定义 devops-system 服务的配置结构。
+// Package config defines the configuration structures for the devops-system
+// service.
 //
-// 加载机制复用 devops-infra/config（基础 + APP_ENV 环境覆盖合并），
-// 本包只定义自己的根 Config 与专有配置段。
+// The loading mechanism reuses devops-infra/config (base + APP_ENV
+// environment override merging); this package only defines its own root
+// Config and service-specific sections.
 package config
 
 import (
@@ -12,10 +14,10 @@ import (
 	securityjwt "github.com/stanley760/devops/devops-infra/security/jwt"
 )
 
-// DefaultJWTKeyID key_id 未配置时的默认 kid（token 头与 JWKS 一致）。
+// DefaultJWTKeyID is the default kid when key_id is not configured (consistent between the token header and JWKS).
 const DefaultJWTKeyID = "devops-system-rs256-1"
 
-// Config devops-system 服务根配置，对应 config/config.yaml 顶层结构
+// Config is the devops-system service root config, corresponding to the top-level structure of config/config.yaml
 type Config struct {
 	Server        config.ServerConfig `mapstructure:"server"`
 	Log           config.LogConfig    `mapstructure:"log"`
@@ -30,20 +32,23 @@ type Config struct {
 	Gateway       gateway.Config      `mapstructure:"gateway"`
 }
 
-// JWTConfig JWT 双 token 配置。
+// JWTConfig is the JWT dual-token config.
 //
-// access token 已从 HS256 升级为 RS256 + kid（存量 HS256 token 升级时整体失效，
-// refresh 会话不受影响）。signing_key 语义随之变更为 RSA 私钥 PEM（PKCS#1/PKCS#8），
-// 由配置/密钥管理持有；公钥经 JWKS 暴露给 Higress 与各服务验签。
+// The access token has been upgraded from HS256 to RS256 + kid (existing
+// HS256 tokens all become invalid on upgrade; refresh sessions are
+// unaffected). The signing_key semantics changed accordingly to an RSA
+// private key PEM (PKCS#1/PKCS#8), held by configuration/secret
+// management; the public key is exposed via JWKS to Higress and the
+// services for verification.
 type JWTConfig struct {
-	SigningKey    string        `mapstructure:"signing_key"`    // RS256 私钥 PEM
-	KeyID         string        `mapstructure:"key_id"`         // kid 头（轮换标识），缺省 DefaultJWTKeyID
-	Issuer        string        `mapstructure:"issuer"`         // 签发者
-	AccessExpire  time.Duration `mapstructure:"access_expire"`  // access token 有效期
-	RefreshExpire time.Duration `mapstructure:"refresh_expire"` // refresh token（会话）有效期
+	SigningKey    string        `mapstructure:"signing_key"`    // RS256 private key PEM
+	KeyID         string        `mapstructure:"key_id"`         // kid header (rotation identifier); defaults to DefaultJWTKeyID
+	Issuer        string        `mapstructure:"issuer"`         // issuer
+	AccessExpire  time.Duration `mapstructure:"access_expire"`  // access token lifetime
+	RefreshExpire time.Duration `mapstructure:"refresh_expire"` // refresh token (session) lifetime
 }
 
-// EffectiveKeyID 返回生效的 kid。
+// EffectiveKeyID returns the effective kid.
 func (c JWTConfig) EffectiveKeyID() string {
 	if c.KeyID == "" {
 		return DefaultJWTKeyID
@@ -51,9 +56,11 @@ func (c JWTConfig) EffectiveKeyID() string {
 	return c.KeyID
 }
 
-// SharedJWTConfig 映射为共享 JWT 配置（YAML 键不变，仅做转换）。
-// keySet 由调用方注入：服务自验签场景传承载自身公钥的 StaticKeySet，
-// 多签发方/轮换场景传 JWKS 后端实现。
+// SharedJWTConfig maps to the shared JWT config (the YAML keys are
+// unchanged; this is a pure conversion). The keySet is injected by the
+// caller: the self-verifying service scenario passes a StaticKeySet holding
+// its own public key, while the multi-issuer/rotation scenario passes a
+// JWKS-backed implementation.
 func (c JWTConfig) SharedJWTConfig(keySet securityjwt.KeySet) securityjwt.Config {
 	return securityjwt.Config{
 		PrivateKeyPEM: []byte(c.SigningKey),
@@ -65,29 +72,29 @@ func (c JWTConfig) SharedJWTConfig(keySet securityjwt.KeySet) securityjwt.Config
 	}
 }
 
-// TenantConfig 单库多租户配置。
+// TenantConfig is the single-database multi-tenant config.
 type TenantConfig struct {
-	DefaultCode string `mapstructure:"default_code"` // 登录未指定租户时的默认租户 code
+	DefaultCode string `mapstructure:"default_code"` // default tenant code when no tenant is specified at login
 }
 
-// IDClientConfig devops-id 发号服务接入配置（含客户端预取缓冲）
+// IDClientConfig is the devops-id issuance-service client config (including the client prefetch buffer)
 type IDClientConfig struct {
-	Endpoint    string        `mapstructure:"endpoint"`     // devops-id gRPC 地址
-	Batch       int           `mapstructure:"batch"`        // 预取批量（1 = 关闭预取，逐次 RPC）
-	LowWater    float64       `mapstructure:"low_water"`    // 预取水位（剩余比例）
-	DialTimeout time.Duration `mapstructure:"dial_timeout"` // 拨号超时
-	CallTimeout time.Duration `mapstructure:"call_timeout"` // 单次调用超时
+	Endpoint    string        `mapstructure:"endpoint"`     // devops-id gRPC address
+	Batch       int           `mapstructure:"batch"`        // prefetch batch size (1 = prefetch disabled, one RPC per call)
+	LowWater    float64       `mapstructure:"low_water"`    // prefetch low-water mark (remaining ratio)
+	DialTimeout time.Duration `mapstructure:"dial_timeout"` // dial timeout
+	CallTimeout time.Duration `mapstructure:"call_timeout"` // per-call timeout
 }
 
-// ObservabilityConfig 服务级观测配置；ServiceName 由 nacos.registry.service_name 派生。
+// ObservabilityConfig is the service-level observability config; ServiceName is derived from nacos.registry.service_name.
 type ObservabilityConfig struct {
-	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP 出口；空表示本地 span 不上报
-	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // 根采样率，<=0 视为 1.0
-	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // 是否启用 Prometheus 指标
+	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP exporter; empty means local spans are not reported
+	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // root sampling ratio; <=0 is treated as 1.0
+	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // whether to enable Prometheus metrics
 }
 
-// APIDocConfig OpenAPI 文档门控。BasePath 是文档挂载路径，而非 OpenAPI servers URL。
+// APIDocConfig is the OpenAPI documentation gate. BasePath is the documentation mount path, not an OpenAPI servers URL.
 type APIDocConfig struct {
-	Enabled  bool   `mapstructure:"enabled"`   // 仅 dev/test 开启，prod 必须关闭
-	BasePath string `mapstructure:"base_path"` // 默认 /apidoc
+	Enabled  bool   `mapstructure:"enabled"`   // enabled in dev/test only; must be disabled in prod
+	BasePath string `mapstructure:"base_path"` // defaults to /apidoc
 }

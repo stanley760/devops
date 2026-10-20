@@ -1,22 +1,34 @@
-// Package auth 认证门面：JWT 双 token 与 Redis 会话管理（C 端形态）。
+// Package auth is the authentication facade: JWT dual tokens and Redis session
+// management (C-side form).
 //
-// 签发/校验/会话全部委托共享实现，本包只做C 端的语义适配：
+// Issuance/verification/sessions are all delegated to the shared
+// implementation; this package only adapts C-side semantics:
 //
-//   - devops-infra/security/jwt：RS256 + kid 签发/解析，短期 access token；
-//   - devops-infra/security/session：Redis 会话态，每个请求校验会话存在，
-//     因此登出/改密/封禁后旧 access 立即失效；
-//   - devops-infra/security/middleware：框架无关认证决策（Bearer 解析 → token
-//     解析 → 会话态），Authenticate 供中间件消费。
+//   - devops-infra/security/jwt: RS256 + kid issuance/parsing, short-lived
+//     access token;
+//   - devops-infra/security/session: Redis session state, verified on every
+//     request, so old access tokens die immediately after logout/password
+//     change/ban;
+//   - devops-infra/security/middleware: framework-agnostic authentication
+//     decisions (Bearer parsing → token parsing → session state), with
+//     Authenticate consumed by middleware.
 //
-// ## 与 devops-system 的差异（C 端有意为之，不是遗漏）
+// ## Differences from devops-system (deliberate on the C side, not an
+// oversight)
 //
-// 共享的 session.Store 以 TenantID 划分 Redis 键空间（t{tid}:auth:*）且强制
-// TenantID > 0，而 C 端 devops-user 是单租户形态。为复用该实现，本包引入
-// 一个**固定哨兵租户 ID**（DefaultTenantID = 1）承载键空间与 claims.tid：
+// The shared session.Store partitions the Redis keyspace by TenantID
+// (t{tid}:auth:*) and enforces TenantID > 0, while the C-side devops-user is
+// single-tenant. To reuse that implementation, this package introduces a
+// **fixed sentinel tenant ID** (DefaultTenantID = 1) to carry the keyspace and
+// claims.tid:
 //
-//   - 不代表真实租户，仅作键空间隔离与接口占位；
-//   - 业务代码不得依据 claims.TenantID 做租户过滤（C 端本就没有租户概念）；
-//   - 若将来 C 端引入多租户，届时应新建独立 session.Store 实现而非继续复用哨兵值。
+//   - it does not represent a real tenant, only keyspace isolation and an
+//     interface placeholder;
+//   - business code must not do tenant filtering based on claims.TenantID (the
+//     C side has no tenant concept);
+//   - if the C side ever adopts multi-tenancy, a new independent
+//     session.Store implementation should be created rather than continuing to
+//     reuse the sentinel value.
 package auth
 
 import (
@@ -34,13 +46,16 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/refreshtoken"
 )
 
-// DefaultTenantID 共享 session.Store 要求的正整数租户 ID（C 端单租户哨兵值）。
+// DefaultTenantID is the positive tenant ID required by the shared
+// session.Store (a C-side single-tenant sentinel value).
 //
-// 仅用于 Redis 键空间与 claims.tid 占位，**不代表真实租户**。
-// 业务代码禁止依据 TenantID 做租户隔离判断。
+// Used only as a placeholder for the Redis keyspace and claims.tid; **it does
+// not represent a real tenant**. Business code must not make tenant isolation
+// decisions based on TenantID.
 const DefaultTenantID int64 = 1
 
-// AccessClaims access token 载荷（JSON 标签与 JWT 通用实现对齐）。
+// AccessClaims is the access token payload (JSON tags aligned with the shared
+// JWT implementation).
 type AccessClaims struct {
 	UserID     int64  `json:"uid"`
 	Username   string `json:"username"`
@@ -50,8 +65,9 @@ type AccessClaims struct {
 	securityjwt.RegisteredClaims
 }
 
-// FromShared 共享 claims → 本服务 AccessClaims（中间件边界一次性转换，
-// 业务 handler 不依赖基础设施包类型）。
+// FromShared converts shared claims to this service's AccessClaims (a one-time
+// conversion at the middleware boundary, so business handlers do not depend on
+// infrastructure package types).
 func FromShared(c *securityjwt.Claims) *AccessClaims {
 	if c == nil {
 		return nil
@@ -66,25 +82,28 @@ func FromShared(c *securityjwt.Claims) *AccessClaims {
 	}
 }
 
-// ClaimsFrom 从 context 取 JWT 载荷（JWT 中间件之后可用）。
+// ClaimsFrom gets the JWT payload from the context (available after the JWT
+// middleware).
 func ClaimsFrom(ctx context.Context) *AccessClaims {
 	return FromShared(securitymiddleware.HumaCurrentClaims(ctx))
 }
 
-// Manager JWT + 会话管理器（共享实现门面）。
+// Manager is the JWT + session manager (a facade over the shared
+// implementation).
 type Manager struct {
 	cfg      config.JWTConfig
 	tokens   *securityjwt.Manager
 	sessions securitysession.Store
-	// refreshTokens 存 refresh token（不透明随机串）。
+	// refreshTokens stores refresh tokens (opaque random strings).
 	refreshTokens *refreshtoken.Store
 	authn         *securitymiddleware.Authenticator
 }
 
-// New 创建管理器。装配见 cmd/root.go。
+// New creates a manager. Wiring is in cmd/root.go.
 //
-// refreshTokens 为 nil 时 Refresh 返回 ErrRefreshInvalid（不 nil 解引用），
-// 此时 access 的签发与校验仍正常——便于按环境开关 refresh 功能。
+// When refreshTokens is nil, Refresh returns ErrRefreshInvalid (no nil
+// dereference), while access token issuance and verification still work
+// normally — making it easy to toggle the refresh feature per environment.
 func New(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securitysession.Store, refresh *refreshtoken.Store) *Manager {
 	return &Manager{
 		cfg:           cfg,
@@ -95,24 +114,28 @@ func New(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securityses
 	}
 }
 
-// JWKS 输出验签公钥的 JWKS 文档，供 Higress jwt-auth 与其他服务验签。
+// JWKS returns the JWKS document carrying the verification public key, for
+// Higress jwt-auth and other services to verify signatures.
 func (m *Manager) JWKS() (map[string]any, error) {
 	return m.tokens.JWKS()
 }
 
-// Authenticate 共享认证决策：Bearer 解析 → token 解析 → 会话态校验。
-// 中间件消费本方法，故必须满足 securitymw.BearerAuthenticator。
+// Authenticate is the shared authentication decision: Bearer parsing → token
+// parsing → session state verification. Middleware consumes this method, so it
+// must satisfy securitymw.BearerAuthenticator.
 func (m *Manager) Authenticate(ctx context.Context, bearerHeader string) (*securityjwt.Claims, error) {
 	return m.authn.Authenticate(ctx, bearerHeader)
 }
 
-// Issue 签发 access + refresh 双 token。
+// Issue issues an access + refresh token pair.
 //
-// refresh 是 **256 位随机不透明串**（服务端只存哈希），**不是 access token**——
-// 复用 access 当 refresh 会让攻击者无限续命，且登出/封禁无法真正作废它。
+// refresh is a **256-bit random opaque string** (the server stores only the
+// hash), **not the access token** — reusing access as refresh would let an
+// attacker renew indefinitely, and logout/ban could not truly revoke it.
 //
-// access 的有效期由 jwt.access_expire 决定；refresh 的有效期由
-// refreshtoken.Store 的 TTL（= jwt.refresh_expire）决定，二者独立。
+// The access lifetime is governed by jwt.access_expire; the refresh lifetime
+// is governed by the refreshtoken.Store TTL (= jwt.refresh_expire); the two
+// are independent.
 func (m *Manager) Issue(ctx context.Context, userID int64, username string) (TokenPair, error) {
 	sid := uuid.NewString()
 	pair, err := m.tokens.Issue(ctx, securityjwt.Subject{
@@ -148,23 +171,27 @@ func (m *Manager) Issue(ctx context.Context, userID int64, username string) (Tok
 	}, nil
 }
 
-// TokenPair 双 token签发结果。
+// TokenPair is the token pair issuance result.
 type TokenPair struct {
-	AccessToken  string `json:"access_token" doc:"访问令牌"`
-	RefreshToken string `json:"refresh_token" doc:"刷新令牌（不透明随机串，非 JWT）"`
-	ExpiresIn    int64  `json:"expires_in" doc:"访问令牌有效期（秒）"`
-	IssuedAt     int64  `json:"issued_at" doc:"签发时间（Unix 毫秒）"`
+	AccessToken  string `json:"access_token" doc:"access token"`
+	RefreshToken string `json:"refresh_token" doc:"refresh token (opaque random string, not JWT)"`
+	ExpiresIn    int64  `json:"expires_in" doc:"access token lifetime (seconds)"`
+	IssuedAt     int64  `json:"issued_at" doc:"issued at (Unix milliseconds)"`
 }
 
-// Refresh 用 refresh token 换新双 token（轮换：旧 refresh 立即失效）。
+// Refresh exchanges a refresh token for a new token pair (rotating: the old
+// refresh token dies immediately).
 //
-// username 由调用方从库里查得后传入——刷新时若不带用户名，新access token 的
-// username claim 会是空的，后续任何依赖该claim 的审计/展示都会失真。
+// username is looked up from the database by the caller and passed in — if the
+// username is missing on refresh, the new access token's username claim would
+// be empty, and any downstream audit/display relying on that claim would be
+// wrong.
 //
-// 语义：
-//   - refresh 不存在 / 已过期 / 已轮换 / 格式非法 → ErrRefreshInvalid
-//     （四种情况合并，防探测）；
-//   - 轮换是原子的，并发刷新只有一个能成功（见 refreshtoken.Store.Rotate）。
+// Semantics:
+//   - refresh does not exist / expired / rotated / malformed → ErrRefreshInvalid
+//     (four cases merged to prevent probing);
+//   - rotation is atomic; only one concurrent refresh can succeed (see
+//     refreshtoken.Store.Rotate).
 func (m *Manager) Refresh(ctx context.Context, refreshPlain, username string) (TokenPair, error) {
 	if m.refreshTokens == nil {
 		return TokenPair{}, ErrRefreshInvalid
@@ -175,8 +202,9 @@ func (m *Manager) Refresh(ctx context.Context, refreshPlain, username string) (T
 		return TokenPair{}, ErrRefreshInvalid
 	}
 
-	// access 与 refresh 轮换后共享同一 sid：这样轮换 refresh 时不必重建会话，
-	// 用户正在使用的会话不会因刷新而被误踢下线。
+	// access and refresh share the same sid after rotation: this way rotating
+	// a refresh token does not need to rebuild the session, and the session
+	// the user is currently using is not kicked offline by a refresh.
 	sid := uuid.NewString()
 	pair, err := m.tokens.Issue(ctx, securityjwt.Subject{
 		UserID:     userID,
@@ -192,7 +220,8 @@ func (m *Manager) Refresh(ctx context.Context, refreshPlain, username string) (T
 	if err != nil {
 		return TokenPair{}, err
 	}
-	// 原子轮换：查旧 → 删旧 → 写新。失败说明已被并发用掉。
+	// Atomic rotation: look up old → delete old → write new. Failure means it
+	// was already used concurrently.
 	if err := m.refreshTokens.Rotate(ctx, oldHash, newHash, userID); err != nil {
 		return TokenPair{}, ErrRefreshInvalid
 	}
@@ -212,7 +241,8 @@ func (m *Manager) Refresh(ctx context.Context, refreshPlain, username string) (T
 	}, nil
 }
 
-// RevokeRefresh 作废指定 refresh token（改密 / 登出时用）。
+// RevokeRefresh invalidates a specific refresh token (used on password change
+// / logout).
 func (m *Manager) RevokeRefresh(ctx context.Context, refreshPlain string) error {
 	if m.refreshTokens == nil || refreshPlain == "" {
 		return nil
@@ -220,17 +250,22 @@ func (m *Manager) RevokeRefresh(ctx context.Context, refreshPlain string) error 
 	return m.refreshTokens.Delete(ctx, refreshtoken.Hash(refreshPlain))
 }
 
-// RevokeUserSessions 强制该用户**全端下线**：撤销其全部 refresh + 全部 access 会话。
+// RevokeUserSessions forces the user **offline on all devices**: revoking all
+// of their refresh tokens and all access sessions.
 //
-// 组合两侧的撤销能力：
-//   - refresh 侧：refreshtoken.RevokeUser（依赖 user → hashes 反查索引）；
-//   - access 侧：session.Store.RevokeUser（枚举 sids 集合）。
+// It combines revocation on both sides:
+//   - refresh side: refreshtoken.RevokeUser (relies on the user → hashes
+//     reverse index);
+//   - access side: session.Store.RevokeUser (enumerates the sids set).
 //
-// 两者都是「全端」——用户在手机/平板/PC 上的所有会话同时失效。
+// Both are "all devices" — every session of the user on phone/tablet/PC dies
+// at once.
 //
-// ⚠️ 已签发的 access JWT 在被撤销后仍可用到自然过期：本服务每个请求都经
-// HumaAuthenticate 校验 Redis 会话态（infra/security/middleware），故撤销后
-// **下一次请求即401**，无需等到JWT 过期。这是「有状态校验」带来的好处。
+// ⚠️ An issued access JWT remains usable until natural expiry even after
+// revocation: every request in this service goes through HumaAuthenticate,
+// which verifies the Redis session state (infra/security/middleware), so after
+// revocation **the next request gets 401**, with no need to wait for JWT
+// expiry. That is the benefit of "stateful verification".
 func (m *Manager) RevokeUserSessions(ctx context.Context, userID int64) error {
 	var errs []error
 	if m.refreshTokens != nil {
@@ -244,10 +279,12 @@ func (m *Manager) RevokeUserSessions(ctx context.Context, userID int64) error {
 	return errors.Join(errs...)
 }
 
-// RevokeUserSessionsExcept 全端下线但保留指定 refresh 对应的设备
-// （当前调用方的设备），用于「改密后把其他设备都踢掉」的场景。
+// RevokeUserSessionsExcept forces offline on all devices but keeps the device
+// corresponding to a given refresh token (the current caller's device), for
+// the "kick all other devices after a password change" scenario.
 //
-// keepPlain 为空时等价于 RevokeUserSessions（全踢）。
+// When keepPlain is empty it is equivalent to RevokeUserSessions (kick
+// everything).
 func (m *Manager) RevokeUserSessionsExcept(ctx context.Context, userID int64, keepPlain string) error {
 	var errs []error
 	if m.refreshTokens != nil {
@@ -259,24 +296,29 @@ func (m *Manager) RevokeUserSessionsExcept(ctx context.Context, userID int64, ke
 			errs = append(errs, err)
 		}
 	}
-	// access 侧无法按 refresh 反查 sid（session 侧只有 user → sids 集合），
-	// 故这里不做 Except——保留设备会同时被踢，需要重登录一次。
-	// 若产品要求「保留当前设备」，需给 session 侧补 sid → refreshHash 的反查。
+	// The access side cannot reverse-lookup sid from a refresh token (the
+	// session side only has a user → sids set), so there is no Except here —
+	// the kept device is kicked too and needs to log in once more. If the
+	// product requires "keep the current device", the session side needs a
+	// sid → refreshHash reverse index.
 	if err := m.sessions.RevokeUser(ctx, DefaultTenantID, userID); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-// ErrRefreshInvalid refresh token 无效（不存在 / 已过期 / 已轮换 / 格式非法）。
+// ErrRefreshInvalid means the refresh token is invalid (does not exist /
+// expired / rotated / malformed).
 //
-// 三种情况合并为一个错误：区分会让攻击者据此判断某个 token 是否曾经有效。
-var ErrRefreshInvalid = errors.New("刷新令牌无效或已过期")
+// The cases are merged into a single error: distinguishing them would let an
+// attacker tell whether a token was ever valid.
+var ErrRefreshInvalid = errors.New("refresh token is invalid or has expired")
 
-// ErrAccountDisabled 账号已被封禁。
-var ErrAccountDisabled = errors.New("账号已被封禁")
+// ErrAccountDisabled means the account has been banned.
+var ErrAccountDisabled = errors.New("account has been banned")
 
-// Parse 解析 access token（不校验会话态，仅供需要读载荷的内部逻辑）。
+// Parse parses an access token (no session state verification; for internal
+// logic that only needs the payload).
 func (m *Manager) Parse(token string) (*AccessClaims, error) {
 	claims, err := m.tokens.ParseAccess(token)
 	if err != nil {
@@ -285,7 +327,8 @@ func (m *Manager) Parse(token string) (*AccessClaims, error) {
 	return FromShared(claims), nil
 }
 
-// SessionActive 会话是否仍有效（踢下线/改密/封禁后即失效）。
+// SessionActive reports whether the session is still valid (invalidated
+// immediately after kick/password change/ban).
 func (m *Manager) SessionActive(ctx context.Context, claims *AccessClaims) bool {
 	if claims == nil {
 		return false
@@ -298,7 +341,7 @@ func (m *Manager) SessionActive(ctx context.Context, claims *AccessClaims) bool 
 	return err == nil && active
 }
 
-// Logout 撤销当前会话。
+// Logout revokes the current session.
 func (m *Manager) Logout(ctx context.Context, claims *AccessClaims) error {
 	if claims == nil {
 		return nil

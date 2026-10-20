@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// testDB 每用例独立内存库（sqlite 方言：tableExists 走 sqlite_master 分支）。
+// testDB gives each test case an independent in-memory DB (sqlite dialect: tableExists takes the sqlite_master branch).
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", "\\", "_").Replace(t.Name())
@@ -21,8 +21,8 @@ func testDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// mapFS 构造脚本文件系统（相对 sql/ 的路径 → 内容）。
-// 单测用 sqlite 兼容 SQL，不执行生产 MySQL 脚本（后者只做命名/结构校验）。
+// mapFS builds the script file system (path relative to sql/ -> content).
+// Tests use sqlite-compatible SQL and do not execute the production MySQL scripts (those are only validated for naming/structure).
 func mapFS(files map[string]string) fstest.MapFS {
 	fs := fstest.MapFS{}
 	for name, content := range files {
@@ -58,7 +58,7 @@ func TestRunSecondRunSkipsEverything(t *testing.T) {
 	if err := runFS(db, fs); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	// 第二次执行：表已存在 → 建表与种子全部跳过，数据不重复
+	// second run: the table already exists -> table creation and seeds are all skipped, no duplicate data
 	if err := runFS(db, fs); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -67,13 +67,13 @@ func TestRunSecondRunSkipsEverything(t *testing.T) {
 		t.Fatalf("count: %v", err)
 	}
 	if cnt != 1 {
-		t.Fatalf("re-run rows = %d, want 1（表已存在应跳过种子）", cnt)
+		t.Fatalf("re-run rows = %d, want 1 (seed should be skipped when the table exists)", cnt)
 	}
 }
 
 func TestRunDataSkippedWhenTablePreExists(t *testing.T) {
 	db := testDB(t)
-	// t_a 先于 dbinit 存在（存量表）；t_b 由本次创建
+	// t_a exists before dbinit (pre-existing table); t_b is created by this run
 	if err := db.Exec("CREATE TABLE t_a (id INTEGER PRIMARY KEY)").Error; err != nil {
 		t.Fatalf("pre-create t_a: %v", err)
 	}
@@ -91,23 +91,23 @@ func TestRunDataSkippedWhenTablePreExists(t *testing.T) {
 		t.Fatalf("count t_a: %v", err)
 	}
 	if cnt != 0 {
-		t.Fatalf("t_a rows = %d, want 0（表非本次创建，种子应跳过）", cnt)
+		t.Fatalf("t_a rows = %d, want 0 (table not created by this run, seed should be skipped)", cnt)
 	}
 	if err := db.Raw("SELECT COUNT(*) FROM t_b").Scan(&cnt).Error; err != nil {
 		t.Fatalf("count t_b: %v", err)
 	}
 	if cnt != 1 {
-		t.Fatalf("t_b rows = %d, want 1（表本次创建，种子应执行）", cnt)
+		t.Fatalf("t_b rows = %d, want 1 (table created by this run, seed should be executed)", cnt)
 	}
 }
 
 func TestRunDDLFailureFailsClosed(t *testing.T) {
-	// 单条建表语句语法错误（括号未闭合）：执行期 fail-closed
+	// syntax error in a single CREATE TABLE statement (unclosed parenthesis): fail-closed at execution time
 	fs := mapFS(map[string]string{
 		"schema/t_demo.sql": "CREATE TABLE IF NOT EXISTS t_demo (id INTEGER PRIMARY KEY, v TEXT",
 	})
 	if err := runFS(testDB(t), fs); err == nil {
-		t.Fatal("坏建表语句执行失败应报错")
+		t.Fatal("a malformed CREATE TABLE statement should error on execution")
 	}
 }
 
@@ -116,8 +116,8 @@ func TestRunRejectsMultiStmtDDL(t *testing.T) {
 		"schema/t_demo.sql": "CREATE TABLE IF NOT EXISTS t_demo (id INTEGER PRIMARY KEY); INSERT INTO t_demo (id) VALUES (1);",
 	})
 	err := runFS(testDB(t), fs)
-	if err == nil || !strings.Contains(err.Error(), "恰含 1 条") {
-		t.Fatalf("建表脚本非单条语句应报错, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "exactly 1 CREATE TABLE statement") {
+		t.Fatalf("a multi-statement table creation script should error, got: %v", err)
 	}
 }
 
@@ -126,8 +126,8 @@ func TestRunRejectsStemContentMismatch(t *testing.T) {
 		"schema/t_x.sql": "CREATE TABLE IF NOT EXISTS t_y (id INTEGER PRIMARY KEY);",
 	})
 	err := runFS(testDB(t), fs)
-	if err == nil || !strings.Contains(err.Error(), "与文件名主干不一致") {
-		t.Fatalf("表名与文件名不一致应报错, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "does not match the file name stem") {
+		t.Fatalf("a table name mismatching the file name should error, got: %v", err)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestRunRejectsDataWithoutDdl(t *testing.T) {
 		"datas/t_z.sql":  "INSERT INTO t_z (id) VALUES (1);",
 	})
 	err := runFS(testDB(t), fs)
-	if err == nil || !strings.Contains(err.Error(), "没有对应的建表脚本") {
-		t.Fatalf("无对应建表脚本的种子应报错, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no corresponding table creation script") {
+		t.Fatalf("a seed without a corresponding table creation script should error, got: %v", err)
 	}
 }
 
@@ -148,22 +148,22 @@ func TestRunRejectsBadFilename(t *testing.T) {
 			name: "CREATE TABLE IF NOT EXISTS t_demo (id INTEGER PRIMARY KEY);",
 		})
 		err := runFS(testDB(t), fs)
-		if err == nil || !strings.Contains(err.Error(), "不合规") {
-			t.Fatalf("%s 命名不合规应报错, got: %v", name, err)
+		if err == nil || !strings.Contains(err.Error(), "is invalid") {
+			t.Fatalf("%s should error on invalid naming, got: %v", name, err)
 		}
 	}
 }
 
 func TestRunEmptyFSOK(t *testing.T) {
-	// 无脚本：空 FS 合法（成功零动作）
+	// no scripts: an empty FS is valid (succeeds with zero actions)
 	if err := runFS(testDB(t), fstest.MapFS{}); err != nil {
-		t.Fatalf("空 FS: %v", err)
+		t.Fatalf("empty FS: %v", err)
 	}
 }
 
 func TestEmbeddedSQLWellFormed(t *testing.T) {
-	// 真实嵌入脚本的结构性契约（不连库）：命名/主干一致、datas 都有 ddl 对应、
-	// schema 覆盖全部 10 张业务表。
+	// structural contract of the real embedded scripts (no DB connection): naming/stem consistency,
+	// every datas entry has a corresponding ddl, and schema covers all 10 business tables.
 	ddls, err := loadScripts(scriptFS, "sql/schema", true)
 	if err != nil {
 		t.Fatalf("load ddl: %v", err)
@@ -183,7 +183,7 @@ func TestEmbeddedSQLWellFormed(t *testing.T) {
 		"t_system_role_menu":     true,
 		"t_system_login_log":     true,
 		"t_system_operation_log": true,
-		// DDD/CQRS 重构新增：领域事件表（承载待投影事实，无种子数据）。
+		// Added in the DDD/CQRS refactor: domain event table (carries pending projection facts, no seed data).
 		"t_system_domain_event": true,
 	}
 	got := make(map[string]bool, len(ddls))
@@ -191,22 +191,22 @@ func TestEmbeddedSQLWellFormed(t *testing.T) {
 		got[s.Table] = true
 	}
 	if len(got) != len(ddls) {
-		t.Fatalf("建表脚本表名重复: %v", ddls)
+		t.Fatalf("duplicate table names in table creation scripts: %v", ddls)
 	}
 	for tbl := range want {
 		if !got[tbl] {
-			t.Errorf("缺建表脚本 sql/schema/%s.sql", tbl)
+			t.Errorf("missing table creation script sql/schema/%s.sql", tbl)
 		}
 	}
 	for tbl := range got {
 		if !want[tbl] {
-			t.Errorf("多余建表脚本 %s", tbl)
+			t.Errorf("extra table creation script %s", tbl)
 		}
 	}
 	ddlSet := got
 	for _, s := range datas {
 		if !ddlSet[s.Table] {
-			t.Errorf("种子 %s 无对应建表脚本", s.Name)
+			t.Errorf("seed %s has no corresponding table creation script", s.Name)
 		}
 	}
 }

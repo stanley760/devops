@@ -1,8 +1,8 @@
--- t_system_users 用户表（租户表）。
--- 复合唯一索引跨 tenant_id 与业务列，内联声明：
--- uk_tenant_username(tenant_id,username)、uk_tenant_mobile(tenant_id,mobile)。
--- mobile 为指针语义（未设置存 NULL），保证 uk_tenant_mobile 多空值不冲突；
--- post_ids 为 JSON 列，空值必须存 NULL（json 约束拒绝 ''）。
+-- t_system_users user table (tenant table).
+-- Composite unique indexes span tenant_id and business columns, declared inline:
+-- uk_tenant_username(tenant_id,username), uk_tenant_mobile(tenant_id,mobile).
+-- mobile has pointer semantics (NULL when unset), so multiple NULLs never conflict on uk_tenant_mobile;
+-- post_ids is a JSON column, and empty values must be stored as NULL (the json constraint rejects '').
 CREATE TABLE IF NOT EXISTS t_system_users (
     id          BIGINT       NOT NULL,
     creator     VARCHAR(64)  NULL,

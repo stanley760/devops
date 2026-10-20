@@ -18,7 +18,7 @@ func TestInitDefaults(t *testing.T) {
 	rt, err := Init(context.Background(), Config{
 		ServiceName: "test-svc",
 		Env:         "dev",
-		// OTLPEndpoint 留空：不装配出口，本地 span 照常
+		// OTLPEndpoint left empty: no exporter, local spans still work
 		MetricsEnabled: true,
 	})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestInitDefaults(t *testing.T) {
 		t.Fatal("MetricsHandler should be non-nil when MetricsEnabled")
 	}
 
-	// /metrics 端点应输出 Go 运行时指标
+	// the /metrics endpoint should output Go runtime metrics
 	rec := httptest.NewRecorder()
 	rt.MetricsHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rec.Code != http.StatusOK {
@@ -40,7 +40,7 @@ func TestInitDefaults(t *testing.T) {
 		t.Fatal("metrics should expose go runtime metrics")
 	}
 
-	// Shutdown 幂等安全
+	// Shutdown is idempotent-safe
 	if err := rt.Shutdown(context.Background()); err != nil {
 		t.Fatalf("second Shutdown() error = %v", err)
 	}
@@ -65,13 +65,13 @@ func TestTraceHandlerAttachesTraceIDs(t *testing.T) {
 	handler := TraceHandler{Handler: inner}
 	logger := slog.New(handler)
 
-	// 无 span 上下文：不注入 trace_id
+	// no span context: trace_id is not injected
 	logger.InfoContext(context.Background(), "no-span")
 	if strings.Contains(buf.String(), "trace_id") {
 		t.Fatalf("unexpected trace_id without span: %s", buf.String())
 	}
 
-	// 有 span 上下文：注入 trace_id/span_id
+	// with a span context: trace_id/span_id are injected
 	tp := sdktrace.NewTracerProvider()
 	old := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
@@ -110,7 +110,7 @@ func TestMetricsMiddlewareRecordsAndPassesThrough(t *testing.T) {
 		t.Fatalf("handler passthrough broken: %d", rec.Code)
 	}
 
-	// 指标经 exporter 输出可被抓取（计数器存在且带路由模板标签）
+	// metrics are output via the exporter and can be scraped (the counter exists and carries the route template label)
 	mrec := httptest.NewRecorder()
 	rt.MetricsHandler.ServeHTTP(mrec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := mrec.Body.String()
@@ -119,13 +119,13 @@ func TestMetricsMiddlewareRecordsAndPassesThrough(t *testing.T) {
 		!strings.Contains(body, `status="418"`) {
 		t.Fatalf("metric with route template label missing:\n%s", firstLines(body, 5))
 	}
-	// Resource 常量标签：service_name / deployment_environment 随每条指标输出，
-	// Grafana 面板按 service_name 过滤依赖此标签
+	// Resource constant labels: service_name / deployment_environment are output with
+	// every metric; Grafana dashboards filtering by service_name depend on these labels
 	if !strings.Contains(body, `service_name="t"`) || !strings.Contains(body, `deployment_environment="dev"`) {
 		t.Fatalf("resource constant labels missing:\n%s", firstLines(body, 5))
 	}
 
-	// 未匹配路由归为 unmatched（防高基数）
+	// unmatched routes collapse to unmatched (prevents high cardinality)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	mrec = httptest.NewRecorder()

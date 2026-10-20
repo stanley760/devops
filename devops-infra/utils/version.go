@@ -5,11 +5,11 @@ import (
 	"runtime/debug"
 )
 
-// resolveVersion 按优先级获取服务版本：
-//  1. .env 文件 APP_VERSION（本地 go run 开发，显式指定版本号）
-//  2. 模块版本（go install 从模块代理安装时）
-//  3. vcs.revision（git commit 短哈希 + dirty 标记）
-//  4. 兜底 unknown
+// resolveVersion gets the service version by priority:
+//  1. APP_VERSION from the .env file (local go run development with an explicit version)
+//  2. Module version (when installed via go install from the module proxy)
+//  3. vcs.revision (git commit short hash + dirty marker)
+//  4. Fallback: unknown
 func ResolveVersion() string {
 
 	if v := os.Getenv("APP_VERSION"); v != "" {

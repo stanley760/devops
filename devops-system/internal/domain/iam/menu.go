@@ -9,12 +9,13 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// Menu 菜单聚合根（全局表，无 tenant_id）。
+// Menu is the menu aggregate root (global table, no tenant_id).
 //
-// 注意：t_system_menu 不带 tenant_id，属全局表，租户插件对其不做注入。
-// 菜单树的构建（父子装配）见 buildTree —— 改造前有 3 份几乎逐字重复的
-// 树组装代码（service/dept.go:143、service/menu.go:204、service/auth.go:267），
-// 现统一为泛型 buildTree。
+// Note: t_system_menu carries no tenant_id; it is a global table and the tenant plugin does
+// not inject for it. Menu tree construction (parent-child assembly) is in buildTree — before
+// the refactor there were 3 nearly verbatim copies of the tree-assembly code
+// (service/dept.go:143, service/menu.go:204, service/auth.go:267), now unified into the
+// generic buildTree.
 type Menu struct {
 	shared.AggregateRoot
 
@@ -25,9 +26,9 @@ type Menu struct {
 	Path          string
 	Component     string
 	ComponentName string
-	// Permission 权限标识，如 system:user:create；目录与租户管理留空。
-	// 命名与列名 permission 对齐（避免与标准库 Permission 常量混淆，
-	// 故不用简称 Perm）。
+	// Permission is the permission identifier, e.g. system:user:create; empty for directories and tenant management.
+	// The name aligns with the column name permission (to avoid confusion with the standard
+	// library Permission constants, so the abbreviation Perm is not used).
 	Permission string
 	Icon       string
 	Sort       int
@@ -35,23 +36,23 @@ type Menu struct {
 	KeepAlive  bool
 	AlwaysShow bool
 	Status     int8
-	// Remark 非表列：菜单表无 remark 列，此字段仅用于承载输入并被仓储忽略，
-	// 保留以对齐既有 API 契约（types.MenuSaveReq 含 remark）。
+	// Remark is not a table column: the menu table has no remark column; this field only carries input and is ignored by the
+	// repository, kept to align with the existing API contract (types.MenuSaveReq includes remark).
 	CreateTime time.Time
 	UpdateTime time.Time
 
-	// Children 子菜单（聚合内引用）。
+	// Children are child menus (references within the aggregate).
 	Children []*Menu
 }
 
-// MenuType 菜单类型。
+// MenuType is the menu type.
 const (
-	MenuTypeDir    int8 = 1 // 目录
-	MenuTypeMenu   int8 = 2 // 菜单
-	MenuTypeButton int8 = 3 // 按钮
+	MenuTypeDir    int8 = 1 // directory
+	MenuTypeMenu   int8 = 2 // menu
+	MenuTypeButton int8 = 3 // button
 )
 
-// MenuUpdate 菜单变更入参（领域输入）。
+// MenuUpdate is the menu change input (domain input).
 type MenuUpdate struct {
 	Name          string
 	Type          int8
@@ -69,18 +70,18 @@ type MenuUpdate struct {
 	Remark        string
 }
 
-// ValidateForCreate 创建前校验：名称非空、父节点非自引用。
+// ValidateForCreate validates before creation: name must be non-empty, parent must not be self-referencing.
 func (m *Menu) ValidateForCreate() error {
 	if strings.TrimSpace(m.Name) == "" {
-		return errs.New(errs.CodeParam, "菜单名称不能为空")
+		return errs.New(errs.CodeParam, "menu name cannot be empty")
 	}
 	if m.ParentID == m.ID {
-		return errs.New(errs.CodeParam, "上级菜单不能是自己")
+		return errs.New(errs.CodeParam, "parent menu cannot be itself")
 	}
 	return nil
 }
 
-// Change 应用变更（不含菜单类型变更，类型变更会影响子节点语义）。
+// Change applies the change (menu type changes excluded, as a type change affects child node semantics).
 func (m *Menu) Change(up MenuUpdate) {
 	m.Name = up.Name
 	m.Type = up.Type
@@ -97,10 +98,12 @@ func (m *Menu) Change(up MenuUpdate) {
 	m.Status = up.Status
 }
 
-// EnsureNotSelfOrDescendant 校验菜单不可挂到自己的子树之下（防环）。
+// EnsureNotSelfOrDescendant validates that a menu cannot be attached under its own subtree (cycle prevention).
 //
-// 该规则在改造前不存在——原 service/menu.go 仅在聚合加载失败时兜底，
-// 存在把菜单挂到自身后代导致树构建死循环的风险。此处显式建模为领域规则。
+// This rule did not exist before the refactor — the original service/menu.go only had a
+// fallback when aggregate loading failed, leaving a risk of attaching a menu under its own
+// descendant and causing an infinite loop in tree construction. It is now explicitly modeled
+// as a domain rule.
 func (m *Menu) EnsureNotSelfOrDescendant(parentID int64, all []*Menu) error {
 	if parentID == 0 || parentID == m.ID {
 		return nil
@@ -109,14 +112,14 @@ func (m *Menu) EnsureNotSelfOrDescendant(parentID int64, all []*Menu) error {
 	for _, x := range all {
 		byID[x.ID] = x
 	}
-	// 从目标父节点向上回溯，若途中经过自身即为成环。
+	// walk up from the target parent; passing through itself on the way means a cycle.
 	seen := make(map[int64]bool, len(all))
 	for cur := parentID; cur != 0; {
 		if cur == m.ID {
-			return errs.New(errs.CodeParam, "上级菜单不能是自己的下级")
+			return errs.New(errs.CodeParam, "parent menu cannot be a descendant of itself")
 		}
 		if seen[cur] {
-			break // 存量数据已有环，停止回溯避免死循环
+			break // existing data already has a cycle; stop backtracking to avoid an infinite loop
 		}
 		seen[cur] = true
 		parent, ok := byID[cur]
@@ -128,7 +131,7 @@ func (m *Menu) EnsureNotSelfOrDescendant(parentID int64, all []*Menu) error {
 	return nil
 }
 
-// CollectPermissions 收集自身与全部后代的权限标识（分配角色菜单时派生 p 行用）。
+// CollectPermissions collects the permission identifiers of itself and all descendants (used to derive p rows when assigning role menus).
 func (m *Menu) CollectPermissions() []string {
 	out := make([]string, 0)
 	var walk func(*Menu)
@@ -144,5 +147,5 @@ func (m *Menu) CollectPermissions() []string {
 	return out
 }
 
-// IsButton 是否按钮类型。
+// IsButton reports whether it is the button type.
 func (m *Menu) IsButton() bool { return m.Type == MenuTypeButton }

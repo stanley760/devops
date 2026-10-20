@@ -1,10 +1,11 @@
-// Package humakit 业务中间件套件：JWT 认证 → 租户 → 域内/平台鉴权 → 数据权限解析
-// 的装配与链组合。
+// Package humakit is the business middleware suite: assembly and chain composition of
+// JWT auth → tenant → in-domain/platform authorization → data permission resolution.
 //
-// 分层：决策在 security/middleware 与 tenant（infra 决策原语），本包做链组合、
-// 数据权限解析与 fail-closed 收口；文案呈现与业务数据源一律经 Deps/Envelope 注入。
-// 这样各业务模块可各自装配自己的文案与数据源，
-// 而不复制中间件链实现。
+// Layering: decisions live in security/middleware and tenant (infra decision primitives);
+// this package does chain composition, data permission resolution, and fail-closed
+// enforcement; message presentation and business data sources are always injected via
+// Deps/Envelope. This lets each business module assemble its own messages and data
+// sources without duplicating the middleware chain implementation.
 package humakit
 
 import (
@@ -21,50 +22,52 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// Middleware huma 中间件类型别名（huma 无独立命名类型）。
+// Middleware is a type alias for the huma middleware type (huma has no separate named type).
 type Middleware = func(huma.Context, func(huma.Context))
 
-// Envelope 错误呈现回调（文案属业务，经此注入）。
-// nil 字段走安全默认（HTTP 状态短语信封），避免漏注入时返回无 body 的裸状态码。
+// Envelope holds error presentation callbacks (messages belong to the business, injected here).
+// nil fields fall back to safe defaults (HTTP status phrase envelopes), avoiding a bare
+// status code with no body when injection is missed.
 type Envelope struct {
-	Unauthorized      func(hctx huma.Context, err error) // 401 基础（含会话失效文案映射）
-	AuthnInfra        func(hctx huma.Context, err error) // 401/503 认证基础设施错误
-	TenantForbidden   func(hctx huma.Context, err error) // 403 租户不可用
-	PermForbidden     func(hctx huma.Context, err error) // 403 域内无权限
-	PlatformForbidden func(hctx huma.Context, err error) // 403 平台（可区分非管理员文案）
-	AuthzInfra        func(hctx huma.Context, err error) // 403/503 鉴权基础设施错误
+	Unauthorized      func(hctx huma.Context, err error) // 401 base (including session expiry message mapping)
+	AuthnInfra        func(hctx huma.Context, err error) // 401/503 authentication infrastructure error
+	TenantForbidden   func(hctx huma.Context, err error) // 403 tenant unavailable
+	PermForbidden     func(hctx huma.Context, err error) // 403 no permission within the domain
+	PlatformForbidden func(hctx huma.Context, err error) // 403 platform (distinguishable non-admin message)
+	AuthzInfra        func(hctx huma.Context, err error) // 403/503 authorization infrastructure error
 }
 
-// Deps 业务依赖全部经回调/接口注入；humakit 不做默认业务绑定（装配属业务侧）。
-// nil 语义一律 fail-closed：TenantUsable nil→恒 false；Authorizer nil→拒绝；
-// 解析数据源 nil→解析报错→空 Scope（不可见任何行）。
+// Deps injects all business dependencies via callbacks/interfaces; humakit makes no
+// default business bindings (assembly belongs to the business side).
+// nil semantics always fail closed: TenantUsable nil → always false; Authorizer nil → reject;
+// a nil resolution data source → resolution error → empty Scope (no rows visible).
 type Deps struct {
-	Authorizer securityauthz.Authorizer // 域内/平台鉴权；nil → 拒绝
-	// SuperAdminRole 租户超管角色 code（数据权限全域直通判定）；
-	// "" → security/authz.DefaultRoleConfig().SuperAdmin。
+	Authorizer securityauthz.Authorizer // in-domain/platform authorization; nil → reject
+	// SuperAdminRole is the tenant super-admin role code (data permission domain-wide bypass check);
+	// "" → security/authz.DefaultRoleConfig().SuperAdmin.
 	SuperAdminRole string
-	// ScopeTTL 数据权限解析结果缓存时长；0 → 60s。
+	// ScopeTTL is the data permission resolution result cache duration; 0 → 60s.
 	ScopeTTL time.Duration
-	// TenantUsable 租户可用性判定（停用/过期/不存在 → false）；nil → 恒 false。
+	// TenantUsable decides tenant usability (disabled/expired/nonexistent → false); nil → always false.
 	TenantUsable func(ctx context.Context, tenantID int64) bool
-	// IsPlatformAdmin 平台管理员判定（数据权限全域直通用）；nil → false。
+	// IsPlatformAdmin decides platform admins (domain-wide data permission bypass); nil → false.
 	IsPlatformAdmin func(ctx context.Context, userID int64) bool
-	// 数据权限解析数据源；任一为 nil → 解析失败 → 空 Scope。
+	// Data permission resolution data sources; any nil → resolution failure → empty Scope.
 	UserRoles func(ctx context.Context, userID int64) ([]datascope.RoleScope, error)
 	User      func(ctx context.Context, userID int64) (datascope.UserRef, error)
 	Depts     func(ctx context.Context) ([]datascope.DeptNode, error)
-	// WithClaims 认证成功后的 ctx 增强（审计 actor 等）；nil → 原样透传。
+	// WithClaims is the ctx enhancement after successful authentication (e.g. audit actor); nil → pass through as-is.
 	WithClaims func(ctx context.Context, claims *securityjwt.Claims) context.Context
-	// Envelope 错误呈现回调；nil 字段走安全默认。
+	// Envelope holds error presentation callbacks; nil fields fall back to safe defaults.
 	Envelope Envelope
 }
 
 const defaultScopeTTL = 60 * time.Second
 
-// withDefaults 零值字段回填安全默认（不做业务绑定）。
+// withDefaults backfills zero-value fields with safe defaults (no business binding).
 func (d Deps) withDefaults() Deps {
 	if d.SuperAdminRole == "" {
-		// 与 security/authz 的 RoleConfig 同源，避免两处默认值漂移。
+		// Same source as security/authz's RoleConfig, to avoid the two default values drifting apart.
 		d.SuperAdminRole = securityauthz.DefaultRoleConfig().SuperAdmin
 	}
 	if d.ScopeTTL <= 0 {
@@ -80,7 +83,7 @@ func (d Deps) withDefaults() Deps {
 	return d
 }
 
-// withDefaults nil 槽位回退到 HTTP 状态短语信封（与 securitymw.withHumaDefaults 同语义）。
+// withDefaults falls back nil slots to HTTP status phrase envelopes (same semantics as securitymw.withHumaDefaults).
 func (e Envelope) withDefaults() Envelope {
 	if e.Unauthorized == nil {
 		e.Unauthorized = statusPhrase(http.StatusUnauthorized)
@@ -103,14 +106,15 @@ func (e Envelope) withDefaults() Envelope {
 	return e
 }
 
-// statusPhrase 固定状态码 + HTTP 状态短语的信封回调。
+// statusPhrase is the envelope callback for a fixed status code + HTTP status phrase.
 func statusPhrase(status int) func(huma.Context, error) {
 	return func(hctx huma.Context, _ error) {
 		response.WriteHumaEnvelope(hctx, status, http.StatusText(status))
 	}
 }
 
-// Kit 业务中间件套件：JWT/租户/鉴权/数据权限中间件的装配与链组合。
+// Kit is the business middleware suite: assembly and chain composition of the
+// JWT/tenant/authorization/data permission middleware.
 type Kit struct {
 	authn   securitymw.BearerAuthenticator
 	deps    Deps
@@ -120,11 +124,12 @@ type Kit struct {
 	permM   func(string) Middleware
 	platM   func(string) Middleware
 	scopes  *scopeCache
-	// auditM 操作审计采集中间件；未装配时为 nil，业务链不追加该环节。
+	// auditM is the operation audit collection middleware; nil when not assembled, and the business chain does not append that stage.
 	auditM Middleware
 }
 
-// NewKit 装配中间件套件；deps 的 nil/零值项按 fail-closed 语义回填安全默认。
+// NewKit assembles the middleware suite; nil/zero-value items in deps are backfilled
+// with safe defaults per fail-closed semantics.
 func NewKit(authn securitymw.BearerAuthenticator, deps Deps) *Kit {
 	deps = deps.withDefaults()
 	k := &Kit{
@@ -137,59 +142,62 @@ func NewKit(authn securitymw.BearerAuthenticator, deps Deps) *Kit {
 	k.scopeM = k.securityScope()
 	k.permM = func(perm string) Middleware { return k.securityPerm(perm) }
 	k.platM = func(perm string) Middleware { return k.securityPlat(perm) }
-	// 默认不采集审计：显式占位而非 nil，huma 的链组合不跳过 nil 元素。
+	// No audit collection by default: an explicit placeholder rather than nil, because
+	// huma's chain composition does not skip nil elements.
 	k.auditM = noopAudit
 	return k
 }
 
-// EnableAudit 装配操作审计采集中间件。
+// EnableAudit assembles the operation audit collection middleware.
 //
-// 各业务服务在自己的装配点（cmd 层）调用，传入 Sink 与模块白名单；
-// 未调用的业务服务保持 noopAudit，不产生任何审计写入。
+// Each business service calls this at its own assembly point (the cmd layer), passing in
+// the Sink and the module whitelist; business services that do not call it keep noopAudit
+// and produce no audit writes at all.
 func (k *Kit) EnableAudit(deps AuditDeps) {
 	k.auditM = k.NewAuditMiddleware(deps)
 }
 
-// JWT 认证中间件（Bearer → token 解析 → 会话态 → claims 注入 ctx）。
+// JWT authentication middleware (Bearer → token parsing → session state → claims injected into ctx).
 func (k *Kit) JWT() Middleware { return k.jwtM }
 
-// Tenant 租户校验 + 上下文注入。
+// Tenant tenant verification + context injection.
 func (k *Kit) Tenant() Middleware { return k.tenantM }
 
-// Scope 行级数据权限解析中间件（受控资源路由用）。
+// Scope row-level data permission resolution middleware (for controlled-resource routes).
 func (k *Kit) Scope() Middleware { return k.scopeM }
 
-// Perm 域内鉴权中间件（uid × tid × perm）。
+// Perm in-domain authorization middleware (uid × tid × perm).
 func (k *Kit) Perm(perm string) Middleware { return k.permM(perm) }
 
-// Plat 平台鉴权中间件（平台管理员）。
+// Plat platform authorization middleware (platform admins).
 func (k *Kit) Plat(perm string) Middleware { return k.platM(perm) }
 
-// Logged 仅认证链（登出等无租户语义的接口）。
+// Logged authentication-only chain (for endpoints like logout with no tenant semantics).
 func (k *Kit) Logged() huma.Middlewares { return huma.Middlewares{k.jwtM} }
 
-// TenantBiz 认证 + 租户链（个人信息类接口）。
+// TenantBiz authentication + tenant chain (for personal-info endpoints).
 func (k *Kit) TenantBiz() huma.Middlewares {
 	return huma.Middlewares{k.jwtM, k.tenantM, k.auditM}
 }
 
-// Biz 业务路由中间件链：JWT → Tenant → Perm(域内) → Audit。
+// Biz business route middleware chain: JWT → Tenant → Perm (in-domain) → Audit.
 func (k *Kit) Biz(perm string) huma.Middlewares {
 	return huma.Middlewares{k.jwtM, k.tenantM, k.permM(perm), k.auditM}
 }
 
-// ScopedBiz 受控资源路由链：JWT → Tenant → Perm → DataScope → Audit。
-// 只挂在需要行级过滤的资源；非受控资源不加，保持解析开销与语义边界显式。
+// ScopedBiz controlled-resource route chain: JWT → Tenant → Perm → DataScope → Audit.
+// Attached only to resources that need row-level filtering; not added to uncontrolled
+// resources, keeping resolution overhead and semantic boundaries explicit.
 func (k *Kit) ScopedBiz(perm string) huma.Middlewares {
 	return huma.Middlewares{k.jwtM, k.tenantM, k.permM(perm), k.scopeM, k.auditM}
 }
 
-// PlatChain 平台路由中间件链：JWT → PlatformPerm → Audit（不挂 Tenant，操作全局表）。
+// PlatChain platform route middleware chain: JWT → PlatformPerm → Audit (no Tenant, operates on global tables).
 func (k *Kit) PlatChain(perm string) huma.Middlewares {
 	return huma.Middlewares{k.jwtM, k.platM(perm), k.auditM}
 }
 
-// InvalidateDataScope 清空数据权限缓存（角色保存/删除、用户角色变更时调用）。
+// InvalidateDataScope clears the data permission cache (called on role save/delete and user role changes).
 func (k *Kit) InvalidateDataScope() {
 	k.scopes.invalidate()
 }

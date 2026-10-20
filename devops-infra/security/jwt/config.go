@@ -11,7 +11,8 @@ import (
 var ErrInvalidConfig = errors.New("jwt: invalid config")
 var ErrInvalidToken = errors.New("jwt: invalid token")
 
-// RegisteredClaims 标准 JWT 元数据（类型别名，消费方经本包使用而无需直接依赖 jwt 库）。
+// RegisteredClaims standard JWT metadata (a type alias, so consumers use this package
+// without depending on the jwt library directly).
 type RegisteredClaims = jwtlib.RegisteredClaims
 
 // KeySet resolves public RSA keys by the key id in a token header.

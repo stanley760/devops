@@ -1,6 +1,6 @@
--- t_system_menu 菜单表（全局表，无 tenant_id，对齐 yudao）。
--- type：1目录 2菜单 3按钮。API 鉴权走「权限标识」模式（Casbin 按 permission 判定），
--- 不挂 api_path/api_method。
+-- t_system_menu menu table (global table, no tenant_id, aligned with yudao).
+-- type: 1 directory 2 menu 3 button. API authorization follows the "permission identifier" model (Casbin decides by permission),
+-- so api_path/api_method are not attached.
 CREATE TABLE IF NOT EXISTS t_system_menu (
     id             BIGINT       NOT NULL,
     creator        VARCHAR(64)  NULL,

@@ -1,9 +1,9 @@
-// Package middleware 的业务装配层：把 devops-infra/security/humakit 的中间件链
-// 与本服务的文案、数据源、审计、租户语义接线。
+// Package middleware is this service's business assembly layer: it wires the middleware chain
+// from devops-infra/security/humakit with this service's copy, data sources, audit, and tenant semantics.
 //
-// 分层：决策与链组合在 humakit（infra），本包只做业务默认绑定——
-// 中文信封文案（huma.go）、租户可用性判定（tenant.go）、
-// dao 适配层（dao/scope_source.go）、auditctx 注入。装配点在 cmd/root.go。
+// Layering: decision logic and chain composition live in humakit (infra); this package only does
+// business default binding — envelope copy (huma.go), tenant usability judgment (tenant.go),
+// the dao adapter (dao/scope_source.go), and auditctx injection. The assembly point is cmd/root.go.
 package middleware
 
 import (
@@ -21,14 +21,15 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/store"
 )
 
-// 类型别名：router/app/wire 的 *middleware.Kit 签名零改动，wire 无需重新生成。
+// Type aliases: the *middleware.Kit signature in router/app/wire stays unchanged, so wire needs no regeneration.
 type (
 	Kit  = humakit.Kit
 	Deps = humakit.Deps
 )
 
-// NewKit 装配业务中间件套件：nil/零值项补生产默认绑定（业务语义），
-// 信封文案与数据源适配均留在本层，决策与链组合在 devops-infra/security/humakit。
+// NewKit assembles the business middleware suite: nil/zero entries get production default
+// bindings (business semantics); envelope copy and data source adapters stay in this layer,
+// with decision logic and chain composition in devops-infra/security/humakit.
 func NewKit(authn *auth.Manager, deps Deps) *Kit {
 	if deps.Authorizer == nil {
 		deps.Authorizer = authz.Authorizer()
@@ -58,10 +59,10 @@ func NewKit(authn *auth.Manager, deps Deps) *Kit {
 	return humakit.NewKit(authn, deps)
 }
 
-// injectAuditActor 认证成功后把身份注入审计上下文：
-// model.BeforeCreate/BeforeUpdate 消费其中的用户名填creator/updater，
-// humakit 审计采集中间件消费完整身份写入审计记录。
-// B 端管理后台的操作者统一标记为 audit.UserTypeAdmin。
+// injectAuditActor injects the identity into the audit context after successful authentication:
+// model.BeforeCreate/BeforeUpdate consumes the username in it to fill creator/updater,
+// and the humakit audit-collection middleware consumes the full identity to write audit records.
+// Operators of the B-side admin console are uniformly marked as audit.UserTypeAdmin.
 func injectAuditActor(ctx context.Context, claims *securityjwt.Claims) context.Context {
 	if claims == nil || claims.Username == "" {
 		return ctx
@@ -74,7 +75,7 @@ func injectAuditActor(ctx context.Context, claims *securityjwt.Claims) context.C
 	})
 }
 
-// systemEnvelope 本服务的中文信封文案（六个槽位与历史 gin 版逐字对齐）。
+// systemEnvelope is this service's envelope copy (six slots verbatim aligned with the historical gin version).
 func systemEnvelope() humakit.Envelope {
 	return humakit.Envelope{
 		Unauthorized:      writeHuma401,

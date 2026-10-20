@@ -1,4 +1,4 @@
--- t_system_dept 部门表（租户表）。树结构内存组装（无 ancestors 列，对齐 yudao）。
+-- t_system_dept department table (tenant table). The tree structure is assembled in memory (no ancestors column, aligned with yudao).
 CREATE TABLE IF NOT EXISTS t_system_dept (
     id             BIGINT       NOT NULL,
     creator        VARCHAR(64)  NULL,

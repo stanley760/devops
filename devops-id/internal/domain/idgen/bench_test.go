@@ -1,11 +1,11 @@
-// 发号性能基准（Go testing.B）。三层背压来源各有对应基准：
+// ID generation performance benchmarks (Go testing.B). Each of the three backpressure sources has its own benchmark:
 //
-//  1. g.mu 串行化 —— BenchmarkNextParallel / BenchmarkBackpressure 的锁竞争；
-//  2. 4096/ms 序号天花板 —— 序号耗尽时 nextLocked 持锁等下一毫秒，
-//     BenchmarkNextSerial / BenchmarkBackpressure 的吞吐平台期即此；
-//  3. batchNext 长持锁 —— BenchmarkMixedBatchVsNext 观察批量对单发号的挤压。
+//  1. g.mu serialization -- lock contention in BenchmarkNextParallel / BenchmarkBackpressure;
+//  2. the 4096/ms sequence ceiling -- when the sequence is exhausted, nextLocked holds the lock waiting for the
+//     next millisecond; this is the throughput plateau of BenchmarkNextSerial / BenchmarkBackpressure;
+//  3. batchNext's long lock hold -- BenchmarkMixedBatchVsNext observes how batches squeeze single issuance.
 //
-// 运行：
+// Run:
 //
 //	go test ./internal/domain/idgen -run '^$' -bench . -benchmem
 //	go test ./internal/domain/idgen -run '^$' -bench Backpressure -benchtime 2s
@@ -22,13 +22,14 @@ import (
 	"time"
 )
 
-// 延迟直方图：0..204.8µs 按 20ns 分桶（热路径几十纳秒的延迟可区分），
-// 超出部分按对数分桶（覆盖背压排队的毫秒级尾延迟，误差可接受）。
-// 全程无堆分配，b.N 到千万级也不会撑爆内存。
+// Latency histogram: 0..204.8us bucketed at 20ns (resolves the tens-of-nanoseconds hot path),
+// with logarithmic buckets beyond that (covering the millisecond-scale tail latency of
+// backpressure queuing, with acceptable error).
+// No heap allocation throughout; even b.N in the tens of millions will not exhaust memory.
 const (
-	histTickNs         = 20    // 精确桶宽（20ns）
-	histPreciseBuckets = 10240 // 精确范围 10240*20ns = 204.8µs
-	histLogBuckets     = 32    // ≥精确范围后的对数桶数
+	histTickNs         = 20    // exact bucket width (20ns)
+	histPreciseBuckets = 10240 // exact range 10240*20ns = 204.8us
+	histLogBuckets     = 32    // number of logarithmic buckets at or beyond the exact range
 )
 
 type latencyHist struct {
@@ -62,7 +63,7 @@ func (h *latencyHist) record(d time.Duration) {
 	h.logB[idx].Add(1)
 }
 
-// percentile 返回第 p 分位延迟（0<p<=1）。精确桶取桶中点，对数桶取上界近似。
+// percentile returns the p-th percentile latency (0<p<=1). Exact buckets use the bucket midpoint; log buckets use the upper bound as an approximation.
 func (h *latencyHist) percentile(p float64) time.Duration {
 	total := h.count.Load()
 	if total == 0 {
@@ -88,9 +89,9 @@ func (h *latencyHist) percentile(p float64) time.Duration {
 	return time.Duration(histPreciseBuckets<<(histLogBuckets-1)) * histTickNs
 }
 
-// runFixedWorkers 以固定并发闭环压测：workers 个协程瓜分 b.N 次 op，
-// 每次调用前后打点记入直方图。固定并发（而非 RunParallel 的 GOMAXPROCS）
-// 才能扫出完整的“并发数→吞吐/延迟”背压曲线。
+// runFixedWorkers hammers with a fixed-concurrency closed loop: workers goroutines split b.N ops,
+// timestamping before and after each call into the histogram. Fixed concurrency (rather than
+// RunParallel's GOMAXPROCS) is what sweeps out the full "concurrency -> throughput/latency" backpressure curve.
 func runFixedWorkers(b *testing.B, workers int, op func() error) *latencyHist {
 	b.Helper()
 	hist := &latencyHist{}
@@ -139,15 +140,15 @@ func runFixedWorkers(b *testing.B, workers int, op func() error) *latencyHist {
 	wg.Wait()
 	b.StopTimer()
 	if errBox != nil {
-		b.Fatalf("发号失败: %v", errBox)
+		b.Fatalf("ID generation failed: %v", errBox)
 	}
 	return hist
 }
 
-// reportHist 输出背压观测指标：吞吐（ids/s）与延迟分位。
-// 尾部分位看 p999/max：序号耗尽约每 4096 个号发生一次（≈0.02%），
-// p99 看不到它，p999 才是“撞天花板”信号。
-// 调用前需已 StopTimer（runFixedWorkers 已保证）。
+// reportHist outputs the backpressure observation metrics: throughput (ids/s) and latency percentiles.
+// Tail percentiles look at p999/max: sequence exhaustion happens about once every 4096 IDs (~0.02%),
+// invisible at p99; p999 is the "hit the ceiling" signal.
+// Must be called after StopTimer (runFixedWorkers already guarantees this).
 func reportHist(b *testing.B, h *latencyHist) {
 	b.Helper()
 	if n := h.count.Load(); n > 0 {
@@ -159,8 +160,8 @@ func reportHist(b *testing.B, h *latencyHist) {
 	}
 }
 
-// BenchmarkNextSerial 串行发号：真实时钟，吞吐被 4096/ms 序号天花板
-// 锁死在约 4M ids/s（等下一毫秒的等待时间摊进 ns/op）。
+// BenchmarkNextSerial serial ID generation: real clock; throughput is pinned at roughly 4M ids/s
+// by the 4096/ms sequence ceiling (the wait for the next millisecond is amortized into ns/op).
 func BenchmarkNextSerial(b *testing.B) {
 	gen := newTestGenerator(1)
 	ctx := context.Background()
@@ -173,8 +174,9 @@ func BenchmarkNextSerial(b *testing.B) {
 	}
 }
 
-// BenchmarkNextRawCPU 纯热路径成本：nowFn 每次调用推进 1ms，序号永不耗尽，
-// 测出互斥锁 + 时间戳比较 + 位运算的裸 CPU 成本（不含任何等待）。
+// BenchmarkNextRawCPU pure hot-path cost: nowFn advances 1ms per call, so the sequence never
+// runs out; measures the raw CPU cost of the mutex + timestamp comparison + bit operations
+// (no waiting of any kind).
 func BenchmarkNextRawCPU(b *testing.B) {
 	gen := newTestGenerator(1)
 	var fakeMs atomic.Int64
@@ -190,8 +192,8 @@ func BenchmarkNextRawCPU(b *testing.B) {
 	}
 }
 
-// BenchmarkNextParallel 锁竞争 + 序号天花板下的并行吞吐（GOMAXPROCS 个协程）。
-// 吞吐不再随 -cpu 线性增长时即到达天花板。
+// BenchmarkNextParallel parallel throughput under lock contention and the sequence ceiling (GOMAXPROCS goroutines).
+// The ceiling is reached when throughput stops growing linearly with -cpu.
 func BenchmarkNextParallel(b *testing.B) {
 	gen := newTestGenerator(1)
 	ctx := context.Background()
@@ -200,7 +202,7 @@ func BenchmarkNextParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if _, err := gen.next(ctx); err != nil {
-				// FailNow 不能从非基准协程调用，用 Error 记录后退出。
+				// FailNow cannot be called from a non-benchmark goroutine; record with Error and exit.
 				b.Error(err)
 				return
 			}
@@ -208,10 +210,10 @@ func BenchmarkNextParallel(b *testing.B) {
 	})
 }
 
-// BenchmarkBackpressure 背压主基准：并发数扫掠，观察吞吐平台期与延迟爬升。
+// BenchmarkBackpressure main backpressure benchmark: sweeps concurrency, observing the throughput plateau and latency climb.
 //
-//   - ids/s 在某个并发后不再增长 = 撞上序号天花板 / 锁瓶颈；
-//   - p99-us 随并发继续爬升 = 请求在 g.mu 上排队（背压传导为延迟）。
+//   - ids/s stops growing after some concurrency = hit the sequence ceiling / lock bottleneck;
+//   - p99-us keeps climbing with concurrency = requests are queuing on g.mu (backpressure propagating as latency).
 func BenchmarkBackpressure(b *testing.B) {
 	for _, workers := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("workers-%d", workers), func(b *testing.B) {
@@ -226,8 +228,8 @@ func BenchmarkBackpressure(b *testing.B) {
 	}
 }
 
-// BenchmarkBatchNext 批量摊销：一次锁内取 count 个号。
-// ns/op 是每批成本，ids/s 是摊到单号的吞吐（count 越大越接近天花板）。
+// BenchmarkBatchNext batch amortization: takes count IDs under one lock acquisition.
+// ns/op is the per-batch cost; ids/s is the throughput amortized to a single ID (the larger count is, the closer to the ceiling).
 func BenchmarkBatchNext(b *testing.B) {
 	for _, size := range []int{1, 10, 100, 1000, 10000} {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
@@ -246,9 +248,11 @@ func BenchmarkBatchNext(b *testing.B) {
 	}
 }
 
-// BenchmarkMixedBatchVsNext 批量背压传导：一个协程持续取 10000 的号段
-// （batchNext 长持锁，每 1024 个才短暂放锁），workers 个协程高频 Next。
-// 对照 BenchmarkBackpressure 同并发的 p99，差值即批量挤压单发号的代价。
+// BenchmarkMixedBatchVsNext batch backpressure propagation: one goroutine continuously takes
+// 10000-ID batches (batchNext holds the lock long, releasing it briefly only every 1024),
+// while workers goroutines hammer Next.
+// Compare p99 at the same concurrency against BenchmarkBackpressure; the difference is the
+// cost of batches squeezing single issuance.
 func BenchmarkMixedBatchVsNext(b *testing.B) {
 	const batchSize = 10000
 	for _, workers := range []int{4, 16} {

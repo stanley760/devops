@@ -1,12 +1,14 @@
-// Package shared 是领域层的共享内核：聚合基类、领域事件、领域错误与仓储端口约定。
+// Package shared is the shared kernel of the domain layer: aggregate base classes, domain
+// events, domain errors, and repository port conventions.
 //
-// 分层约束（DDD 依赖方向）：
+// Layering constraint (DDD dependency direction):
 //
 //	api/v1 → application → domain ← infrastructure
-//	                ↘ infrastructure/persistence（实现 domain 的端口）
+//	                ↘ infrastructure/persistence (implements domain's ports)
 //
-// 本包及整个 domain 树禁止 import GORM、huma、Redis、HTTP 等任何基础设施包，
-// 只允许依赖 devops-infra/errs 与标准库。编译期即强制该约束成立。
+// This package and the entire domain tree must not import GORM, huma, Redis, HTTP, or any
+// other infrastructure package; only devops-infra/errs and the standard library are allowed.
+// This constraint is enforced at compile time.
 package shared
 
 import (
@@ -14,21 +16,24 @@ import (
 	"time"
 )
 
-// AggregateRoot 聚合根基类。
+// AggregateRoot is the aggregate root base class.
 //
-// 聚合是 DDD 的一致性边界：聚合内部的所有变更必须在单一事务内完成，
-// 跨聚合的一致性由领域事件（见 Event）而非分布式事务保证。
+// An aggregate is DDD's consistency boundary: all changes inside an aggregate must complete
+// within a single transaction; cross-aggregate consistency is guaranteed by domain events
+// (see Event) rather than distributed transactions.
 //
-// 嵌入本类型的实体持有自己的领域事件缓冲，行为方法只负责在内存中记录事件，
-// 由仓储在持久化时取出并发布——这样「业务状态变更」与「事件发布」天然同事务。
+// Entities embedding this type hold their own domain event buffer; behavior methods only
+// record events in memory, and the repository takes them out and publishes them at persistence
+// time — this way "business state change" and "event publication" are naturally in the same
+// transaction.
 type AggregateRoot struct {
 	events []Event
 }
 
-// RecordEvent 记录领域事件（由实体行为方法在状态变更后调用）。
+// RecordEvent records a domain event (called by entity behavior methods after a state change).
 func (a *AggregateRoot) RecordEvent(e Event) { a.events = append(a.events, e) }
 
-// PullEvents 取出并清空事件缓冲。仓储在事务提交路径上调用。
+// PullEvents takes and clears the event buffer. Called by the repository on the transaction commit path.
 func (a *AggregateRoot) PullEvents() []Event {
 	if len(a.events) == 0 {
 		return nil
@@ -39,7 +44,7 @@ func (a *AggregateRoot) PullEvents() []Event {
 	return out
 }
 
-// Events 返回当前待发布事件的只读副本（供测试断言用，不消费缓冲）。
+// Events returns a read-only copy of the currently pending events (for test assertions; does not consume the buffer).
 func (a *AggregateRoot) Events() []Event {
 	if len(a.events) == 0 {
 		return nil
@@ -49,54 +54,59 @@ func (a *AggregateRoot) Events() []Event {
 	return out
 }
 
-// Version 乐观并发控制版本号。仅在仓储需要乐观锁时使用；
-// 当前实现用租户插件 + 唯一索引保证一致性，此字段为演进预留。
+// Version is the optimistic concurrency control version. Used only when the repository needs
+// optimistic locking; the current implementation guarantees consistency with the tenant plugin
+// + unique indexes, so this field is reserved for future evolution.
 type Version int64
 
-// AggregateID 聚合根标识别名（int64 主键，JSON 下发时由 API 层转字符串）。
+// AggregateID is the aggregate root identifier alias (int64 primary key, converted to a string by the API layer when sent as JSON).
 type AggregateID = int64
 
-// AuditInfo 审计留痕信息（值对象）。
+// AuditInfo is audit trail info (value object).
 //
-// 对应既有表的 creator/updater 列。抽取为值对象后，领域层不依赖
-// devops-common/auditctx 的具体上下文实现，只接受已解析好的操作者。
+// Corresponds to the creator/updater columns of existing tables. Extracted as a value object
+// so the domain layer does not depend on the concrete context implementation of
+// devops-common/auditctx and only accepts an already-resolved operator.
 type AuditInfo struct {
 	Creator string
 	Updater string
 }
 
-// Actor 当前操作者（从认证上下文解析出的领域输入）。
+// Actor is the current operator (domain input resolved from the authentication context).
 type Actor struct {
 	UserID   int64
 	Username string
 	TenantID int64
 }
 
-// NowFunc 时钟抽象。领域层不直接调用 time.Now()，便于测试注入确定性时钟。
+// NowFunc is the clock abstraction. The domain layer does not call time.Now() directly, making it easy to inject a deterministic clock in tests.
 type NowFunc func() time.Time
 
-// SystemNow 默认时钟实现。
+// SystemNow is the default clock implementation.
 func SystemNow() time.Time { return time.Now() }
 
-// PageParam 说明：分页入参复用 devops-common/domain.PageParam。
+// PageParam note: pagination input reuses devops-common/domain.PageParam.
 //
-// 该类型已在共享内核中定义且**不依赖 GORM**（仅标准库 + 结构 tag），
-// 同时被 gormx.FindPage 与 API 契约共用，无需在领域层重复定义。
-// 各仓储 Filter 直接内嵌 domain.PageParam。
+// That type is already defined in the shared kernel and does not depend on GORM (standard
+// library + struct tags only), and it is shared by gormx.FindPage and the API contract, so
+// there is no need to redefine it in the domain layer. Each repository Filter embeds
+// domain.PageParam directly.
 //
-// 补充说明：devops-common/domain.PageParam 携带 query/form/doc tag，
-// 这些 tag 只服务于 API 层反射（huma 生成 OpenAPI）与请求绑定，
-// 领域层与仓储层只是**携带**该类型而不解析其 tag，
-// 因此不构成 dao → API 契约的方向性依赖（真正的依赖方向由包 import 决定，
-// 而非结构 tag）。
+// Supplementary note: devops-common/domain.PageParam carries query/form/doc tags, which only
+// serve API-layer reflection (huma generating OpenAPI) and request binding. The domain and
+// repository layers merely carry the type without parsing its tags, so this does not
+// constitute a directional dependency from dao to the API contract (the real dependency
+// direction is determined by package imports, not struct tags).
 
-// TxManager 事务边界端口。
+// TxManager is the transaction boundary port.
 //
-// 现状痛点：既有 dao.WithTx 把 *gorm.DB 完全封在 dao 包内，
-// service 无法编排跨聚合用例的事务，被迫用手工补偿（如租户创建失败后
-// 手工 HardDeleteTenant 回滚）。抽出本端口后，应用层可以声明事务边界，
-// 仓储实现内部从 ctx 取事务句柄，从而在不泄漏 *gorm.DB 的前提下跨仓储编排。
+// Current pain point: the existing dao.WithTx keeps *gorm.DB entirely inside the dao package,
+// so the service cannot orchestrate transactions across aggregate use cases and is forced to
+// use manual compensation (e.g. manually HardDeleteTenant to roll back after a tenant
+// creation failure). With this port extracted, the application layer can declare transaction
+// boundaries, and repository implementations take the transaction handle from ctx internally,
+// thus orchestrating across repositories without leaking *gorm.DB.
 type TxManager interface {
-	// WithinTx 在单一事务内执行 fn。fn 返回错误则回滚。
+	// WithinTx executes fn within a single transaction. Rolls back if fn returns an error.
 	WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
 }

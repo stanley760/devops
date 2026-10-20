@@ -9,10 +9,10 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// Dept 部门聚合根（租户内）。
+// Dept is the dept aggregate root (within the tenant).
 //
-// 注意：t_system_dept 无 ancestors 列（对齐 yudao），树的父子关系仅由
-// parent_id 表达，路径信息在查询侧按需组装。
+// Note: t_system_dept has no ancestors column (aligned with yudao); the tree parent-child
+// relationship is expressed only by parent_id, with path info assembled on the query side as needed.
 type Dept struct {
 	shared.AggregateRoot
 
@@ -21,7 +21,7 @@ type Dept struct {
 	ParentID int64
 	Name     string
 	Sort     int
-	// LeaderUserID 负责人（用户 ID；列名 leader_user_id）。
+	// LeaderUserID is the leader (user ID; column name leader_user_id).
 	LeaderUserID int64
 	Phone        string
 	Email        string
@@ -30,7 +30,7 @@ type Dept struct {
 	UpdateTime   time.Time
 }
 
-// DeptUpdate 部门变更入参（领域输入）。
+// DeptUpdate is the dept change input (domain input).
 type DeptUpdate struct {
 	ParentID     int64
 	Name         string
@@ -41,15 +41,15 @@ type DeptUpdate struct {
 	Status       int8
 }
 
-// ValidateForCreate 创建前校验。
+// ValidateForCreate validates before creation.
 func (d *Dept) ValidateForCreate() error {
 	if strings.TrimSpace(d.Name) == "" {
-		return errs.New(errs.CodeParam, "部门名称不能为空")
+		return errs.New(errs.CodeParam, "dept name cannot be empty")
 	}
 	return nil
 }
 
-// Change 应用变更。
+// Change applies the change.
 func (d *Dept) Change(up DeptUpdate) {
 	d.ParentID = up.ParentID
 	d.Name = up.Name
@@ -60,34 +60,34 @@ func (d *Dept) Change(up DeptUpdate) {
 	d.Status = up.Status
 }
 
-// EnsureNotSelf 校验不可把自己设为上级。
+// EnsureNotSelf validates that a dept cannot set itself as its own parent.
 func (d *Dept) EnsureNotSelf(parentID int64) error {
 	if parentID == d.ID {
-		return errs.New(errs.CodeParam, "上级部门不能是自己")
+		return errs.New(errs.CodeParam, "parent dept cannot be itself")
 	}
 	return nil
 }
 
-// HasChildrenReport 部门下是否仍有子部门或成员（删除前置校验）。
+// HasChildrenReport reports whether the dept still has child departments or members (pre-delete validation).
 //
-// 返回的提示文案与既有实现保持一致，避免前端提示变化。
+// The returned messages are kept consistent with the existing implementation to avoid frontend prompt changes.
 func HasChildrenReport(hasChildren bool, hasMembers bool) error {
 	if hasChildren {
-		return errs.New(errs.CodeParam, "存在下级部门，不能删除")
+		return errs.New(errs.CodeParam, "sub-departments exist, cannot delete")
 	}
 	if hasMembers {
-		return errs.New(errs.CodeParam, "部门下存在用户，不能删除")
+		return errs.New(errs.CodeParam, "users exist under the department, cannot delete")
 	}
 	return nil
 }
 
-// Post 岗位聚合根（租户内）。
+// Post is the post aggregate root (within the tenant).
 type Post struct {
 	shared.AggregateRoot
 
 	ID         int64
 	TenantID   int64
-	Code       string // 租户内唯一
+	Code       string // unique within the tenant
 	Name       string
 	Sort       int
 	Status     int8
@@ -96,7 +96,7 @@ type Post struct {
 	UpdateTime time.Time
 }
 
-// PostUpdate 岗位变更入参。
+// PostUpdate is the post change input.
 type PostUpdate struct {
 	Code   string
 	Name   string
@@ -105,15 +105,15 @@ type PostUpdate struct {
 	Remark string
 }
 
-// ValidateForCreate 创建前校验：编码非空。
+// ValidateForCreate validates before creation: code must be non-empty.
 func (p *Post) ValidateForCreate() error {
 	if strings.TrimSpace(p.Code) == "" {
-		return errs.New(errs.CodeParam, "岗位编码不能为空")
+		return errs.New(errs.CodeParam, "post code cannot be empty")
 	}
 	return nil
 }
 
-// Change 应用变更。
+// Change applies the change.
 func (p *Post) Change(up PostUpdate) {
 	p.Code = up.Code
 	p.Name = up.Name
@@ -122,35 +122,35 @@ func (p *Post) Change(up PostUpdate) {
 	p.Remark = up.Remark
 }
 
-// Tenant 租户聚合根（全局表，无 tenant_id —— 租户注册表本身）。
+// Tenant is the tenant aggregate root (global table, no tenant_id — the tenant registry itself).
 //
-// 租户状态与用户/角色状态联动：停用租户 → 全员会话失效 + 拒绝登录。
-// 改造前该联动散落在 service/tenant.go（RevokeTenantSessions 调用），
-// 现以领域事件表达。
+// Tenant status is coupled with user/role status: disabling a tenant invalidates all sessions and denies login.
+// Before the refactor, this coupling was scattered in service/tenant.go (RevokeTenantSessions calls);
+// it is now expressed via a domain event.
 type Tenant struct {
 	shared.AggregateRoot
 
 	ID   int64
 	Name string
-	// Code 全局唯一（uk_code），前端租户标识与登录入参。
+	// Code is globally unique (uk_code), the frontend tenant identifier and login input.
 	Code          string
 	ContactName   string
 	ContactMobile string
 	Status        int8
-	// ExpireTime nil 表示永不过期。
+	// ExpireTime nil means never expires.
 	ExpireTime *time.Time
 	Remark     string
 	CreateTime time.Time
 	UpdateTime time.Time
 }
 
-// 租户状态。
+// Tenant status.
 const (
 	TenantStatusDisabled int8 = 0
 	TenantStatusEnabled  int8 = 1
 )
 
-// TenantUpdate 租户变更入参。
+// TenantUpdate is the tenant change input.
 type TenantUpdate struct {
 	Name          string
 	ContactName   string
@@ -160,7 +160,7 @@ type TenantUpdate struct {
 	Remark        string
 }
 
-// IsEnabled 租户是否可用（存在、未停用、未过期）。
+// IsEnabled reports whether the tenant is usable (exists, not disabled, not expired).
 func (t *Tenant) IsEnabled(now time.Time) bool {
 	if t.Status != TenantStatusEnabled {
 		return false
@@ -171,15 +171,15 @@ func (t *Tenant) IsEnabled(now time.Time) bool {
 	return true
 }
 
-// EnsureUsable 租户可用性校验（登录与中间件共用同一判定口径）。
+// EnsureUsable validates tenant usability (login and the middleware share the same judgment semantics).
 func (t *Tenant) EnsureUsable(now time.Time) error {
 	if !t.IsEnabled(now) {
-		return errs.New(errs.CodeForbidden, "租户不可用（停用或已过期）")
+		return errs.New(errs.CodeForbidden, "tenant is unavailable (disabled or expired)")
 	}
 	return nil
 }
 
-// Change 应用变更；状态转为停用时记录事件（全员踢下线）。
+// Change applies the change; records an event when the status turns to disabled (kick everyone offline).
 func (t *Tenant) Change(up TenantUpdate, at time.Time) {
 	was := t.Status
 	t.Name = up.Name
@@ -198,14 +198,14 @@ func (t *Tenant) Change(up TenantUpdate, at time.Time) {
 	}
 }
 
-// SyncStatusWithExpiry 按过期时间推导状态（未来→启用，过去→停用）。
+// SyncStatusWithExpiry derives the status from the expiry time (future -> enabled, past -> disabled).
 //
-// 业务规则：更新租户时若显式传了过期时间，状态应与之保持一致，
-// 否则会出现「已过期但状态仍为启用」的矛盾态。
-// 改造前该规则在 service/tenant.go:130-140 以 updates map 表达。
+// Business rule: when updating a tenant with an explicit expiry time, the status should stay
+// consistent with it, otherwise the contradictory state of "expired but still enabled" appears.
+// Before the refactor, this rule was expressed as an updates map in service/tenant.go:130-140.
 func (t *Tenant) SyncStatusWithExpiry(now time.Time) {
 	if t.ExpireTime == nil {
-		return // 永不过期：不改动状态
+		return // never expires: do not change the status
 	}
 	want := TenantStatusEnabled
 	if !t.ExpireTime.After(now) {
@@ -223,12 +223,12 @@ func (t *Tenant) SyncStatusWithExpiry(now time.Time) {
 	}
 }
 
-// EnsureNotDefaultDisable 禁止停用默认租户（避免把自己锁在门外）。
+// EnsureNotDefaultDisable forbids disabling the default tenant (to avoid locking yourself out).
 //
-// 该规则在改造前不存在，属本次重构新增的显式业务约束。
+// This rule did not exist before the refactor; it is an explicit business constraint added in this refactor.
 func (t *Tenant) EnsureNotDefaultDisable(code string) error {
 	if code == "default" && t.Status == TenantStatusDisabled {
-		return errs.New(errs.CodeParam, "默认租户不可停用")
+		return errs.New(errs.CodeParam, "the default tenant cannot be disabled")
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ import (
 	"github.com/stanley760/devops/devops-infra/http/response"
 )
 
-// run 经真实 gin 引擎执行 handler，返回其响应。
+// run executes the handler through a real gin engine and returns its response.
 func run(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -27,7 +27,7 @@ func run(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
 	return w
 }
 
-// env 统一信封的宽松解析。
+// env loosely parses the unified envelope.
 type env struct {
 	Code int             `json:"code"`
 	Msg  string          `json:"msg"`
@@ -44,13 +44,13 @@ func TestOK(t *testing.T) {
 	}
 	var e env
 	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
-		t.Fatalf("响应不是统一信封: %v", err)
+		t.Fatalf("response is not a unified envelope: %v", err)
 	}
 	if e.Code != errs.CodeOK || e.Msg != "ok" {
 		t.Fatalf("code=%d msg=%q, want code=200 msg=ok", e.Code, e.Msg)
 	}
 	if !strings.Contains(w.Body.String(), `"id":1`) {
-		t.Fatalf("data 缺失: %s", w.Body.String())
+		t.Fatalf("data missing: %s", w.Body.String())
 	}
 }
 
@@ -76,11 +76,11 @@ func TestOKPage(t *testing.T) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
-		t.Fatalf("响应不是统一信封: %v", err)
+		t.Fatalf("response is not a unified envelope: %v", err)
 	}
 	if e.Code != errs.CodeOK || len(e.Data.List) != 2 || e.Data.Total != 21 ||
 		e.Data.PageNum != 2 || e.Data.PageSize != 10 || e.Data.Pages != 3 {
-		t.Fatalf("分页信封不符合: %s", w.Body.String())
+		t.Fatalf("paginated envelope mismatch: %s", w.Body.String())
 	}
 }
 
@@ -94,18 +94,18 @@ func TestWrapBizError(t *testing.T) {
 	}
 	var e env
 	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
-		t.Fatalf("响应不是统一信封: %v", err)
+		t.Fatalf("response is not a unified envelope: %v", err)
 	}
 	if e.Code != errs.CodeNotFound || e.Msg != errs.ErrNotFound.Msg {
-		t.Fatalf("信封不符合: %s", w.Body.String())
+		t.Fatalf("envelope mismatch: %s", w.Body.String())
 	}
 }
 
 func TestWrapWrappedBizError(t *testing.T) {
-	// errors.As 需穿透 fmt.Errorf 的 %w 包装
-	inner := errs.Wrap(errors.New("duplicate entry"), errs.CodeParam, "用户名已存在")
+	// errors.As must unwrap the fmt.Errorf %w wrapper
+	inner := errs.Wrap(errors.New("duplicate entry"), errs.CodeParam, "username already exists")
 	w := run(t, response.Wrap(func(c *gin.Context) error {
-		return fmt.Errorf("创建用户: %w", inner)
+		return fmt.Errorf("create user: %w", inner)
 	}))
 
 	if w.Code != http.StatusBadRequest {
@@ -113,10 +113,10 @@ func TestWrapWrappedBizError(t *testing.T) {
 	}
 	var e env
 	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
-		t.Fatalf("响应不是统一信封: %v", err)
+		t.Fatalf("response is not a unified envelope: %v", err)
 	}
-	if e.Msg != "用户名已存在" {
-		t.Fatalf("msg = %q, want 用户名已存在", e.Msg)
+	if e.Msg != "username already exists" {
+		t.Fatalf("msg = %q, want username already exists", e.Msg)
 	}
 }
 
@@ -129,19 +129,19 @@ func TestWrapUnknownError(t *testing.T) {
 		t.Fatalf("status = %d, want 500", w.Code)
 	}
 	if strings.Contains(w.Body.String(), "connection refused") {
-		t.Fatalf("内部错误泄露到响应: %s", w.Body.String())
+		t.Fatalf("internal error leaked into the response: %s", w.Body.String())
 	}
 	var e env
 	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
-		t.Fatalf("响应不是统一信封: %v", err)
+		t.Fatalf("response is not a unified envelope: %v", err)
 	}
 	if e.Code != errs.CodeInternal || e.Msg != errs.ErrInternal.Msg {
-		t.Fatalf("信封不符合: %s", w.Body.String())
+		t.Fatalf("envelope mismatch: %s", w.Body.String())
 	}
 }
 
 func TestWrapMissingResponse(t *testing.T) {
-	// handler 忘记写响应时兜底 500，避免请求挂起
+	// when a handler forgets to write a response, fall back to 500 to avoid hanging the request
 	w := run(t, response.Wrap(func(c *gin.Context) error {
 		return nil
 	}))
@@ -152,7 +152,7 @@ func TestWrapMissingResponse(t *testing.T) {
 }
 
 func TestWrapSuccessPassThrough(t *testing.T) {
-	// 已写响应且返回 nil：正常放行
+	// response already written and nil returned: pass through normally
 	w := run(t, response.Wrap(func(c *gin.Context) error {
 		response.OK(c, nil)
 		return nil
@@ -164,9 +164,9 @@ func TestWrapSuccessPassThrough(t *testing.T) {
 }
 
 func TestFailCodeNormalization(t *testing.T) {
-	// 误传 2xx 码时归一化为 500
+	// a mistakenly passed 2xx code is normalized to 500
 	w := run(t, func(c *gin.Context) {
-		response.Fail(c, 200, "误用成功码")
+		response.Fail(c, 200, "misused success code")
 	})
 
 	if w.Code != http.StatusInternalServerError {
@@ -174,7 +174,7 @@ func TestFailCodeNormalization(t *testing.T) {
 	}
 }
 
-// bindRun 模拟真实 handler：POST JSON → ShouldBindJSON 直返错误。
+// bindRun simulates a real handler: POST JSON → ShouldBindJSON returns the error directly.
 func bindRun(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -196,7 +196,7 @@ func bindRun(t *testing.T, body string) *httptest.ResponseRecorder {
 }
 
 func TestWrapValidationErrorAs400(t *testing.T) {
-	// 缺 required 字段：应 400 且 msg 带字段名，而非 500 兜底
+	// a missing required field: expect 400 with the field name in msg, not a 500 fallback
 	w := bindRun(t, `{"age":1}`)
 
 	if w.Code != http.StatusBadRequest {
@@ -207,7 +207,7 @@ func TestWrapValidationErrorAs400(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.Code != errs.CodeParam || !strings.Contains(e.Msg, "Name") {
-		t.Fatalf("code=%d msg=%q，应含字段名 Name 的 400 提示", e.Code, e.Msg)
+		t.Fatalf("code=%d msg=%q, expected a 400 message containing the field name Name", e.Code, e.Msg)
 	}
 }
 

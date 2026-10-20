@@ -1,13 +1,14 @@
-// Package domain 提供跨业务复用的分页值对象与元数据。
+// Package domain provides pagination value objects and metadata shared across businesses.
 //
-// 本包保持零外部依赖（仅标准库），使不使用 GORM 的业务模块也能直接复用分页契约；
-// 依赖 GORM 的查询辅助位于子包 gormx。
+// This package keeps zero external dependencies (standard library only) so that
+// business modules that do not use GORM can reuse the pagination contract directly;
+// the GORM-dependent query helpers live in the gormx subpackage.
 package domain
 
-// PageParam 分页入参（HTTP query/form 绑定）。
+// PageParam is the pagination input (bound from HTTP query/form).
 type PageParam struct {
-	PageNum  int `query:"page_num" form:"page_num" binding:"omitempty,min=1" minimum:"1" default:"1" doc:"页码"`
-	PageSize int `query:"page_size" form:"page_size" binding:"omitempty,min=1,max=100" minimum:"1" maximum:"100" default:"10" doc:"每页记录数"`
+	PageNum  int `query:"page_num" form:"page_num" binding:"omitempty,min=1" minimum:"1" default:"1" doc:"page number"`
+	PageSize int `query:"page_size" form:"page_size" binding:"omitempty,min=1,max=100" minimum:"1" maximum:"100" default:"10" doc:"records per page"`
 }
 
 const (
@@ -16,7 +17,7 @@ const (
 	MaxPageSize     = 1000
 )
 
-// Normalize 补齐默认值并限制单页最大条数。
+// Normalize fills in default values and caps the maximum page size.
 func (p PageParam) Normalize() PageParam {
 	if p.PageNum < 1 {
 		p.PageNum = DefaultPageNum
@@ -30,7 +31,7 @@ func (p PageParam) Normalize() PageParam {
 	return p
 }
 
-// Offset 返回当前页对应的数据库偏移量。
+// Offset returns the database offset corresponding to the current page.
 func (p PageParam) Offset() int {
 	p = p.Normalize()
 	maxInt := int(^uint(0) >> 1)
@@ -40,16 +41,16 @@ func (p PageParam) Offset() int {
 	return (p.PageNum - 1) * p.PageSize
 }
 
-// PageResult 是带分页元数据的查询结果。
+// PageResult is a query result with pagination metadata.
 type PageResult[T any] struct {
-	List     []T   `json:"list" doc:"当前页数据列表" required:"true"`
-	Total    int64 `json:"total" doc:"符合查询条件的总记录数" required:"true"`
-	PageNum  int   `json:"page_num" doc:"当前页码，从 1 开始" required:"true"`
-	PageSize int   `json:"page_size" doc:"每页记录数" required:"true"`
-	Pages    int64 `json:"pages" doc:"总页数" required:"true"`
+	List     []T   `json:"list" doc:"data list of the current page" required:"true"`
+	Total    int64 `json:"total" doc:"total number of records matching the query" required:"true"`
+	PageNum  int   `json:"page_num" doc:"current page number, starting from 1" required:"true"`
+	PageSize int   `json:"page_size" doc:"records per page" required:"true"`
+	Pages    int64 `json:"pages" doc:"total number of pages" required:"true"`
 }
 
-// MapPage 转换当前页的数据，同时保留分页元数据。
+// MapPage converts the items of the current page while preserving the pagination metadata.
 func MapPage[T, U any](page PageResult[T], convert func(T) U) PageResult[U] {
 	mapped := PageResult[U]{
 		List:     make([]U, 0, len(page.List)),

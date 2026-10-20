@@ -1,22 +1,22 @@
-// Package config 定义应用配置结构，并封装 viper 的初始化与读取。
+// Package config defines application config structures and wraps viper's initialization and reading.
 //
-// 职责划分：
-//   - Init(path) 先加载 .env，再加载 bootstrap.yaml，合并服务环境覆盖文件，开启热更新
-//   - LoadInto() 把配置反序列化到结构体
+// Responsibilities:
+//   - Init(path) first loads .env, then bootstrap.yaml, merges the service environment override file, and enables hot reload
+//   - LoadInto() deserializes the config into a struct
 //
-// 配置组织方式（.env + bootstrap + 远程优先 + 本地兜底）：
+// Configuration layout (.env + bootstrap + remote first + local fallback):
 //
-//	config/.env                   本地环境变量（APP_ENV、NACOS_REGISTER_IP 等），不提交
-//	config/bootstrap.yaml         引导配置：nacos 连接信息 + 公共基线，始终加载
-//	远程 dataID                    优先加载，命中即以远程为准
-//	config/<service>-<env>.yaml   本地兜底：仅当远程未命中同名 dataID 时由
-//	                              调用方通过 MergeEnvConfig 合并
-//	例如：devops-id-dev.yaml、devops-system-prod.yaml
+//	config/.env                    Local environment variables (APP_ENV, NACOS_REGISTER_IP, etc.), not committed
+//	config/bootstrap.yaml          Bootstrap config: nacos connection info + common baseline, always loaded
+//	remote dataID                  Loaded first; once hit, the remote value wins
+//	config/<service>-<env>.yaml    Local fallback: merged by the caller via MergeEnvConfig only when
+//	                              the remote side does not hit the same-named dataID
+//	Example: devops-id-dev.yaml, devops-system-prod.yaml
 //
-// .env 文件优先级低于 OS 环境变量：已设置的环境变量不会被 .env 覆盖，
-// 避免 CI/容器环境的外部注入被本地文件意外篡改。
+// The .env file ranks below OS environment variables: variables already set are not overwritten by .env,
+// preventing externally injected values in CI/container environments from being tampered with by local files.
 //
-// 使用方式（cmd 层）：
+// Usage (cmd layer):
 //
 //	cobra.OnInitialize(func() { config.Init(confFile) })
 //	cfg, err := config.LoadInto(&cfg)
@@ -32,18 +32,18 @@ import (
 	"github.com/spf13/viper"
 )
 
-// EnvAppEnv 用于选择环境的环境变量名，取值如 dev / prod / test。
+// EnvAppEnv is the environment variable name used to select the environment; values such as dev / prod / test.
 const EnvAppEnv = "APP_ENV"
 
-// loadDotEnv 加载 bootstrap 同目录下的 .env 文件（存在时），将其中未在 OS 环境
-// 中设置的变量注入 os.Environ。文件不存在时静默跳过——生产环境通常不依赖 .env。
+// loadDotEnv loads the .env file next to bootstrap (when present), injecting its variables
+// into os.Environ if not already set in the OS environment. A missing file is skipped silently — production environments usually do not rely on .env.
 func loadDotEnv(basePath string) {
 	configDir := filepath.Dir(basePath)
 	dotEnv := filepath.Join(configDir, ".env")
 	if _, err := os.Stat(dotEnv); err != nil {
-		return // .env 不存在，跳过
+		return // .env missing, skip
 	}
-	// Overload=false：不覆盖已设置的 OS 环境变量（CI/容器注入优先）
+	// Overload=false: do not overwrite OS environment variables already set (CI/container injection wins)
 	if err := godotenv.Load(dotEnv); err == nil {
 		dotEnvFile = ".env"
 	}
@@ -57,20 +57,20 @@ var (
 	bootstrapNacos map[string]any
 )
 
-// Init 加载 .env（如有），再读取 bootstrap 引导配置。
-// 本地环境覆盖文件不在此时合并——远程 Nacos 配置优先，仅当远程未命中时
-// 由调用方通过 MergeEnvConfig 兜底加载。
+// Init loads .env (if present), then reads the bootstrap config.
+// Local environment override files are not merged at this point — remote Nacos config wins; only when the remote misses
+// does the caller load the fallback via MergeEnvConfig.
 func Init(path string) error {
 	if path == "" {
 		path = filepath.Join("config", "bootstrap.yaml")
 	}
-	// 先加载 .env：将 APP_ENV、NACOS_REGISTER_IP 等本地变量注入进程环境。
-	// 已设置的 OS 环境变量优先，.env 不覆盖（CI/容器注入安全）。
+	// Load .env first: inject local variables such as APP_ENV and NACOS_REGISTER_IP into the process environment.
+	// OS environment variables already set take precedence; .env never overwrites them (safe for CI/container injection).
 	loadDotEnv(path)
 	viper.Reset()
 	viper.SetConfigFile(path)
 	if err := viper.ReadInConfig(); err != nil {
-		return fmt.Errorf("读取基础配置 %s 失败: %w", path, err)
+		return fmt.Errorf("failed to read base config %s: %w", path, err)
 	}
 	baseFile = path
 	envFile = ""
@@ -80,13 +80,13 @@ func Init(path string) error {
 	return nil
 }
 
-// MergeEnvConfig 合并本地环境覆盖文件 <service>-<env>.yaml（存在时）。
-// 供远程配置中心未命中时的本地兜底；文件不存在时静默跳过。
+// MergeEnvConfig merges the local environment override file <service>-<env>.yaml (when present).
+// It serves as the local fallback when the remote config center misses; a missing file is skipped silently.
 func MergeEnvConfig() error {
 	return mergeEnvConfig(baseFile)
 }
 
-// mergeEnvConfig 按 APP_ENV 加载服务环境配置，文件名格式：<service>-<env>.yaml。
+// mergeEnvConfig loads the service environment config per APP_ENV; file name format: <service>-<env>.yaml.
 func mergeEnvConfig(basePath string) error {
 	env := Env()
 	serviceName := ServiceName()
@@ -101,10 +101,10 @@ func mergeEnvConfig(basePath string) error {
 	envViper := viper.New()
 	envViper.SetConfigFile(candidate)
 	if err := envViper.ReadInConfig(); err != nil {
-		return fmt.Errorf("读取模块环境配置 %s 失败: %w", candidate, err)
+		return fmt.Errorf("failed to read module environment config %s: %w", candidate, err)
 	}
 	if err := viper.MergeConfigMap(envViper.AllSettings()); err != nil {
-		return fmt.Errorf("合并模块环境配置 %s 失败: %w", candidate, err)
+		return fmt.Errorf("failed to merge module environment config %s: %w", candidate, err)
 	}
 	envFile = candidate
 	return nil
@@ -116,7 +116,7 @@ func ServiceName() string {
 	return strings.TrimSpace(viper.GetString("nacos.registry.service_name"))
 }
 
-// Env 返回当前生效的环境名，未设置时默认 dev。
+// Env returns the currently effective environment name, defaulting to dev when unset.
 func Env() string {
 	env := strings.TrimSpace(os.Getenv(EnvAppEnv))
 	if env == "" {
@@ -125,7 +125,7 @@ func Env() string {
 	return env
 }
 
-// Files 返回实际加载的配置文件来源。
+// Files returns the sources of the configuration files actually loaded.
 func Files() string {
 	sources := make([]string, 0, 4)
 	if dotEnvFile != "" {
@@ -143,10 +143,10 @@ func Files() string {
 	return strings.Join(sources, " + ")
 }
 
-// LoadInto 把合并后的配置反序列化到调用方定义的结构体。
+// LoadInto deserializes the merged config into a struct defined by the caller.
 func LoadInto(target any) error {
 	if err := viper.Unmarshal(target); err != nil {
-		return fmt.Errorf("解析配置失败: %w", err)
+		return fmt.Errorf("failed to parse config: %w", err)
 	}
 	return nil
 }
@@ -156,15 +156,15 @@ func LoadInto(target any) error {
 // them, matching Spring Boot's higher-priority remote configuration behavior.
 func MergeWithYAML(content string) error {
 	if strings.TrimSpace(content) == "" {
-		return fmt.Errorf("外部配置内容为空")
+		return fmt.Errorf("external config content is empty")
 	}
 	remote := viper.New()
 	remote.SetConfigType("yaml")
 	if err := remote.ReadConfig(strings.NewReader(content)); err != nil {
-		return fmt.Errorf("解析外部 YAML 配置失败: %w", err)
+		return fmt.Errorf("failed to parse external YAML config: %w", err)
 	}
 	if err := viper.MergeConfigMap(remote.AllSettings()); err != nil {
-		return fmt.Errorf("合并外部 YAML 配置失败: %w", err)
+		return fmt.Errorf("failed to merge external YAML config: %w", err)
 	}
 	return nil
 }
@@ -208,9 +208,9 @@ func RemoteDataIDs(configured []string) []string {
 	return dataIDs
 }
 
-// ProfileDataID 返回 profile dataID（<service>-<env>.yaml），与本地兜底文件
-// 同名。调用方据此判断远程是否命中：未命中时才合并本地环境覆盖文件。
-// 未配置 service_name 时返回空串。
+// ProfileDataID returns the profile dataID (<service>-<env>.yaml), sharing its name with the local fallback
+// file. Callers use it to decide whether the remote side hit: merge the local environment override file only on a miss.
+// Returns an empty string when service_name is not configured.
 func ProfileDataID() string {
 	serviceName := ServiceName()
 	if serviceName == "" {

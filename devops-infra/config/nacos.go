@@ -3,7 +3,7 @@ package config
 import "time"
 
 type NacosConfig struct {
-	Enabled   bool          `mapstructure:"enabled"`   // 总开关，false 时全包 no-op
+	Enabled   bool          `mapstructure:"enabled"`   // master switch; the whole package is a no-op when false
 	Endpoints []string      `mapstructure:"endpoints"` // ["127.0.0.1:8848"]
 	Namespace string        `mapstructure:"namespace"` // devops
 	Group     string        `mapstructure:"group"`     // DEVOPS_GROUP

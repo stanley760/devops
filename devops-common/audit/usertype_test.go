@@ -3,11 +3,11 @@ package audit
 import "testing"
 
 func TestUserTypeLabels(t *testing.T) {
-	if got := UserTypeMember.String(); got != "会员" {
-		t.Fatalf("UserTypeMember.String() = %q, want %q", got, "会员")
+	if got := UserTypeMember.String(); got != "Member" {
+		t.Fatalf("UserTypeMember.String() = %q, want %q", got, "Member")
 	}
-	if got := UserTypeAdmin.String(); got != "管理员" {
-		t.Fatalf("UserTypeAdmin.String() = %q, want %q", got, "管理员")
+	if got := UserTypeAdmin.String(); got != "Admin" {
+		t.Fatalf("UserTypeAdmin.String() = %q, want %q", got, "Admin")
 	}
 }
 
@@ -43,8 +43,8 @@ func TestUserTypeValid(t *testing.T) {
 
 func TestUserTypeStringFallsBackForUnknown(t *testing.T) {
 	got := UserType(99).String()
-	if got != "未知(99)" {
-		t.Fatalf("String() = %q, want %q", got, "未知(99)")
+	if got != "Unknown(99)" {
+		t.Fatalf("String() = %q, want %q", got, "Unknown(99)")
 	}
 }
 

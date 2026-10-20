@@ -1,7 +1,10 @@
-// 部门/岗位管理服务。
+// Department/post management service.
 //
-// 部门树内存组装（无 ancestors 列，对齐 yudao）；更新时校验父节点不得是自身或后代，
-// 防止把子树挂到自身之下形成环。岗位 code 租户内唯一、创建后不可改。
+// The department tree is assembled in memory (no ancestors column, aligned with
+// yudao); updates validate that the parent is neither the node itself nor one
+// of its descendants, preventing a subtree from being hung under itself and
+// forming a cycle. A post code is unique within a tenant and cannot be changed
+// after creation.
 package service
 
 import (
@@ -15,13 +18,13 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// Dept 部门管理服务。
+// Dept is the department management service.
 type Dept struct{}
 
-// NewDept 创建服务。
+// NewDept creates the service.
 func NewDept() *Dept { return &Dept{} }
 
-// List 部门树（status 筛选可选）。
+// List returns the department tree (status filter optional).
 func (s *Dept) List(ctx context.Context, status *int8) ([]types.DeptTreeResp, error) {
 	depts, err := dao.ListDepts(ctx, status)
 	if err != nil {
@@ -30,7 +33,7 @@ func (s *Dept) List(ctx context.Context, status *int8) ([]types.DeptTreeResp, er
 	return buildDeptTree(depts), nil
 }
 
-// Get 部门详情。
+// Get returns the department details.
 func (s *Dept) Get(ctx context.Context, id types.ID) (*types.DeptDTO, error) {
 	d, err := dao.GetDeptByID(ctx, id.Int64())
 	if err != nil {
@@ -40,7 +43,7 @@ func (s *Dept) Get(ctx context.Context, id types.ID) (*types.DeptDTO, error) {
 	return &dto, nil
 }
 
-// Create 创建部门：校验父部门存在。
+// Create creates a department: validates that the parent department exists.
 func (s *Dept) Create(ctx context.Context, claims *auth.AccessClaims, req types.DeptSaveReq) error {
 	if req.ParentID.Int64() > 0 {
 		if _, err := dao.GetDeptByID(ctx, req.ParentID.Int64()); err != nil {
@@ -62,7 +65,8 @@ func (s *Dept) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 	return dao.CreateDept(ctx, d)
 }
 
-// Update 更新部门：父节点不能是自身或自身后代（防环）。
+// Update updates a department: the parent cannot be the node itself or one of
+// its descendants (cycle prevention).
 func (s *Dept) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.DeptSaveReq) error {
 	d, err := dao.GetDeptByID(ctx, id.Int64())
 	if err != nil {
@@ -71,12 +75,12 @@ func (s *Dept) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	parentID := req.ParentID.Int64()
 	if parentID != 0 {
 		if parentID == d.ID {
-			return errs.New(errs.CodeParam, "父部门不能是自身")
+			return errs.New(errs.CodeParam, "parent department cannot be itself")
 		}
 		if _, err := dao.GetDeptByID(ctx, parentID); err != nil {
 			return err
 		}
-		// 后代校验：parentID 落在以 d 为根的子树内则成环
+		// Descendant check: a cycle forms if parentID falls inside the subtree rooted at d
 		depts, err := dao.ListDepts(ctx, nil)
 		if err != nil {
 			return err
@@ -86,7 +90,7 @@ func (s *Dept) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 			childrenOf[dep.ParentID] = append(childrenOf[dep.ParentID], dep.ID)
 		}
 		if inSubtree(childrenOf, d.ID, parentID) {
-			return errs.New(errs.CodeParam, "父部门不能是自身的子部门")
+			return errs.New(errs.CodeParam, "parent department cannot be a descendant of itself")
 		}
 	}
 
@@ -102,7 +106,7 @@ func (s *Dept) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	})
 }
 
-// Delete 删除部门：有子部门/有用户不可删。
+// Delete deletes a department: departments with children or users cannot be deleted.
 func (s *Dept) Delete(ctx context.Context, id types.ID) error {
 	deptID := id.Int64()
 	if _, err := dao.GetDeptByID(ctx, deptID); err != nil {
@@ -113,19 +117,19 @@ func (s *Dept) Delete(ctx context.Context, id types.ID) error {
 		return err
 	}
 	if has {
-		return errs.New(errs.CodeParam, "存在子部门，无法删除")
+		return errs.New(errs.CodeParam, "child departments exist, cannot delete")
 	}
 	has, err = dao.DeptHasUsers(ctx, deptID)
 	if err != nil {
 		return err
 	}
 	if has {
-		return errs.New(errs.CodeParam, "部门下存在用户，无法删除")
+		return errs.New(errs.CodeParam, "users exist under this department, cannot delete")
 	}
 	return dao.DeleteDept(ctx, deptID)
 }
 
-// inSubtree target 是否在以 root 为根的子树内（BFS）。
+// inSubtree reports whether target lies in the subtree rooted at root (BFS).
 func inSubtree(childrenOf map[int64][]int64, root, target int64) bool {
 	queue := []int64{root}
 	for len(queue) > 0 {
@@ -139,7 +143,8 @@ func inSubtree(childrenOf map[int64][]int64, root, target int64) bool {
 	return false
 }
 
-// buildDeptTree 部门列表 → 树（parent 不在集合或为 0 即根）。
+// buildDeptTree converts a department list into a tree (a parent outside the
+// set, or 0, is a root).
 func buildDeptTree(depts []model.Dept) []types.DeptTreeResp {
 	byID := make(map[int64]*types.DeptTreeResp, len(depts))
 	roots := make([]*types.DeptTreeResp, 0)
@@ -163,7 +168,7 @@ func buildDeptTree(depts []model.Dept) []types.DeptTreeResp {
 	return out
 }
 
-// toDeptDTO model.Dept → DTO。
+// toDeptDTO maps model.Dept → DTO.
 func toDeptDTO(d *model.Dept) types.DeptDTO {
 	return types.DeptDTO{
 		ID:           types.ID(d.ID),
@@ -178,15 +183,15 @@ func toDeptDTO(d *model.Dept) types.DeptDTO {
 	}
 }
 
-// ---- 岗位 ----
+// ---- Post ----
 
-// Post 岗位管理服务。
+// Post is the post management service.
 type Post struct{}
 
-// NewPost 创建服务。
+// NewPost creates the service.
 func NewPost() *Post { return &Post{} }
 
-// List 分页查询。
+// List returns a paginated query.
 func (s *Post) List(ctx context.Context, q types.PostPageQuery) (domain.PageResult[types.PostDTO], error) {
 	page, err := dao.ListPosts(ctx, q)
 	if err != nil {
@@ -197,7 +202,7 @@ func (s *Post) List(ctx context.Context, q types.PostPageQuery) (domain.PageResu
 	}), nil
 }
 
-// Get 岗位详情。
+// Get returns the post details.
 func (s *Post) Get(ctx context.Context, id types.ID) (*types.PostDTO, error) {
 	p, err := dao.GetPostByID(ctx, id.Int64())
 	if err != nil {
@@ -207,14 +212,14 @@ func (s *Post) Get(ctx context.Context, id types.ID) (*types.PostDTO, error) {
 	return &dto, nil
 }
 
-// Create 创建岗位：code 租户内唯一。
+// Create creates a post: the code is unique within a tenant.
 func (s *Post) Create(ctx context.Context, claims *auth.AccessClaims, req types.PostSaveReq) error {
 	exists, err := dao.PostCodeExists(ctx, req.Code, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errs.New(errs.CodeParam, "岗位编码已存在")
+		return errs.New(errs.CodeParam, "post code already exists")
 	}
 	p := &model.Post{
 		BaseTenantModel: model.BaseTenantModel{
@@ -229,7 +234,7 @@ func (s *Post) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 	return dao.CreatePost(ctx, p)
 }
 
-// Update 更新岗位（code 创建后不可改）。
+// Update updates a post (the code cannot be changed after creation).
 func (s *Post) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.PostSaveReq) error {
 	p, err := dao.GetPostByID(ctx, id.Int64())
 	if err != nil {
@@ -244,7 +249,8 @@ func (s *Post) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	})
 }
 
-// Delete 删除岗位：被用户 post_ids 引用不可删 → 软删（改写 code 保同名重建）。
+// Delete deletes a post: posts referenced by users' post_ids cannot be deleted
+// → soft-delete (the code is rewritten so a same-named post can be recreated).
 func (s *Post) Delete(ctx context.Context, claims *auth.AccessClaims, id types.ID) error {
 	p, err := dao.GetPostByID(ctx, id.Int64())
 	if err != nil {
@@ -255,12 +261,12 @@ func (s *Post) Delete(ctx context.Context, claims *auth.AccessClaims, id types.I
 		return err
 	}
 	if has {
-		return errs.New(errs.CodeParam, "岗位已被用户引用，请先解除关联")
+		return errs.New(errs.CodeParam, "post is referenced by users; unlink it first")
 	}
 	return dao.SoftDeletePost(ctx, p.ID, p.Code)
 }
 
-// toPostDTO model.Post → DTO。
+// toPostDTO maps model.Post → DTO.
 func toPostDTO(p *model.Post) types.PostDTO {
 	return types.PostDTO{
 		ID:         types.ID(p.ID),

@@ -12,15 +12,16 @@ import (
 //go:embed banner.txt
 var banner string
 
-// ui 用于打印 banner 与版本信息这类"程序输出"。
-// 独立 log 实例（Flags=0、输出到 color.Output），多行 banner 不被时间前缀顶歪，
-// 终端正常显色、重定向自动去转义。
+// ui prints "program output" such as the banner and version info.
+// A separate log instance (Flags=0, writing to color.Output) keeps multi-line banners
+// from being pushed off-center by a time prefix, colors normally on a terminal,
+// and strips escape sequences automatically when redirected.
 var ui = log.New(color.Output, "", 0)
 
 func main() {
-	// 提前加载 config/.env：resolveVersion 依赖 APP_VERSION，
-	// 而 config.Init（cobra.OnInitialize）要等到 cmd.Execute 才执行。
-	// godotenv.Load 不覆盖已设置的 OS 环境变量，CI/容器注入安全。
+	// Load config/.env early: resolveVersion depends on APP_VERSION,
+	// while config.Init (cobra.OnInitialize) only runs when cmd.Execute is called.
+	// godotenv.Load does not override already-set OS environment variables, so CI/container injection is safe.
 	_ = godotenv.Load("config/.env")
 
 	ver := utils.ResolveVersion()

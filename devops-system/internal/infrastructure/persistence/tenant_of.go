@@ -6,14 +6,15 @@ import (
 	"github.com/stanley760/devops/devops-infra/tenant"
 )
 
-// tenantOf 从上下文取租户 ID。
+// tenantOf takes the tenant ID from the context.
 //
-// 为什么需要它：涉及 JOIN 的查询或 Unscoped 查询会绕开租户插件的自动注入
-// （见 devops-infra/tenant 插件的 JOIN 放行规则），此时必须显式带 tenant_id，
-// 否则就是跨租户数据泄漏。取不到租户即 fail-closed 报错。
+// Why it is needed: queries involving JOINs or Unscoped queries bypass the tenant plugin's
+// automatic injection (see the JOIN pass-through rules of the devops-infra/tenant plugin), in
+// which case tenant_id must be specified explicitly, otherwise it is a cross-tenant data leak.
+// Failing to get the tenant fails closed with an error.
 //
-// fail-closed 语义与既有实现一致（dao/user.go:tenantOf、dao/menu.go:tenantOfCtx），
-// 收敛为唯一实现。
+// The fail-closed semantics are consistent with the existing implementation (dao/user.go:tenantOf,
+// dao/menu.go:tenantOfCtx), converged into a single implementation.
 func tenantOf(ctx context.Context) (int64, error) {
 	return tenant.RequiredTenantID(ctx)
 }

@@ -2,7 +2,7 @@ package config
 
 import "time"
 
-// MysqlConfig MySQL 连接配置（t_leaf_alloc 号段表）
+// MysqlConfig is the MySQL connection config (t_leaf_alloc segment table).
 type MysqlConfig struct {
 	Host            string        `mapstructure:"host"`
 	Port            int           `mapstructure:"port"`

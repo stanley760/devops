@@ -1,19 +1,22 @@
 package authz
 
-// 角色名配置：平台超管与租户超管的角色标识由业务注入（或走默认），
-// 避免种子策略与 IsPlatformAdmin 判定各写死一份字符串导致脑裂。
+// Role name configuration: the platform super-admin and tenant super-admin role
+// identifiers are injected by the business (or taken from the defaults), so that the
+// seed policies and the IsPlatformAdmin check do not each hard-code a copy of the
+// strings and drift apart.
 const (
 	defaultPlatformAdmin = "platform_admin"
 	defaultSuperAdmin    = "super_admin"
 )
 
-// RoleConfig 角色名配置；零值字段回填默认，保证向后兼容（yudao 口径）。
+// RoleConfig holds role names; zero-value fields fall back to defaults, preserving
+// backward compatibility (yudao convention).
 type RoleConfig struct {
-	PlatformAdmin string // 平台管理员角色（g2 二元组 + p,*,* 通配），默认 "platform_admin"
-	SuperAdmin    string // 租户超管角色（p,{domain},* + g 三元组），默认 "super_admin"
+	PlatformAdmin string // platform admin role (g2 pair + p,*,* wildcard), defaults to "platform_admin"
+	SuperAdmin    string // tenant super-admin role (p,{domain},* + g triple), defaults to "super_admin"
 }
 
-// DefaultRoleConfig 默认角色名配置（与历史硬编码字符串一致）。
+// DefaultRoleConfig returns the default role names (identical to the historical hard-coded strings).
 func DefaultRoleConfig() RoleConfig {
 	return RoleConfig{
 		PlatformAdmin: defaultPlatformAdmin,
@@ -21,7 +24,7 @@ func DefaultRoleConfig() RoleConfig {
 	}
 }
 
-// withDefaults 零值字段回填默认，保证部分自定义也能跑。
+// withDefaults backfills zero-value fields with defaults so partial customization still works.
 func (c RoleConfig) withDefaults() RoleConfig {
 	if c.PlatformAdmin == "" {
 		c.PlatformAdmin = defaultPlatformAdmin

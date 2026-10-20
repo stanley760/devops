@@ -1,4 +1,4 @@
-// 登录审计查询模块 DTO（管理端 t_system_login_log 读取侧；写入侧见 service.Auth.login）。
+// Login audit query module DTOs (admin-side read side of t_system_login_log; for the write side, see service.Auth.login).
 package types
 
 import (
@@ -7,28 +7,28 @@ import (
 	"github.com/stanley760/devops/devops-common/domain"
 )
 
-// LoginLogPageQuery GET /login-logs 查询参数。
+// LoginLogPageQuery holds the GET /login-logs query parameters.
 type LoginLogPageQuery struct {
 	domain.PageParam
-	Username  string     `doc:"用户名，模糊匹配（失败尝试也记录）"`
-	IP        string     `doc:"客户端 IP，模糊匹配（支持网段前缀，如 \"192.168.\"）"`
-	Result    *int8      `doc:"登录结果 0:成功；1:失败，不传为不过滤"`
-	BeginTime *time.Time `doc:"开始时间（含），create_time 下界"`
-	EndTime   *time.Time `doc:"结束时间（含），create_time 上界"`
+	Username  string     `doc:"username, fuzzy match (failed attempts are recorded too)"`
+	IP        string     `doc:"client IP, fuzzy match (supports subnet prefixes, e.g. \"192.168.\")"`
+	Result    *int8      `doc:"login result 0: success 1: failure; omitting means no filter"`
+	BeginTime *time.Time `doc:"begin time (inclusive), lower bound of create_time"`
+	EndTime   *time.Time `doc:"end time (inclusive), upper bound of create_time"`
 }
 
-// LoginLogDTO 登录审计行。
+// LoginLogDTO is a login audit row.
 type LoginLogDTO struct {
-	ID          ID        `json:"id" doc:"记录id"`
-	Username    string    `json:"username" doc:"用户名"`
-	UserID      ID        `json:"userId" doc:"用户id，未知用户为 0"`
-	IP          string    `json:"ip" doc:"客户端 IP"`
-	UserAgent   string    `json:"userAgent" doc:"客户端 User-Agent"`
-	GeoCountry  string    `json:"geoCountry" doc:"国家（higress geo-ip 插件注入头）"`
-	GeoProvince string    `json:"geoProvince" doc:"省份（higress geo-ip 插件注入头）"`
-	GeoCity     string    `json:"geoCity" doc:"城市（higress geo-ip 插件注入头）"`
-	GeoIsp      string    `json:"geoIsp" doc:"运营商（higress geo-ip 插件注入头）"`
-	Result      int8      `json:"result" doc:"登录结果 0:成功；1:失败"`
-	Code        int       `json:"code" doc:"业务码，同 auth_login 指标 code 标签"`
-	CreateTime  time.Time `json:"createTime" doc:"登录时间"`
+	ID          ID        `json:"id" doc:"record id"`
+	Username    string    `json:"username" doc:"username"`
+	UserID      ID        `json:"userId" doc:"user id, 0 for unknown users"`
+	IP          string    `json:"ip" doc:"client IP"`
+	UserAgent   string    `json:"userAgent" doc:"client User-Agent"`
+	GeoCountry  string    `json:"geoCountry" doc:"country (injected by the higress geo-ip plugin header)"`
+	GeoProvince string    `json:"geoProvince" doc:"province (injected by the higress geo-ip plugin header)"`
+	GeoCity     string    `json:"geoCity" doc:"city (injected by the higress geo-ip plugin header)"`
+	GeoIsp      string    `json:"geoIsp" doc:"ISP (injected by the higress geo-ip plugin header)"`
+	Result      int8      `json:"result" doc:"login result 0: success 1: failure"`
+	Code        int       `json:"code" doc:"business code, same as the auth_login metric code label"`
+	CreateTime  time.Time `json:"createTime" doc:"login time"`
 }

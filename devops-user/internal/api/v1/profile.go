@@ -12,22 +12,22 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/service"
 )
 
-// ProfileHandler 用户资料接口。
+// ProfileHandler holds the user profile endpoints.
 type ProfileHandler struct {
 	svc *service.Profile
 }
 
-// NewProfileHandler 构造资料 handler。
+// NewProfileHandler constructs the profile handler.
 func NewProfileHandler(svc *service.Profile) *ProfileHandler {
 	return &ProfileHandler{svc: svc}
 }
 
-// profileOutput 资料响应体。
+// profileOutput is the profile response body.
 type profileOutput struct {
 	Body commonResp.BaseResponse[model.PublicProfile]
 }
 
-// Get GET /user/api/v1/profile —— 读取当前用户资料。
+// Get GET /user/api/v1/profile — reads the current user's profile.
 func (h *ProfileHandler) Get(ctx context.Context, _ *struct{}) (*profileOutput, error) {
 	profile, err := h.svc.Get(ctx, auth.ClaimsFrom(ctx))
 	if err != nil {
@@ -40,25 +40,29 @@ func (h *ProfileHandler) Get(ctx context.Context, _ *struct{}) (*profileOutput, 
 	}}, nil
 }
 
-// updateBody 资料修改入参。
+// updateBody is the profile update request body.
 //
-// ⚠️ 无 id / user_id 字段：C 端行级归属校验靠「身份只来自 token」实现，
-// 若允许客户端传 ID 再比对，等于把越权判断交给客户端参数。
+// ⚠️ No id / user_id fields: C-side row-level ownership is enforced by
+// "identity comes only from the token"; allowing the client to pass an ID and
+// comparing it would hand the authorization decision to client parameters.
 //
-// 指针 + `required:"false"`：nil 表示不修改该字段。huma 默认所有字段必填，
-// 指针字段同样需显式标可选，否则缺字段即报校验失败（无法做部分更新）。
-// `required` 必须写成独立 struct tag，写进 json tag 里无效（详见 auth.go 注释）。
+// Pointers + `required:"false"`: nil means "do not modify this field". huma
+// requires all fields by default, and pointer fields must also be explicitly
+// marked optional, otherwise a missing field fails validation (making partial
+// updates impossible). `required` must be an independent struct tag; putting it
+// inside the json tag has no effect (see the comments in auth.go).
 type updateBody struct {
-	Nickname *string `json:"nickname" required:"false" doc:"昵称，不传则不修改" maxLength:"32"`
-	Email    *string `json:"email" required:"false" doc:"邮箱，不传则不修改"`
-	Mobile   *string `json:"mobile" required:"false" doc:"手机号，不传则不修改"`
-	// Gender 用指针：nil = 不修改，0 = 改回「未知」——两者语义不同，
-	// 非指针会让客户端无法把性别改回未知。
-	Gender *int8   `json:"gender" required:"false" doc:"性别 0未知 1男 2女，不传则不修改" minimum:"0" maximum:"2"`
-	Avatar *string `json:"avatar" required:"false" doc:"头像地址，不传则不修改"`
+	Nickname *string `json:"nickname" required:"false" doc:"nickname; unchanged when omitted" maxLength:"32"`
+	Email    *string `json:"email" required:"false" doc:"email; unchanged when omitted"`
+	Mobile   *string `json:"mobile" required:"false" doc:"mobile number; unchanged when omitted"`
+	// Gender uses a pointer: nil = no change, 0 = change back to "unknown" —
+	// the two have different semantics; a non-pointer would make it impossible
+	// for clients to change gender back to unknown.
+	Gender *int8   `json:"gender" required:"false" doc:"gender: 0=unknown, 1=male, 2=female; unchanged when omitted" minimum:"0" maximum:"2"`
+	Avatar *string `json:"avatar" required:"false" doc:"avatar URL; unchanged when omitted"`
 }
 
-// Update PUT /user/api/v1/profile —— 修改当前用户资料。
+// Update PUT /user/api/v1/profile — updates the current user's profile.
 func (h *ProfileHandler) Update(ctx context.Context, in *struct {
 	Body updateBody
 }) (*profileOutput, error) {
@@ -79,44 +83,52 @@ func (h *ProfileHandler) Update(ctx context.Context, in *struct {
 	}}, nil
 }
 
-// changePasswordBody 改密入参。
+// changePasswordBody is the password change request body.
 type changePasswordBody struct {
-	OldPassword string `json:"old_password" required:"true" doc:"原密码" minLength:"1" maxLength:"72"`
-	NewPassword string `json:"new_password" required:"true" doc:"新密码，至少 8 位" minLength:"8" maxLength:"72"`
-	// CurrentRefreshToken 选填：带上则保留当前设备（其余设备下线）。
-	CurrentRefreshToken string `json:"current_refresh_token" required:"false" doc:"当前设备的刷新令牌；带上则保留本设备" maxLength:"128"`
-	// KeepCurrentDevice 等价于「传了 current_refresh_token」的显式写法，
-	// 便于客户端表达意图：改密后踢掉其他设备但保留本机。
-	KeepCurrentDevice bool `json:"keep_current_device" required:"false" doc:"改密后保留本设备，其余设备强制重新登录"`
+	OldPassword string `json:"old_password" required:"true" doc:"current password" minLength:"1" maxLength:"72"`
+	NewPassword string `json:"new_password" required:"true" doc:"new password, at least 8 characters" minLength:"8" maxLength:"72"`
+	// CurrentRefreshToken is optional: when provided, the current device is
+	// kept (other devices are logged out).
+	CurrentRefreshToken string `json:"current_refresh_token" required:"false" doc:"refresh token of the current device; when provided, this device is kept" maxLength:"128"`
+	// KeepCurrentDevice is an explicit form equivalent to "passing
+	// current_refresh_token", making it easier for clients to express intent:
+	// kick other devices after a password change but keep this one.
+	KeepCurrentDevice bool `json:"keep_current_device" required:"false" doc:"keep this device after the password change; all other devices must log in again"`
 }
 
-// okOutput 无业务数据的成功响应。
+// okOutput is a success response with no business data.
 type okOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// ChangePassword PUT /user/api/v1/profile/password —— 修改自己的口令。
+// ChangePassword PUT /user/api/v1/profile/password — changes one's own
+// password.
 //
-// 旧口令必须正确：否则拿到 token 的人可直接改密永久占据账号。
-// 响应提示「请重新登录」：口令变更后旧 access 仍在有效期内，
-// 客户端应主动丢弃本地凭据重新登录。
+// The old password must be correct: otherwise anyone holding the token could
+// change the password and permanently take over the account. The response
+// prompts "please log in again": after a password change the old access token
+// is still valid for a while, so clients should proactively discard local
+// credentials and log in again.
 func (h *ProfileHandler) ChangePassword(ctx context.Context, in *struct {
 	Body changePasswordBody
 }) (*okOutput, error) {
 	claims := auth.ClaimsFrom(ctx)
-	// 保留本设备时需要它的 refresh；两个字段任一为真即视为保留。
+	// Keeping the current device requires its refresh token; either field
+	// being set counts as keeping it.
 	keep := in.Body.CurrentRefreshToken
 	if in.Body.KeepCurrentDevice && keep == "" {
-		// 只说「保留本设备」但没给 refresh → 无法定位，视为不保留（全踢）。
-		// 保守取向：宁可多踢一次，也不要留下未受控的例外。
+		// Saying "keep this device" without providing a refresh token → it
+		// cannot be located, so it is treated as not keeping it (kick
+		// everything). Conservative choice: better to kick one extra time
+		// than to leave an uncontrolled exception.
 		keep = ""
 	}
 	if err := h.svc.ChangePassword(ctx, claims, in.Body.OldPassword, in.Body.NewPassword, keep); err != nil {
 		return nil, errs.ToHumaError(err)
 	}
-	msg := "密码已修改，所有设备已退出，请重新登录"
+	msg := "Password changed. All devices have been logged out. Please log in again."
 	if keep != "" {
-		msg = "密码已修改，其他设备已退出"
+		msg = "Password changed. Other devices have been logged out."
 	}
 	return &okOutput{Body: commonResp.BaseResponse[any]{
 		Code: http.StatusOK,

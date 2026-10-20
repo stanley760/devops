@@ -1,5 +1,5 @@
-// datascope 纯计算层单测：口径合并矩阵、部门树展开、Apply SQL 注入（sqlite 内存库）、
-// 单点可见性与 fail-closed。
+// datascope pure-computation unit tests: scope merge matrix, department tree expansion, Apply SQL injection (sqlite in-memory database),
+// single-point visibility, and fail-closed.
 package datascope_test
 
 import (
@@ -18,11 +18,11 @@ func TestParseDeptIDs(t *testing.T) {
 		name, in string
 		want     []int64
 	}{
-		{"JSON 数组", "[1,2,3]", []int64{1, 2, 3}},
-		{"空串", "", nil},
-		{"非法 JSON", "1,2,3", nil},
-		{"非正数过滤", "[0,-1,5]", []int64{5}},
-		{"空数组", "[]", []int64{}},
+		{"JSON array", "[1,2,3]", []int64{1, 2, 3}},
+		{"empty string", "", nil},
+		{"invalid JSON", "1,2,3", nil},
+		{"non-positive filtered", "[0,-1,5]", []int64{5}},
+		{"empty array", "[]", []int64{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -43,12 +43,12 @@ func TestNormalizeDeptIDs(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
-		{"数字数组原样", "[1,2,3]", "[1,2,3]"},
-		{"空白容忍", "  [1,2]  ", "[1,2]"},
-		{"非正数过滤后重编", "[0,-1,5]", "[5]"},
-		{"空串", "", ""},
-		{"空数组", "[]", ""},
-		{"非法输入", "abc", ""},
+		{"numeric array as-is", "[1,2,3]", "[1,2,3]"},
+		{"whitespace tolerated", "  [1,2]  ", "[1,2]"},
+		{"re-marshalled after non-positive filtering", "[0,-1,5]", "[5]"},
+		{"empty string", "", ""},
+		{"empty array", "[]", ""},
+		{"invalid input", "abc", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -60,7 +60,7 @@ func TestNormalizeDeptIDs(t *testing.T) {
 }
 
 func TestExpandSubtree(t *testing.T) {
-	// 树： 1 → 2 → 4, 2 → 5, 3（独立子树）
+	// tree: 1 → 2 → 4, 2 → 5, 3 (independent subtree)
 	children := datascope.ChildrenMap([]datascope.DeptNode{
 		{ID: 2, ParentID: 1}, {ID: 3, ParentID: 0}, {ID: 4, ParentID: 2}, {ID: 5, ParentID: 2},
 	})
@@ -74,7 +74,7 @@ func TestExpandSubtree(t *testing.T) {
 			t.Fatalf("ExpandSubtree = %v, want %v", got, want)
 		}
 	}
-	// 展开不越界到兄弟子树
+	// expansion does not leak into sibling subtrees
 	got = datascope.ExpandSubtree(children, []int64{2})
 	if len(got) != 3 || got[0] != 2 || got[1] != 4 || got[2] != 5 {
 		t.Fatalf("ExpandSubtree(2) = %v, want [2 4 5]", got)
@@ -93,28 +93,28 @@ func TestMerge(t *testing.T) {
 		wantSelf  bool
 		wantDepts []int64
 	}{
-		{"无角色 → 仅本人", nil, 10, false, true, nil},
-		{"任一角色全部 → 全部", []datascope.RoleScope{
+		{"no roles → self only", nil, 10, false, true, nil},
+		{"any role all → all", []datascope.RoleScope{
 			{DataScope: datascope.ScopeSelf}, {DataScope: datascope.ScopeAll},
 		}, 10, true, false, nil},
-		{"及以下压过仅本人（子树展开）", []datascope.RoleScope{
+		{"below overrides self only (subtree expansion)", []datascope.RoleScope{
 			{DataScope: datascope.ScopeSelf}, {DataScope: datascope.ScopeDeptBelow},
 		}, 10, false, false, []int64{10, 11}},
-		{"本部门压过自定义", []datascope.RoleScope{
+		{"own department overrides custom", []datascope.RoleScope{
 			{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "[20]"},
 			{DataScope: datascope.ScopeDept},
 		}, 10, false, false, []int64{10}},
-		{"自定义压过仅本人", []datascope.RoleScope{
+		{"custom overrides self only", []datascope.RoleScope{
 			{DataScope: datascope.ScopeSelf},
 			{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "[20]"},
 		}, 10, false, false, []int64{20}},
-		{"多个自定义取并集（有序）", []datascope.RoleScope{
+		{"multiple custom roles take union (ordered)", []datascope.RoleScope{
 			{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "[20]"},
 			{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "[11,10]"},
 		}, 10, false, false, []int64{10, 11, 20}},
-		{"无部门的本部门 → 不可见任何行", []datascope.RoleScope{{DataScope: datascope.ScopeDept}}, 0, false, false, nil},
-		{"无部门的及以下 → 不可见任何行", []datascope.RoleScope{{DataScope: datascope.ScopeDeptBelow}}, 0, false, false, nil},
-		{"自定义但部门集合非法 → 不可见任何行", []datascope.RoleScope{{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "abc"}}, 10, false, false, nil},
+		{"own department without department → no rows visible", []datascope.RoleScope{{DataScope: datascope.ScopeDept}}, 0, false, false, nil},
+		{"below without department → no rows visible", []datascope.RoleScope{{DataScope: datascope.ScopeDeptBelow}}, 0, false, false, nil},
+		{"custom but department set invalid → no rows visible", []datascope.RoleScope{{DataScope: datascope.ScopeCustom, DataScopeDeptIDs: "abc"}}, 10, false, false, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -147,12 +147,12 @@ func TestVisible(t *testing.T) {
 		deptID, rowID int64
 		want          bool
 	}{
-		{"全部恒可见", datascope.Scope{All: true}, 999, 888, true},
-		{"仅本人命中自身", datascope.Scope{SelfOnly: true, SelfID: 7}, 10, 7, true},
-		{"仅本人不可见他人", datascope.Scope{SelfOnly: true, SelfID: 7}, 10, 8, false},
-		{"部门集合内可见", datascope.Scope{DeptIDs: []int64{10, 11}}, 11, 99, true},
-		{"部门集合外不可见", datascope.Scope{DeptIDs: []int64{10, 11}}, 20, 99, false},
-		{"空集一律不可见", datascope.Scope{}, 10, 7, false},
+		{"all always visible", datascope.Scope{All: true}, 999, 888, true},
+		{"self only matches self", datascope.Scope{SelfOnly: true, SelfID: 7}, 10, 7, true},
+		{"self only cannot see others", datascope.Scope{SelfOnly: true, SelfID: 7}, 10, 8, false},
+		{"visible within department set", datascope.Scope{DeptIDs: []int64{10, 11}}, 11, 99, true},
+		{"invisible outside department set", datascope.Scope{DeptIDs: []int64{10, 11}}, 20, 99, false},
+		{"empty set always invisible", datascope.Scope{}, 10, 7, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestVisible(t *testing.T) {
 	}
 }
 
-// applyDB sqlite 内存库（裸表 users：id/dept_id，绕开 model 依赖聚焦 SQL 行为）。
+// applyDB builds a sqlite in-memory database (bare table users: id/dept_id, bypassing model dependencies to focus on SQL behavior).
 func applyDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:datascope_test?mode=memory&cache=shared"), &gorm.Config{
@@ -202,10 +202,10 @@ func TestApply(t *testing.T) {
 		scope datascope.Scope
 		want  []int64
 	}{
-		{"全部 → 不过滤", datascope.Scope{All: true}, []int64{1, 2, 3, 4, 5}},
-		{"仅本人 → owner 命中", datascope.Scope{SelfOnly: true, SelfID: 3}, []int64{3}},
-		{"部门集合 → IN 过滤", datascope.Scope{DeptIDs: []int64{10, 11}}, []int64{1, 2}},
-		{"空集 → 不可见任何行", datascope.Scope{}, nil},
+		{"all → no filtering", datascope.Scope{All: true}, []int64{1, 2, 3, 4, 5}},
+		{"self only → owner match", datascope.Scope{SelfOnly: true, SelfID: 3}, []int64{3}},
+		{"department set → IN filter", datascope.Scope{DeptIDs: []int64{10, 11}}, []int64{1, 2}},
+		{"empty set → no rows visible", datascope.Scope{}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -226,11 +226,11 @@ func TestApply(t *testing.T) {
 
 func TestApplyFailClosedWithoutScope(t *testing.T) {
 	db := applyDB(t)
-	// ctx 未注入数据权限：查询必须失败（而非退化为全量可见）
+	// ctx carries no data permission: the query must fail (rather than degrade to fully visible)
 	var ids []int64
 	err := datascope.Apply(context.Background(), db, datascope.Columns{Dept: "dept_id", Owner: "id"}).
 		Table("users").Pluck("id", &ids).Error
 	if err == nil {
-		t.Fatalf("缺少数据权限上下文时查询应报错, got rows %v", ids)
+		t.Fatalf("query should error when data scope context is missing, got rows %v", ids)
 	}
 }

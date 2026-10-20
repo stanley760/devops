@@ -1,4 +1,4 @@
-// server 子命令：装配依赖图（wire）并启动 gRPC 服务与 metrics。
+// The server subcommand: wires the dependency graph (wire) and starts the gRPC service and metrics.
 package cmd
 
 import (
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	// 挂载 /debug/pprof/* 到 DefaultServeMux（见 startMetricsServer）
+	// Mounts /debug/pprof/* onto DefaultServeMux (see startMetricsServer)
 	"github.com/spf13/cobra"
 	"github.com/stanley760/devops/devops-id/internal/app"
 	"github.com/stanley760/devops/devops-id/internal/config"
@@ -23,30 +23,30 @@ import (
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
-	Short: "启动 gRPC snowflake 发号服务",
+	Short: "start the gRPC snowflake ID generation service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var cfg config.Config
 		if err := infracfg.LoadInto(&cfg); err != nil {
 			return err
 		}
 
-		// 依赖图装配（wire）：etcd client → per-tag 基础设施工厂 →
-		// snowflake Manager → 应用服务 → gRPC handler；worker slot 在
-		// 首次使用 biz_tag 时懒加载。
+		// Dependency graph wiring (wire): etcd client -> per-tag infrastructure factory ->
+		// snowflake Manager -> application service -> gRPC handler; worker slots are
+		// lazily loaded on first use of a biz_tag.
 		register, cleanupGraph, err := app.InitializeGRPC(cfg)
 		if err != nil {
 			return err
 		}
-		defer cleanupGraph() // 优雅退出：revoke 所有 per-tag lease，立即释放槽位，再关 etcd
+		defer cleanupGraph() // graceful shutdown: revoke all per-tag leases, release slots immediately, then close etcd
 
 		reflection := cfg.Grpc.Reflection
 		if infracfg.Env() == "dev" {
-			reflection = true // dev 环境强制开启，便于 grpcurl 调试
+			reflection = true // force-enabled in dev, for grpcurl debugging
 		}
 
 		serviceName := cfg.Nacos.Registry.ServiceName
 		if serviceName == "" {
-			return fmt.Errorf("nacos.registry.service_name 未配置")
+			return fmt.Errorf("nacos.registry.service_name is not configured")
 		}
 		port, err := listenPort(cfg.Grpc.Listen)
 		if err != nil {
@@ -92,12 +92,12 @@ func startMetricsServer(obs *observability.Runtime, listen string) (*http.Server
 	}
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
-		return nil, nil, fmt.Errorf("监听 metrics %s 失败: %w", listen, err)
+		return nil, nil, fmt.Errorf("failed to listen on metrics %s: %w", listen, err)
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", obs.MetricsHandler)
-	// 诊断出口：goroutine/block 等 profile 用于排查 handler 卡死类故障
-	// （2026-10-08 BatchNext 疑似卡死无现场可查）。仅 metrics_listen 配置时生效。
+	// Diagnostics endpoint: goroutine/block profiles help investigate handler-hang incidents
+	// (2026-10-08: a suspected BatchNext hang with no evidence left behind). Only active when metrics_listen is configured.
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 	server := &http.Server{
 		Handler:           mux,
@@ -122,11 +122,11 @@ func stopMetricsServer(server *http.Server) {
 func listenPort(listen string) (int, error) {
 	_, portText, err := net.SplitHostPort(listen)
 	if err != nil {
-		return 0, fmt.Errorf("解析 gRPC 监听地址 %q 失败: %w", listen, err)
+		return 0, fmt.Errorf("failed to parse gRPC listen address %q: %w", listen, err)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 || port > 65535 {
-		return 0, fmt.Errorf("gRPC 监听地址 %q 的端口无效", listen)
+		return 0, fmt.Errorf("invalid port in gRPC listen address %q", listen)
 	}
 	return port, nil
 }

@@ -18,8 +18,8 @@ func RegisterNacosResolver() {
 	})
 }
 
-// serviceNameFromTarget 从 grpc target 提取 Nacos 服务名，兼容两种写法
-// （grpc resolver.Target.Endpoint 只取 URL.Path/Opaque，grpc v1.84 resolver.go:279）：
+// serviceNameFromTarget extracts the Nacos service name from a grpc target, supporting both forms
+// (grpc resolver.Target.Endpoint only reads URL.Path/Opaque; grpc v1.84 resolver.go:279):
 func serviceNameFromTarget(target resolver.Target) string {
 	name := strings.TrimSpace(target.Endpoint())
 	if name == "" {

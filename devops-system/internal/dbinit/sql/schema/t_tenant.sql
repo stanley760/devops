@@ -1,4 +1,4 @@
--- t_tenant 租户注册表（全局表，无 tenant_id）：code 全局唯一，前端租户标识。
+-- t_tenant tenant registry (global table, no tenant_id): code is globally unique and is the frontend tenant identifier.
 CREATE TABLE IF NOT EXISTS t_tenant (
     id             BIGINT       NOT NULL,
     creator        VARCHAR(64)  NULL,

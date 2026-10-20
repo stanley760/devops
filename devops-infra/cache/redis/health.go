@@ -5,13 +5,13 @@ import (
 	"fmt"
 )
 
-// Ping 检查 Redis 连接可用性，超时由调用方通过 context 控制。
+// Ping checks Redis connectivity; the timeout is controlled by the caller via context.
 func (client *Client) Ping(ctx context.Context) error {
 	if client == nil || client.client == nil {
-		return fmt.Errorf("Redis 客户端未初始化")
+		return fmt.Errorf("Redis client not initialized")
 	}
 	if err := client.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("Redis 健康检查失败: %w", err)
+		return fmt.Errorf("Redis health check failed: %w", err)
 	}
 	return nil
 }

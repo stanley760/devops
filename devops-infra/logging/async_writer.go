@@ -7,14 +7,14 @@ import (
 	"sync/atomic"
 )
 
-// ErrBufferFull 表示异步缓冲区已满，该条日志被丢弃。
-// 丢弃是刻意的设计：宁可少记几条日志，也不能让磁盘 IO 拖慢业务。
-var ErrBufferFull = errors.New("logger: 缓冲区已满，日志被丢弃")
+// ErrBufferFull indicates the async buffer is full and this log entry was dropped.
+// Dropping is a deliberate design: better to log a few entries less than to let disk IO slow down business.
+var ErrBufferFull = errors.New("logger: buffer full, log entry dropped")
 
-// asyncWriter 把同步的文件写入转成异步模式。
+// asyncWriter turns synchronous file writes into asynchronous ones.
 //
-// 调用方（slog Handler）只做一次非阻塞的 channel 投递，
-// 真正落盘由后台 goroutine 完成，因此磁盘 IO 不会阻塞业务协程。
+// The caller (slog Handler) only performs a single non-blocking channel send;
+// the actual disk write is done by a background goroutine, so disk IO never blocks business goroutines.
 type asyncWriter struct {
 	ch   chan []byte
 	dst  io.Writer
@@ -59,9 +59,9 @@ func (writer *asyncWriter) run() {
 	}
 }
 
-// Write 实现 io.Writer。缓冲区满时直接丢弃并返回错误，绝不阻塞调用方。
+// Write implements io.Writer. When the buffer is full, it drops the entry and returns an error without ever blocking the caller.
 func (writer *asyncWriter) Write(line []byte) (int, error) {
-	// slog 会复用底层 buffer，必须拷贝一份再投递，否则后台读到的是被覆盖的数据
+	// slog reuses the underlying buffer, so a copy must be made before sending, otherwise the background reads overwritten data
 	buffer := make([]byte, len(line))
 	copy(buffer, line)
 
@@ -74,7 +74,7 @@ func (writer *asyncWriter) Write(line []byte) (int, error) {
 	}
 }
 
-// Close 通知后台协程排空并退出，会等待落盘完成。
+// Close tells the background goroutine to drain and exit, waiting for the disk writes to finish.
 func (writer *asyncWriter) Close() error {
 	if !writer.closed.CompareAndSwap(false, true) {
 		return nil
@@ -84,7 +84,7 @@ func (writer *asyncWriter) Close() error {
 	return nil
 }
 
-// Dropped 返回运行期间因缓冲区满而丢弃的日志条数。
+// Dropped returns the number of log entries dropped due to a full buffer during runtime.
 func (writer *asyncWriter) Dropped() uint64 {
 	return writer.dropped.Load()
 }

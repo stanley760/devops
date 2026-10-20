@@ -14,7 +14,7 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// fakeAuthn 返回固定 claims 的认证器（免去 JWT/会话装配）。
+// fakeAuthn is an authenticator returning fixed claims (avoiding JWT/session assembly).
 type fakeAuthn struct {
 	claims *securityjwt.Claims
 	err    error
@@ -24,7 +24,7 @@ func (f fakeAuthn) Authenticate(context.Context, string) (*securityjwt.Claims, e
 	return f.claims, f.err
 }
 
-// probeScope 组装挂 JWT + Scope 的探测路由，返回取到的 ctx Scope。
+// probeScope assembles a probe route with JWT + Scope attached, returning the ctx Scope obtained.
 func probeScope(t *testing.T, authn fakeAuthn, deps Deps) (datascope.Scope, bool, int) {
 	t.Helper()
 	kit := NewKit(authn, deps)
@@ -46,7 +46,8 @@ func probeScope(t *testing.T, authn fakeAuthn, deps Deps) (datascope.Scope, bool
 	return got, ok, api.Get("/").Code
 }
 
-// TestDefaultEnvelope401 未注入文案时认证失败走安全默认（HTTP 状态短语信封）。
+// TestDefaultEnvelope401 without injected messages, authentication failure falls back to
+// the safe default (HTTP status phrase envelope).
 func TestDefaultEnvelope401(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +71,7 @@ func TestDefaultEnvelope401(t *testing.T) {
 	}
 }
 
-// TestScopeSuperAdmin 租户超管直通全部数据。
+// TestScopeSuperAdmin tenant super-admins bypass all data.
 func TestScopeSuperAdmin(t *testing.T) {
 	t.Parallel()
 
@@ -92,7 +93,8 @@ func TestScopeSuperAdmin(t *testing.T) {
 	}
 }
 
-// TestScopeFailClosedWithoutSource 数据源缺失时解析失败 → 空 Scope，不得放大为全量可见。
+// TestScopeFailClosedWithoutSource when the data source is missing, resolution fails →
+// empty Scope, and must not escalate to full visibility.
 func TestScopeFailClosedWithoutSource(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +110,7 @@ func TestScopeFailClosedWithoutSource(t *testing.T) {
 	}
 }
 
-// TestScopeMergeDeptBelow 多角色合并：本部门及以下按部门树展开。
+// TestScopeMergeDeptBelow multi-role merge: this department and below are expanded along the department tree.
 func TestScopeMergeDeptBelow(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +133,7 @@ func TestScopeMergeDeptBelow(t *testing.T) {
 	if !ok {
 		t.Fatal("scope key not injected")
 	}
-	// 部门 2 及其子树 {2,3}，不含兄弟部门 4
+	// department 2 and its subtree {2,3}, excluding sibling department 4
 	want := map[int64]bool{2: true, 3: true}
 	if len(got.DeptIDs) != len(want) {
 		t.Fatalf("DeptIDs = %v, want keys %v", got.DeptIDs, want)
@@ -143,7 +145,7 @@ func TestScopeMergeDeptBelow(t *testing.T) {
 	}
 }
 
-// TestPlatformAdminScope 平台管理员全域直通。
+// TestPlatformAdminScope platform admins bypass everything.
 func TestPlatformAdminScope(t *testing.T) {
 	t.Parallel()
 
@@ -158,10 +160,10 @@ func TestPlatformAdminScope(t *testing.T) {
 	}
 }
 
-// TestInvalidateDataScope 失效钩子清空缓存。
+// TestInvalidateDataScope the invalidation hook clears the cache.
 func TestInvalidateDataScope(t *testing.T) {
 	t.Parallel()
 
 	kit := NewKit(fakeAuthn{claims: &securityjwt.Claims{UID: 1, TenantID: 1}}, Deps{})
-	kit.InvalidateDataScope() // 不应 panic
+	kit.InvalidateDataScope() // must not panic
 }

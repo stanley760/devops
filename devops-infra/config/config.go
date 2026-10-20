@@ -1,17 +1,17 @@
-// Package config 提供共享配置类型与通用加载器。
+// Package config provides shared configuration types and a common loader.
 //
-// 职责划分：
-//   - 本文件只放各服务共用的配置结构（日志、HTTP 服务）
-//   - 加载机制（基础 + APP_ENV 环境覆盖合并）在同包 viper.go
-//   - 各服务自己定义根 Config 并组合这些类型，用 LoadInto 加载
+// Responsibilities:
+//   - This file only holds config structures shared by all services (logger, HTTP server)
+//   - The loading mechanism (base + APP_ENV environment override merge) lives in viper.go of the same package
+//   - Each service defines its own root Config and composes these types, loaded via LoadInto
 package config
 
 import "time"
 
-// ServerConfig HTTP 服务配置
+// ServerConfig is the HTTP server config.
 type ServerConfig struct {
-	Port           int           `mapstructure:"port"`            // 监听端口
-	ReadTimeout    time.Duration `mapstructure:"read_timeout"`    // 读超时，0 表示不限制
-	WriteTimeout   time.Duration `mapstructure:"write_timeout"`   // 写超时，0 表示不限制
-	TrustedProxies []string      `mapstructure:"trusted_proxies"` // 可信反向代理 IP 或 CIDR
+	Port           int           `mapstructure:"port"`            // listen port
+	ReadTimeout    time.Duration `mapstructure:"read_timeout"`    // read timeout; 0 means no limit
+	WriteTimeout   time.Duration `mapstructure:"write_timeout"`   // write timeout; 0 means no limit
+	TrustedProxies []string      `mapstructure:"trusted_proxies"` // trusted reverse proxy IPs or CIDRs
 }

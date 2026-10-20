@@ -18,7 +18,7 @@ func TestNormalizeConfigDefaultsHost(t *testing.T) {
 
 func TestNormalizeConfigRejectsInvalidPort(t *testing.T) {
 	if _, err := normalizeConfig(config.RedisConfig{}); err == nil {
-		t.Fatal("port 未配置时应返回错误")
+		t.Fatal("should return an error when port is unconfigured")
 	}
 }
 

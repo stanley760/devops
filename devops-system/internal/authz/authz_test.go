@@ -11,7 +11,7 @@ import (
 	securityauthz "github.com/stanley760/devops/devops-infra/security/authz"
 )
 
-// testDB 内存库（casbin_rule 由 gorm-adapter 自动建表）。
+// testDB is an in-memory database (the casbin_rule table is auto-created by gorm-adapter).
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", "\\", "_").Replace(t.Name())
@@ -35,7 +35,7 @@ func setup(t *testing.T) {
 func TestEnforceTenantIsolationAndPlatformAdmin(t *testing.T) {
 	setup(t)
 
-	// 与 migrate 种子同形：admin(1) = 平台管理员 + 租户1超管
+	// Same shape as the migrate seed: admin(1) = platform admin + tenant 1 super admin
 	if err := SeedPolicies(1, 1); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestEnforceTenantIsolationAndPlatformAdmin(t *testing.T) {
 		t.Fatal("user 1 should be platform admin")
 	}
 
-	// 租户用户（无角色绑定）域内拒绝、无法触达平台权限
+	// Tenant user (no role binding): denied in-domain and unable to reach platform permissions
 	if err := SeedTenantAdmin(2, 20); err != nil {
 		t.Fatalf("seed tenant admin: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestPolicyOperationsRoundTrip(t *testing.T) {
 }
 
 func TestFailClosedWhenUninitialized(t *testing.T) {
-	Close() // 确保无实例
+	Close() // ensure no instance
 
 	if Enforce(1, 1, "system:user:query") {
 		t.Fatal("uninitialized enforce must fail closed")
@@ -133,8 +133,10 @@ func TestFailClosedWhenUninitialized(t *testing.T) {
 	}
 }
 
-// TestCustomRoleConfigSeedsAndEnforces 自定义角色名：种子写入与判定必须同源，
-// 否则会出现「种子写自定义名、判定查 platform_admin」的脑裂。
+// TestCustomRoleConfigSeedsAndEnforces: with custom role names, seeding and
+// checks must read from the same source, otherwise you get a split brain
+// where "the seed writes the custom name but the check queries
+// platform_admin".
 func TestCustomRoleConfigSeedsAndEnforces(t *testing.T) {
 	cfg := securityauthz.RoleConfig{PlatformAdmin: "ops_admin", SuperAdmin: "ops_super"}
 	a, err := securityauthz.New(testDB(t), securityauthz.WithRoles(cfg))
@@ -166,7 +168,7 @@ func TestCustomRoleConfigSeedsAndEnforces(t *testing.T) {
 	}
 }
 
-// TestRolesDefaultsWhenUninitialized 未装配时 Roles() 回退默认配置（建租户角色行等取值不 panic）。
+// TestRolesDefaultsWhenUninitialized: when not wired up, Roles() falls back to the default config (so reads such as tenant role-row creation do not panic).
 func TestRolesDefaultsWhenUninitialized(t *testing.T) {
 	Close()
 

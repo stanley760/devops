@@ -6,11 +6,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TraceIDFromContext 返回 ctx 中当前 span 的 trace ID 字符串。
+// TraceIDFromContext returns the trace ID string of the current span in ctx.
 //
-// 审计记录、日志关联等旁路设施据此与链路系统互查。
-// 无有效 span（未装配 trace、ctx 为 nil、或 span 无效）时返回空串，
-// 调用方应把空串视为"无链路信息"而非错误。
+// Side facilities such as audit records and log correlation use it to cross-reference
+// the trace system. It returns an empty string when there is no valid span (trace not
+// assembled, ctx is nil, or the span is invalid); callers must treat an empty string
+// as "no trace information" rather than an error.
 func TraceIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -22,7 +23,8 @@ func TraceIDFromContext(ctx context.Context) string {
 	return sc.TraceID().String()
 }
 
-// SpanIDFromContext 返回 ctx 中当前 span 的 span ID 字符串；无有效 span 时返回空串。
+// SpanIDFromContext returns the span ID string of the current span in ctx;
+// an empty string when there is no valid span.
 func SpanIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -34,7 +36,7 @@ func SpanIDFromContext(ctx context.Context) string {
 	return sc.SpanID().String()
 }
 
-// HasTrace 判断 ctx 中是否存在有效 trace。
+// HasTrace reports whether ctx contains a valid trace.
 func HasTrace(ctx context.Context) bool {
 	if ctx == nil {
 		return false

@@ -16,7 +16,7 @@
       }
     ]
   },
-  "description": "devops 微服务可观测性仪表盘：服务 RED（HTTP/gRPC 服务端+客户端）+ 边缘网关 + 依赖 USE（MySQL/Redis 连接池）+ Go 运行时 + 认证业务（登录/注册）。用 $service/$env 变量过滤，新增服务无需复制面板。指标来自 OTel Prometheus exporter，service_name 标签来自 OTel Resource。HTTP 延迟分位独立展示，其他对照指标按图例名固定颜色区分。",
+  "description": "devops microservices observability dashboard: service RED (HTTP/gRPC server + client) + edge gateway + dependency USE (MySQL/Redis connection pools) + Go runtime + auth business (login/register). Filter with the $service/$env variables; adding a service requires no panel duplication. Metrics come from the OTel Prometheus exporter; the service_name label comes from the OTel Resource. HTTP latency quantiles are shown in dedicated panels; other comparison metrics use fixed colors keyed by legend name.",
   "editable": true,
   "graphTooltip": 1,
   "links": [
@@ -36,8 +36,8 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "HTTP QPS（按路由）",
-      "description": "sum(rate(http_server_requests_total[1m])) by (route)，随 $service/$env 过滤",
+      "title": "HTTP QPS (by route)",
+      "description": "sum(rate(http_server_requests_total[1m])) by (route), filtered by $service/$env",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -81,8 +81,8 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "错误率：应用 5xx vs 网关边缘",
-      "description": "同一图上对照两条错误率曲线：应用 5xx（红，http_server_requests_total，业务/服务故障）与网关 4xx+5xx（橙，envoy_http_downstream_rq，含网关自产错误如无路由、upstream 挂——后端永远看不到）。边缘抬高而应用平稳 = 网关/路由问题；两边一起高 = 服务本身。无错误时 or vector(0) 补零显示 0；整体无数据 = 无流量。>1% 黄、>5% 红",
+      "title": "Error rate: application 5xx vs gateway edge",
+      "description": "Two error-rate curves side by side on one chart: application 5xx (red, http_server_requests_total, business/service failures) and gateway 4xx+5xx (orange, envoy_http_downstream_rq, includes gateway-generated errors such as no route and upstream down — invisible to the backend). Edge elevated while application flat = gateway/routing issue; both elevated = the service itself. or vector(0) pads to a displayed 0 when there are no errors; no data at all = no traffic. >1% yellow, >5% red",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -124,7 +124,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "应用 5xx"
+              "options": "App 5xx"
             },
             "properties": [
               {
@@ -140,7 +140,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "网关 4xx+5xx"
+              "options": "Gateway 4xx+5xx"
             },
             "properties": [
               {
@@ -159,12 +159,12 @@
         {
           "refId": "A",
           "expr": "(sum(rate(http_server_requests_total{service_name=~\"$service\", deployment_environment=~\"$env\", status=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "应用 5xx"
+          "legendFormat": "App 5xx"
         },
         {
           "refId": "B",
           "expr": "(sum(rate(envoy_http_downstream_rq{job=\"higress-gateway\", http_conn_manager_prefix=~\"outbound.*\", response_code_class=~\"4xx|5xx\"}[5m])) or vector(0)) / (sum(rate(envoy_http_downstream_rq{job=\"higress-gateway\", http_conn_manager_prefix=~\"outbound.*\"}[5m])) or vector(0))",
-          "legendFormat": "网关 4xx+5xx"
+          "legendFormat": "Gateway 4xx+5xx"
         }
       ],
       "options": {
@@ -180,8 +180,8 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "HTTP 状态码分布",
-      "description": "按具体状态码看请求速率：200/401/403/404/500 等，4xx 飙升（如 401 打爆）不会体现在 5xx 面板里",
+      "title": "HTTP status code distribution",
+      "description": "Request rate by exact status code: 200/401/403/404/500 etc. A 4xx spike (e.g. a flood of 401s) never shows up in the 5xx panel",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -222,8 +222,8 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "HTTP 延迟 P95（按路由）",
-      "description": "按路由展示 HTTP 请求延迟 P95，便于定位整体慢请求的路由；与 P99 面板对照可判断是否主要由尾部请求拉高延迟。",
+      "title": "HTTP latency P95 (by route)",
+      "description": "HTTP request latency P95 by route, to locate which routes are slow overall; compare with the P99 panel to tell whether latency is driven mainly by tail requests.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -285,8 +285,8 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "HTTP 延迟 P99（按路由）",
-      "description": "按路由展示 HTTP 请求延迟 P99，反映尾部慢请求；持续逼近 SLO 1s（DevOpsHTTPP99High）即压测不达标。",
+      "title": "HTTP latency P99 (by route)",
+      "description": "HTTP request latency P99 by route, reflecting slow tail requests; a sustained approach to the 1s SLO (DevOpsHTTPP99High) means load tests are falling short.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -348,7 +348,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "在途请求数（In-flight）",
+      "title": "In-flight requests",
       "description": "http_server_in_flight",
       "datasource": {
         "type": "prometheus",
@@ -390,8 +390,8 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "gRPC 调用速率（服务端，方法×状态）",
-      "description": "otelgrpc stats handler 自动产出；rpc_response_status_code != OK 即错误",
+      "title": "gRPC call rate (server, method × status)",
+      "description": "Produced automatically by the otelgrpc stats handler; rpc_response_status_code != OK counts as an error",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -435,8 +435,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "gRPC P99 延迟：服务端 vs 客户端",
-      "description": "同一图上对照 gRPC 两侧 P99：服务端（蓝，rpc_server_*，被调方视角）与客户端（紫，rpc_client_*，调用方视角——发号调用 devops-system → devops-id 的 BatchNext/预取补充端到端耗时）。服务端平稳而客户端高 = 网络/超时重试/客户端队列；两边一起高 = 服务本身慢（对照领域层基准约 427ns/号的天花板）。颜色按图例名正则覆盖，图例名区分方法",
+      "title": "gRPC P99 latency: server vs client",
+      "description": "gRPC P99 from both sides on one chart: server (blue, rpc_server_*, callee view) and client (purple, rpc_client_*, caller view — end-to-end time for the ID-generation calls devops-system → devops-id BatchNext/prefetch refill). Server flat while client high = network/timeout retries/client-side queue; both high = the service itself is slow (compare against the domain-layer baseline ceiling of ~427ns per ID). Colors are overridden by legend-name regex; the legend name distinguishes methods",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -459,7 +459,7 @@
           {
             "matcher": {
               "id": "byRegexp",
-              "options": "服务端.*"
+              "options": "Server.*"
             },
             "properties": [
               {
@@ -475,7 +475,7 @@
           {
             "matcher": {
               "id": "byRegexp",
-              "options": "客户端.*"
+              "options": "Client.*"
             },
             "properties": [
               {
@@ -494,12 +494,12 @@
         {
           "refId": "A",
           "expr": "histogram_quantile(0.99, sum(rate(rpc_server_call_duration_seconds_bucket{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) by (le, rpc_method))",
-          "legendFormat": "服务端 {{rpc_method}}"
+          "legendFormat": "Server {{rpc_method}}"
         },
         {
           "refId": "B",
           "expr": "histogram_quantile(0.99, sum(rate(rpc_client_call_duration_seconds_bucket{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) by (le, rpc_method))",
-          "legendFormat": "客户端 {{rpc_method}}"
+          "legendFormat": "Client {{rpc_method}}"
         }
       ],
       "options": {
@@ -519,8 +519,8 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "gRPC 客户端调用速率（方法×状态）",
-      "description": "调用方视角（devops-system → devops-id）：client stats handler 在调用方进程导出 rpc_client_*，服务端“正常”但调用方超时重试的场景只有这层可见",
+      "title": "gRPC client call rate (method × status)",
+      "description": "Caller view (devops-system → devops-id): the client stats handler exports rpc_client_* from the caller process, so cases where the server looks “normal” but the caller is timing out and retrying are only visible here",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -564,8 +564,8 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "网关边缘：QPS×状态类",
-      "description": "Envoy HTTP connection manager 计数 envoy_http_downstream_rq，按 response_code_class（1xx–5xx）聚合；http_conn_manager_prefix=~outbound.* 只取 8080/8443 对外监听器（排除 admin/agent/stats 内部端点）。网关自产的 4xx/5xx（无路由、upstream 挂）后端永远看不到，只有这层可见",
+      "title": "Gateway edge: QPS × status class",
+      "description": "Envoy HTTP connection manager counter envoy_http_downstream_rq aggregated by response_code_class (1xx–5xx); http_conn_manager_prefix=~outbound.* takes only the external 8080/8443 listeners (excluding admin/agent/stats internal endpoints). Gateway-generated 4xx/5xx (no route, upstream down) are never seen by the backend — only visible at this layer",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -606,8 +606,8 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "网关边缘：P99 延迟（按目标）",
-      "description": "envoy_cluster_upstream_rq_time_bucket（毫秒直方图，/1000 转秒）P99，cluster_name 为 Envoy upstream 全名（outbound|端口||服务名.分组.命名空间.nacos），可区分灰度实例。业务流量经网关后才会出现对应 cluster 序列",
+      "title": "Gateway edge: P99 latency (by target)",
+      "description": "P99 of envoy_cluster_upstream_rq_time_bucket (millisecond histogram, /1000 to seconds); cluster_name is the full Envoy upstream name (outbound|port||service.group.namespace.nacos), which distinguishes gray instances. A cluster series only appears once business traffic flows through the gateway",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -648,8 +648,8 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "MySQL 连接池：在用/空闲/上限",
-      "description": "go_sql_* 由 devops-infra InstrumentGORM 注册（client_golang DBStatsCollector），db_name 为标签；池饱和（在用逼近上限）是排队与超时错误的前兆。直采指标无 service_name 标签，按抓取目标（instance）落在 devops-system",
+      "title": "MySQL connection pool: in-use/idle/max",
+      "description": "go_sql_* registered by devops-infra InstrumentGORM (client_golang DBStatsCollector), with db_name as the label; pool saturation (in-use approaching max) is the precursor of queueing and timeout errors. Directly scraped metrics carry no service_name label; they land on devops-system by scrape target (instance)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -674,17 +674,17 @@
         {
           "refId": "A",
           "expr": "go_sql_max_open_connections{job=\"devops-services\"}",
-          "legendFormat": "上限 {{db_name}}"
+          "legendFormat": "Max {{db_name}}"
         },
         {
           "refId": "B",
           "expr": "go_sql_in_use_connections{job=\"devops-services\"}",
-          "legendFormat": "在用 {{db_name}}"
+          "legendFormat": "In use {{db_name}}"
         },
         {
           "refId": "C",
           "expr": "go_sql_idle_connections{job=\"devops-services\"}",
-          "legendFormat": "空闲 {{db_name}}"
+          "legendFormat": "Idle {{db_name}}"
         }
       ],
       "options": {
@@ -700,8 +700,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "MySQL 连接池：等待",
-      "description": "go_sql_wait_count_total（等待次数/秒）与 go_sql_wait_duration_seconds_total（等待秒/秒）。持续 > 0 说明 MaxOpenConns 不足或慢查询拖住连接",
+      "title": "MySQL connection pool: waiting",
+      "description": "go_sql_wait_count_total (waits/second) and go_sql_wait_duration_seconds_total (wait-seconds/second). Sustained > 0 means MaxOpenConns is too small or slow queries are holding connections",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -726,12 +726,12 @@
         {
           "refId": "A",
           "expr": "sum by (db_name) (rate(go_sql_wait_count_total{job=\"devops-services\"}[5m]))",
-          "legendFormat": "等待次数/s {{db_name}}"
+          "legendFormat": "Waits/s {{db_name}}"
         },
         {
           "refId": "B",
           "expr": "sum by (db_name) (rate(go_sql_wait_duration_seconds_total{job=\"devops-services\"}[5m]))",
-          "legendFormat": "等待时长/s {{db_name}}"
+          "legendFormat": "Wait time/s {{db_name}}"
         }
       ],
       "options": {
@@ -747,8 +747,8 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "Redis 连接池：使用/空闲/上限",
-      "description": "redisotel InstrumentMetrics 产出的 OTel db.client.connections.* 系列（Prometheus 名 db_client_connections_*），pool_name 为 Redis 地址",
+      "title": "Redis connection pool: used/idle/max",
+      "description": "OTel db.client.connections.* series produced by redisotel InstrumentMetrics (Prometheus names db_client_connections_*); pool_name is the Redis address",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -773,17 +773,17 @@
         {
           "refId": "A",
           "expr": "db_client_connections_max{service_name=~\"$service\", deployment_environment=~\"$env\"}",
-          "legendFormat": "上限"
+          "legendFormat": "Max"
         },
         {
           "refId": "B",
           "expr": "db_client_connections_usage{state=\"used\", service_name=~\"$service\", deployment_environment=~\"$env\"}",
-          "legendFormat": "在用 {{pool_name}}"
+          "legendFormat": "In use {{pool_name}}"
         },
         {
           "refId": "C",
           "expr": "db_client_connections_usage{state=\"idle\", service_name=~\"$service\", deployment_environment=~\"$env\"}",
-          "legendFormat": "空闲 {{pool_name}}"
+          "legendFormat": "Idle {{pool_name}}"
         }
       ],
       "options": {
@@ -799,8 +799,8 @@
     {
       "id": 15,
       "type": "timeseries",
-      "title": "Redis 池：等待/超时",
-      "description": "db_client_connections_waits / timeouts。等待 > 0 是池不足的早期信号；超时 > 0 说明请求已被拒绝（Redis 不可用或池耗尽）",
+      "title": "Redis pool: waits/timeouts",
+      "description": "db_client_connections_waits / timeouts. Waits > 0 are an early signal of an undersized pool; timeouts > 0 mean requests are already being rejected (Redis unavailable or pool exhausted)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -825,12 +825,12 @@
         {
           "refId": "A",
           "expr": "sum by (pool_name) (rate(db_client_connections_waits{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "等待/s {{pool_name}}"
+          "legendFormat": "Wait/s {{pool_name}}"
         },
         {
           "refId": "B",
           "expr": "sum by (pool_name) (rate(db_client_connections_timeouts{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "超时/s {{pool_name}}"
+          "legendFormat": "Timeout/s {{pool_name}}"
         }
       ],
       "options": {
@@ -846,8 +846,8 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Go 运行时：goroutines",
-      "description": "持续上升不回落 = 泄漏/阻塞。Go/进程指标为直采（无 service_name），按抓取目标 instance 区分",
+      "title": "Go runtime: goroutines",
+      "description": "Rising without falling back = leak/blockage. Go/process metrics are directly scraped (no service_name); distinguish by scrape target instance",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -888,8 +888,8 @@
     {
       "id": 17,
       "type": "timeseries",
-      "title": "Go 内存：堆在用/常驻",
-      "description": "go_memstats_heap_inuse_bytes（堆在用）与 process_resident_memory_bytes（进程常驻 RSS）",
+      "title": "Go memory: heap in-use/resident",
+      "description": "go_memstats_heap_inuse_bytes (heap in-use) and process_resident_memory_bytes (process resident RSS)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -914,12 +914,12 @@
         {
           "refId": "A",
           "expr": "go_memstats_heap_inuse_bytes{job=\"devops-services\"}",
-          "legendFormat": "堆在用 {{instance}}"
+          "legendFormat": "Heap in use {{instance}}"
         },
         {
           "refId": "B",
           "expr": "process_resident_memory_bytes{job=\"devops-services\"}",
-          "legendFormat": "常驻 {{instance}}"
+          "legendFormat": "Resident {{instance}}"
         }
       ],
       "options": {
@@ -935,8 +935,8 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "GC 时间占比",
-      "description": "rate(go_gc_duration_seconds_sum[5m])：每秒花费在 GC 上的秒数（≈GC 占用 CPU 比例），>0.1 值得关注",
+      "title": "GC time fraction",
+      "description": "rate(go_gc_duration_seconds_sum[5m]): seconds spent on GC per second (≈ GC share of CPU); >0.1 deserves attention",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -991,8 +991,8 @@
     {
       "id": 19,
       "type": "timeseries",
-      "title": "进程：CPU 核数 / 打开 FD",
-      "description": "rate(process_cpu_seconds_total)≈占用核数；process_open_fds 逼近 ulimit 会报 too many open files",
+      "title": "Process: CPU cores / open FDs",
+      "description": "rate(process_cpu_seconds_total) ≈ cores in use; process_open_fds approaching the ulimit triggers “too many open files”",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1017,7 +1017,7 @@
         {
           "refId": "A",
           "expr": "rate(process_cpu_seconds_total{job=\"devops-services\"}[5m])",
-          "legendFormat": "CPU核 {{instance}}"
+          "legendFormat": "CPU cores {{instance}}"
         },
         {
           "refId": "B",
@@ -1038,8 +1038,8 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "运行时长（重启检测）",
-      "description": "time() - process_start_time_seconds：曲线掉头归零 = 进程刚重启，配合 goroutines 面板判断非计划重启",
+      "title": "Uptime (restart detection)",
+      "description": "time() - process_start_time_seconds: the curve dropping back to zero means the process just restarted; use together with the goroutines panel to spot unplanned restarts",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1080,8 +1080,8 @@
     {
       "id": 21,
       "type": "timeseries",
-      "title": "发号缓冲：剩余/容量（按 biz_tag）",
-      "description": "idgen_buffer_remaining/capacity（idclient SDK 在消费方进程导出）：剩余持续下降并逼近 0 = 补充赶不上消耗（devops-id 不可达或慢）；恒 0 = 已耗尽，下一次发号将同步 RPC，并发时开始 fail-fast。多副本/灰度实例各持独立缓冲，按 service_name 区分",
+      "title": "ID buffer: remaining/capacity (by biz_tag)",
+      "description": "idgen_buffer_remaining/capacity (exported by the idclient SDK in the consumer process): remaining steadily declining toward 0 = refill cannot keep up with consumption (devops-id unreachable or slow); constant 0 = exhausted, the next ID generation falls back to a synchronous RPC and starts failing fast under concurrency. Each replica/gray instance holds its own buffer, distinguished by service_name",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1106,12 +1106,12 @@
         {
           "refId": "A",
           "expr": "idgen_buffer_remaining{service_name=~\"$service\", deployment_environment=~\"$env\"}",
-          "legendFormat": "剩余 {{biz_tag}} [{{service_name}}]"
+          "legendFormat": "Remaining {{biz_tag}} [{{service_name}}]"
         },
         {
           "refId": "B",
           "expr": "idgen_buffer_capacity{service_name=~\"$service\", deployment_environment=~\"$env\"}",
-          "legendFormat": "容量 {{biz_tag}}"
+          "legendFormat": "Capacity {{biz_tag}}"
         }
       ],
       "options": {
@@ -1127,8 +1127,8 @@
     {
       "id": 22,
       "type": "timeseries",
-      "title": "发号：速率 & 补充失败",
-      "description": "idgen_issued_total（本地发号速率，业务视角）与 idgen_refill_failures_total。trigger=async 为后台预取失败（早期信号）；trigger=sync 表示缓冲已空、业务请求正被阻塞重试——同步失败持续出现时应结合缓冲面板排查 devops-id/etcd",
+      "title": "ID generation: rate & refill failures",
+      "description": "idgen_issued_total (local ID-generation rate, business view) and idgen_refill_failures_total. trigger=async is background prefetch failure (early signal); trigger=sync means the buffer is empty and business requests are blocking and retrying — persistent sync failures should be investigated together with the buffer panel against devops-id/etcd",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1153,12 +1153,12 @@
         {
           "refId": "A",
           "expr": "sum by (biz_tag) (rate(idgen_issued_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "发号/s {{biz_tag}}"
+          "legendFormat": "IDs issued/s {{biz_tag}}"
         },
         {
           "refId": "B",
           "expr": "sum by (biz_tag, trigger) (rate(idgen_refill_failures_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "补充失败/s {{biz_tag}}[{{trigger}}]"
+          "legendFormat": "Replenish failures/s {{biz_tag}}[{{trigger}}]"
         }
       ],
       "options": {
@@ -1174,8 +1174,8 @@
     {
       "id": 23,
       "type": "timeseries",
-      "title": "发号补充延迟 P99（按 biz_tag×trigger）",
-      "description": "idgen_refill_duration_seconds：BatchNext 补充耗时。async 走高会先于缓冲耗尽出现（预取变慢），sync 走高直接影响用户写请求",
+      "title": "ID refill latency P99 (by biz_tag × trigger)",
+      "description": "idgen_refill_duration_seconds: BatchNext refill time. Rising async appears before buffer exhaustion (slower prefetch); rising sync directly affects user write requests",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1216,8 +1216,8 @@
     {
       "id": 24,
       "type": "timeseries",
-      "title": "发号服务：拒绝 & 降级事件",
-      "description": "devops-id 服务端发号故障事件速率（正常应恒为 0）：拒绝/s（红，idgen_requests_rejected_total）是业务 500 的直接上游；本地降级/s（橙，idgen_fallback_total）= etcd 不可用降级本地槽位，有重复 ID 风险；lease 失效/s（紫，idgen_lease_lost_total）= 槽位可能被抢占、发号已熔断；时钟回拨/s（黄，idgen_clock_rollback_total）。任一条脱离 0 立即结合健康状态面板与 devops-id 日志定位",
+      "title": "ID service: rejection & degradation events",
+      "description": "devops-id server-side ID-generation failure event rates (should normally be 0): rejections/s (red, idgen_requests_rejected_total) are the direct upstream of business 500s; local fallbacks/s (orange, idgen_fallback_total) = etcd unavailable, degraded to local slots with a risk of duplicate IDs; lease lost/s (purple, idgen_lease_lost_total) = the slot may be preempted and ID generation is circuit-broken; clock rollbacks/s (yellow, idgen_clock_rollback_total). If any of these leaves 0, immediately correlate with the health-state panel and devops-id logs",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1240,7 +1240,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "拒绝/s"
+              "options": "Rejects/s"
             },
             "properties": [
               {
@@ -1256,7 +1256,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "本地降级/s"
+              "options": "Local fallback/s"
             },
             "properties": [
               {
@@ -1272,7 +1272,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "lease 失效/s"
+              "options": "Lease invalidations/s"
             },
             "properties": [
               {
@@ -1288,7 +1288,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "时钟回拨/s"
+              "options": "Clock rollbacks/s"
             },
             "properties": [
               {
@@ -1307,22 +1307,22 @@
         {
           "refId": "A",
           "expr": "sum(rate(idgen_requests_rejected_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) or vector(0)",
-          "legendFormat": "拒绝/s"
+          "legendFormat": "Rejects/s"
         },
         {
           "refId": "B",
           "expr": "sum(rate(idgen_fallback_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) or vector(0)",
-          "legendFormat": "本地降级/s"
+          "legendFormat": "Local fallback/s"
         },
         {
           "refId": "C",
           "expr": "sum(rate(idgen_lease_lost_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) or vector(0)",
-          "legendFormat": "lease 失效/s"
+          "legendFormat": "Lease invalidations/s"
         },
         {
           "refId": "D",
           "expr": "sum(rate(idgen_clock_rollback_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) or vector(0)",
-          "legendFormat": "时钟回拨/s"
+          "legendFormat": "Clock rollbacks/s"
         }
       ],
       "options": {
@@ -1342,8 +1342,8 @@
     {
       "id": 25,
       "type": "timeseries",
-      "title": "发号服务：健康状态",
-      "description": "idgen_health_state（biz_tag 维度）：0=serving（正常发号）、1=degraded（降级：本地 fallback 或水位持久化连续失败）、2=not_serving（lease 失效/已关闭，发号被拒）。跳到 1/2 时用户写路径开始受影响。曲线在首次取号（懒初始化）后出现",
+      "title": "ID service: health state",
+      "description": "idgen_health_state (by biz_tag): 0=serving (normal ID generation), 1=degraded (local fallback or consecutive watermark-persistence failures), 2=not_serving (lease lost/closed, ID generation rejected). User write paths start being affected once it jumps to 1/2. The series appears after the first ID request (lazy initialization)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1404,8 +1404,8 @@
     {
       "id": 26,
       "type": "timeseries",
-      "title": "发号服务端：延迟分位 P95 / P99",
-      "description": "idgen_batch_latency_seconds（devops-id 进程内 Next/BatchNext 端到端耗时，按 method 维度）：P95=黄、P99=红。与「发号补充延迟」（调用方视角）对照可分离网络开销；与领域层基准对照（单号热路径 ~427ns、批量摊销后 ~2.4M ids/s 天花板）可判断是发号本身变慢还是被 gRPC/批量大小拖慢",
+      "title": "ID service: latency quantiles P95 / P99",
+      "description": "idgen_batch_latency_seconds (end-to-end time of Next/BatchNext inside devops-id, by method): P95=yellow, P99=red. Compare with “ID refill latency” (caller view) to separate network overhead; compare with the domain-layer baseline (~427ns single-ID hot path, ~2.4M ids/s ceiling after batch amortization) to tell whether ID generation itself slowed down or is dragged by gRPC/batch size",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1488,8 +1488,8 @@
     {
       "id": 27,
       "type": "timeseries",
-      "title": "认证业务：登录/注册速率（按结果）",
-      "description": "auth_login_total / auth_register_total（service 层 OTel counter，result=success|failure，code 为失败业务码）。成功/失败双曲线对照：失败抬升而成功平稳 = 暴力破解或误密码刷子；双降 = 认证链路故障。状态色固定：成功绿、失败红，图例名同时标注结果，不单靠颜色区分",
+      "title": "Auth business: login/register rate (by result)",
+      "description": "auth_login_total / auth_register_total (service-layer OTel counters, result=success|failure, code is the failure business code). Success/failure curves side by side: failures rising while success is flat = brute force or password-stuffing; both falling = auth chain failure. Fixed colors: success green, failure red; the legend name also states the result, so color is never the only signal",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1547,12 +1547,12 @@
         {
           "refId": "A",
           "expr": "sum(rate(auth_login_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) by (result)",
-          "legendFormat": "登录 {{result}}"
+          "legendFormat": "Login {{result}}"
         },
         {
           "refId": "B",
           "expr": "sum(rate(auth_register_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m])) by (result)",
-          "legendFormat": "注册 {{result}}"
+          "legendFormat": "Register {{result}}"
         }
       ],
       "options": {
@@ -1571,8 +1571,8 @@
     {
       "id": 28,
       "type": "timeseries",
-      "title": "认证业务：登录失败率",
-      "description": "auth_login_total{result=\"failure\"} / auth_login_total。无失败时 or vector(0) 补零显示 0；整体无数据 = 无登录流量。>30% 黄、>50% 红（50% 对应告警 DevOpsLoginFailureRateHigh）。持续抬升先看上一图的 code 标签：401 为主是爆破，500 为主是认证链路故障",
+      "title": "Auth business: login failure rate",
+      "description": "auth_login_total{result=\"failure\"} / auth_login_total. or vector(0) pads to a displayed 0 when there are no failures; no data at all = no login traffic. >30% yellow, >50% red (50% corresponds to alert DevOpsLoginFailureRateHigh). When it rises steadily, check the code label on the previous panel first: mostly 401 = brute force, mostly 500 = auth chain failure",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1616,7 +1616,7 @@
         {
           "refId": "A",
           "expr": "(sum(rate(auth_login_total{service_name=~\"$service\", deployment_environment=~\"$env\", result=\"failure\"}[5m])) or vector(0)) / sum(rate(auth_login_total{service_name=~\"$service\", deployment_environment=~\"$env\"}[5m]))",
-          "legendFormat": "登录失败率"
+          "legendFormat": "Login failure rate"
         }
       ],
       "options": {
@@ -1641,7 +1641,7 @@
     "list": [
       {
         "name": "service",
-        "label": "服务",
+        "label": "Service",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -1670,7 +1670,7 @@
       },
       {
         "name": "env",
-        "label": "环境",
+        "label": "Environment",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -1705,7 +1705,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "DevOps 可观测性（RED + USE + 边缘网关）",
+  "title": "DevOps observability (RED + USE + edge gateway)",
   "uid": "devops-red",
   "version": 6,
   "weekStart": ""

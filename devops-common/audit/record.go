@@ -2,62 +2,63 @@ package audit
 
 import "context"
 
-// Record 一条操作审计记录。
+// Record is a single operation audit record.
 //
-// 零外部依赖，不含 gorm tag：持久化映射由实现方（如 devops-infra/audit 的
-// GORM Sink）按各业务表结构自行完成，契约层不绑定具体存储。
+// Zero external dependencies and no gorm tags: persistence mapping is done by the
+// implementation (e.g. the GORM Sink in devops-infra/audit) per each business
+// table schema; the contract layer does not bind to a specific store.
 type Record struct {
-	// TenantID 租户ID；全局表操作时为 0。
+	// TenantID tenant ID; 0 for global-table operations.
 	TenantID int64
-	// TraceID 链路追踪编号，用于与日志/链路系统互查。
+	// TraceID trace ID for correlation with logging/tracing systems.
 	TraceID string
-	// UserID 操作者主键；未知或系统写入时为 0。
+	// UserID primary key of the actor; 0 for unknown or system writes.
 	UserID int64
-	// Username 操作者名称（登录名）。
+	// Username actor name (login name).
 	Username string
-	// UserType 操作者类别（C 端会员 / B 端管理员）。
+	// UserType actor category (C-side member / B-side admin).
 	UserType UserType
 
-	// Module 一级模块，如 system。
+	// Module top-level module, e.g. system.
 	Module string
-	// SubModule 二级模块，如 user。
+	// SubModule second-level module, e.g. user.
 	SubModule string
-	// BizID 业务主键，如被改动的用户 ID；无关联实体时为 0。
+	// BizID business primary key, e.g. the ID of the modified user; 0 when no entity is associated.
 	BizID int64
 
-	// Contents 变更内容摘要；一期通常留空或仅记请求体摘要。
+	// Contents summary of changes; usually left empty or only the request body summary in phase one.
 	Contents string
-	// Extra 扩展信息（JSON 文本），如耗时、结果码。
+	// Extra extended information (JSON text), e.g. latency, result code.
 	Extra string
 
-	// RequestMethod HTTP 方法。
+	// RequestMethod HTTP method.
 	RequestMethod string
-	// RequestURL 请求路径。
+	// RequestURL request path.
 	RequestURL string
-	// UserIP 客户端真实 IP。
+	// UserIP client's real IP.
 	UserIP string
-	// UserAgent 客户端 UA。
+	// UserAgent client UA.
 	UserAgent string
-	// 以下四项为客户端归属地，来自网关 geo-ip 插件注入的 X-Higress-Geo-* 头。
+	// The following four fields are the client's geolocation, injected by the gateway geo-ip plugin via X-Higress-Geo-* headers.
 	GeoCountry  string
 	GeoProvince string
 	GeoCity     string
 	GeoISP      string
 
-	// Result 执行结果：0 成功，1 失败。
+	// Result execution result: 0 success, 1 failure.
 	Result int8
-	// Code 业务码，与响应信封一致（成功 200）。
+	// Code business code, consistent with the response envelope (200 on success).
 	Code int
 }
 
-// 审计结果取值。
+// Audit result values.
 const (
 	ResultSuccess int8 = 0
 	ResultFailure int8 = 1
 )
 
-// ClientMeta 客户端元数据，由 HTTP 层从请求中提取后随审计上报。
-// Geo 四项来自网关 geo-ip 插件注入的 X-Higress-Geo-* 头。
+// ClientMeta is client metadata extracted from the request by the HTTP layer and reported with the audit.
+// The four Geo fields come from X-Higress-Geo-* headers injected by the gateway geo-ip plugin.
 type ClientMeta struct {
 	IP          string
 	UserAgent   string
@@ -67,30 +68,31 @@ type ClientMeta struct {
 	GeoISP      string
 }
 
-// Sink 审计写入端。
+// Sink is the audit write endpoint.
 //
-// 实现约定（所有实现方必须遵守）：
-//   - Emit 是旁路调用，绝不可阻塞或失败影响业务主链路
-//   - 写入失败仅记录日志与指标，由实现方兜底
-//   - 实现方需按本包列宽常量截断超长字段，保行不丢
+// Implementation contract (all implementations must comply):
+//   - Emit is a side-channel call; it must never block or let failures affect the main business flow
+//   - Write failures are only recorded in logs and metrics; the implementation provides the fallback
+//   - Implementations must truncate over-long fields per this package's column-width constants, never dropping a row
 type Sink interface {
 	Emit(ctx context.Context, rec Record)
 }
 
-// SinkFunc 把普通函数适配为 Sink，便于测试与轻量注入。
+// SinkFunc adapts a plain function into a Sink, for testing and lightweight injection.
 type SinkFunc func(ctx context.Context, rec Record)
 
-// Emit 实现 Sink。
+// Emit implements Sink.
 func (f SinkFunc) Emit(ctx context.Context, rec Record) { f(ctx, rec) }
 
-// Noop 是丢弃全部记录的 Sink，用作未装配时的安全默认值，
-// 避免业务代码到处判nil。
+// Noop is a Sink that discards all records, used as the safe default when nothing is wired up,
+// so business code does not have to check for nil everywhere.
 var Noop Sink = SinkFunc(func(context.Context, Record) {})
 
-// 审计字段列宽上限（按字符计，与各业务表 gorm tag 对齐）。
+// Audit field column-width limits (in characters, aligned with each business table's gorm tags).
 //
-// 这些值是契约的一部分：实现方截断时以此为准，业务表 DDL 应与之保持一致，
-// 否则超长内容会在严格模式下导致整行插入失败（丢审计行比截断更不可接受）。
+// These values are part of the contract: implementations truncate against them, and business
+// table DDL should stay consistent with them; otherwise over-long content would fail the whole
+// row insert in strict mode (dropping audit rows is less acceptable than truncating).
 const (
 	MaxUsername  = 30
 	MaxIP        = 50
@@ -103,10 +105,11 @@ const (
 	MaxMethod    = 16
 )
 
-// Clip 按字符数截断字符串到 n。
+// Clip truncates a string to n characters.
 //
-// MySQL varchar 按字符计长；按字节截会截出非法 UTF-8，中文归属地、
-// 中文用户名正是高风险场景。len(s) 字节数不超 n 时必不超 n 字符，快路径直接返回。
+// MySQL varchar counts characters; truncating by bytes would cut invalid UTF-8, and Chinese
+// geolocations and usernames are exactly the high-risk cases. When len(s) bytes is already
+// within n, the rune count is too, so the fast path returns immediately.
 func Clip(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -118,7 +121,7 @@ func Clip(s string, n int) string {
 	return string(r[:n])
 }
 
-// ClipClientMeta 按列宽截断客户端元数据中的全部字段。
+// ClipClientMeta truncates every field of the client metadata to its column width.
 func ClipClientMeta(m ClientMeta) ClientMeta {
 	m.IP = Clip(m.IP, MaxIP)
 	m.UserAgent = Clip(m.UserAgent, MaxUserAgent)
@@ -129,10 +132,10 @@ func ClipClientMeta(m ClientMeta) ClientMeta {
 	return m
 }
 
-// Normalize 按契约列宽截断记录中的全部受限字段。
+// Normalize truncates all bounded fields of the record to the contract column widths.
 //
-// UserType 不做改写：未定义枚举值保留原值便于落库后排查，
-// 由消费方（查询侧）决定如何呈现。
+// UserType is left untouched: undefined enum values are preserved as-is for post-write
+// troubleshooting; consumers (the query side) decide how to present them.
 func (r Record) Normalize() Record {
 	r.TraceID = Clip(r.TraceID, MaxTraceID)
 	r.Username = Clip(r.Username, MaxUsername)

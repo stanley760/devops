@@ -1,57 +1,57 @@
-# devops-id 发号服务接入指南
+# devops-id ID Generation Service Integration Guide
 
-`devops-id` 是基于 Snowflake 算法的 gRPC 分布式 ID 服务。服务按 `leaf_name + biz_tag` 在 etcd 中隔离 worker-ID 分配空间；首次请求某个 `biz_tag` 时才为该业务标识分配 worker。
+`devops-id` is a gRPC distributed ID service based on the Snowflake algorithm. The service isolates worker-ID allocation spaces in etcd by `leaf_name + biz_tag`; a worker is allocated for a business tag only the first time that `biz_tag` is requested.
 
-## 接入概览
+## Integration Overview
 
-| 项目 | 说明 |
+| Item | Description |
 | --- | --- |
-| 协议 | gRPC / protobuf |
-| 服务名 | `idgen.IdGen` |
-| 默认监听 | `:9990` |
-| 方法 | `Next`、`BatchNext` |
-| ID 类型 | `int64` |
-| 健康检查 | `grpc.health.v1.Health/Check` |
-| 传输安全 | 当前使用明文 gRPC，应部署在可信内网 |
+| Protocol | gRPC / protobuf |
+| Service name | `idgen.IdGen` |
+| Default listen | `:9990` |
+| Methods | `Next`, `BatchNext` |
+| ID type | `int64` |
+| Health check | `grpc.health.v1.Health/Check` |
+| Transport security | plaintext gRPC for now; deploy inside a trusted intranet |
 
-## ID 语义
+## ID Semantics
 
-- 同一 `biz_tag` 内 ID 唯一、趋势递增，但不保证连续。
-- 不同 `biz_tag` 的 ID 空间完全独立，允许出现相同 ID。
-- `biz_tag` 不参与 Snowflake 位运算；它与 `leaf_name` 一起决定 etcd 槽位和本地 worker 缓存的命名空间。
-- 多客户端并发取号时，不同客户端获得的 ID 可能交错。
-- 服务重启或客户端预取缓冲未消费完会产生空洞；不要把 ID 当作无空洞序列使用。
-- 只把 ID 作为业务标识使用，不要从 ID 解析业务含义。
+- Within a single `biz_tag`, IDs are unique and roughly increasing, but not guaranteed to be contiguous.
+- The ID spaces of different `biz_tag` values are fully independent, so identical IDs may appear across them.
+- `biz_tag` does not participate in Snowflake bit arithmetic; together with `leaf_name` it determines the etcd slot and local worker cache namespace.
+- When multiple clients fetch IDs concurrently, IDs obtained by different clients may interleave.
+- Service restarts or unconsumed client prefetch buffers create gaps; do not treat IDs as a gap-free sequence.
+- Use IDs only as business identifiers; do not parse business meaning out of an ID.
 
-## Worker 分配
+## Worker Allocation
 
-Snowflake ID 结构为：
+The Snowflake ID layout is:
 
 ```text
-| 1 bit 符号位 | 41 bit 毫秒时间戳 | 10 bit worker ID | 12 bit 序列号 |
+| 1 bit sign | 41 bit ms timestamp | 10 bit worker ID | 12 bit sequence |
 ```
 
-worker ID 的分配按以下维度隔离：
+Worker ID allocation is isolated along the following dimensions:
 
 ```text
 idgen/snowflake/{leaf_name}/{biz_tag}/
 ```
 
-例如 `leaf_name=devops-id`、`biz_tag=user` 时，服务实例会在 `idgen/snowflake/devops-id/user/` 下抢占槽位。`role` 等其它 `biz_tag` 会使用独立的槽位前缀，因此拥有独立 worker-ID 空间。
+For example, with `leaf_name=devops-id` and `biz_tag=user`, a service instance claims a slot under `idgen/snowflake/devops-id/user/`. Other `biz_tag` values such as `role` use independent slot prefixes and therefore have independent worker-ID spaces.
 
-本地 worker 缓存路径为：
+The local worker cache path is:
 
 ```text
 {worker_cache}/{leaf_name}/{biz_tag}/worker_id
 ```
 
-服务启动时不分配 worker。某个 `biz_tag` 首次收到取号请求时，`devops-id` 才会创建该 tag 的生成器并通过 etcd 分配 worker ID。后续相同 `biz_tag` 的请求会复用该生成器。
+No worker is allocated at service startup. Only when a `biz_tag` receives its first ID request does `devops-id` create the generator for that tag and allocate a worker ID via etcd. Subsequent requests for the same `biz_tag` reuse that generator.
 
-`leaf_name` 与 `biz_tag` 必须是安全的路径组件：不能为空、包含前后空白、`.`、`..`、`/` 或 `\`。
+`leaf_name` and `biz_tag` must be safe path components: non-empty, free of leading/trailing whitespace, and containing none of `.`, `..`, `/` or `\`.
 
-## gRPC 契约
+## gRPC Contract
 
-Proto 源文件：[`proto/idgen.proto`](./proto/idgen.proto)。
+Proto source: [`proto/idgen.proto`](./proto/idgen.proto).
 
 ```protobuf
 service IdGen {
@@ -77,35 +77,35 @@ message BatchNextReply {
 }
 ```
 
-### 方法说明
+### Methods
 
-| 方法 | Full method | 请求 | 响应 | 用途 |
+| Method | Full method | Request | Response | Purpose |
 | --- | --- | --- | --- | --- |
-| `Next` | `/idgen.IdGen/Next` | `biz_tag` | `id` | 取一个 ID |
-| `BatchNext` | `/idgen.IdGen/BatchNext` | `biz_tag`、`count` | `ids` | 原子取一批 ID，供客户端预取缓冲使用 |
+| `Next` | `/idgen.IdGen/Next` | `biz_tag` | `id` | Fetch a single ID |
+| `BatchNext` | `/idgen.IdGen/BatchNext` | `biz_tag`, `count` | `ids` | Atomically fetch a batch of IDs for client prefetch buffering |
 
-### 参数约束
+### Parameter Constraints
 
-- `biz_tag` 必须是非空且可作为路径组件的业务标识，建议使用稳定单数标识，如 `user`、`order`。
-- `BatchNext.count` 范围为 `1..100000`。
-- `BatchNext` 返回列表在单次响应内单调递增。
-- 业务接入建议使用较小批量（例如 100），不要把上限当成常规配置。
+- `biz_tag` must be a non-empty business identifier usable as a path component; prefer stable singular identifiers such as `user` or `order`.
+- `BatchNext.count` ranges over `1..100000`.
+- The list returned by `BatchNext` is monotonically increasing within a single response.
+- Use a modest batch size in production (e.g. 100); do not treat the maximum as a normal setting.
 
-## 错误与重试
+## Errors and Retries
 
-| gRPC 状态 | 含义 | 建议 |
+| gRPC status | Meaning | Recommendation |
 | --- | --- | --- |
-| `InvalidArgument` | `biz_tag` 非法或 `count` 越界 | 修复请求参数，不要原样重试 |
-| `Unavailable` | etcd 不可用、时钟回拨超阈值、worker lease 失效、服务不可达 | 使用指数退避重试 |
-| `Internal` | 服务端内部错误 | 记录错误并检查服务端日志，不要盲目重试 |
+| `InvalidArgument` | invalid `biz_tag` or out-of-range `count` | Fix the request parameters; do not retry as-is |
+| `Unavailable` | etcd unavailable, clock rollback beyond threshold, worker lease expired, service unreachable | Retry with exponential backoff |
+| `Internal` | server-side internal error | Log the error and check the server logs; do not retry blindly |
 
-重试语义是“最多消耗额外 ID，不会在同一个 `biz_tag` 内产生重复 ID”。如果请求已到达服务端但响应丢失，这批 ID 可能已分配但调用方未收到；再次重试会取得新 ID。不要在业务层缓存失败请求的 ID 并复用。
+The retry semantics are "at most extra IDs are consumed; no duplicate IDs are produced within the same `biz_tag`". If a request reached the server but the response was lost, those IDs may already be allocated without the caller receiving them; retrying yields new IDs. Do not cache the IDs of failed requests and reuse them at the business layer.
 
-## Go 接入
+## Go Integration
 
-### 推荐：使用 `idclient` 预取缓冲
+### Recommended: Use the `idclient` Prefetch Buffer
 
-`pkg/idclient` 封装了 `BatchNext` 预取、按 `biz_tag` 隔离的本地缓冲、低水位异步补充和健康检查。对同一个 `biz_tag`，本地发号顺序递增。
+`pkg/idclient` wraps `BatchNext` prefetching, `biz_tag`-isolated local buffers, low-watermark async replenishment and health checks. For a single `biz_tag`, locally issued IDs increase in order.
 
 ```go
 package main
@@ -146,20 +146,20 @@ func main() {
 }
 ```
 
-`idclient.Client` 可被多个 goroutine 共用，内部按 `biz_tag` 维护独立缓冲。
+An `idclient.Client` can be shared by multiple goroutines and maintains independent buffers per `biz_tag` internally.
 
-### 配置建议
+### Configuration Recommendations
 
-| 配置 | 建议值 | 说明 |
+| Setting | Suggested value | Description |
 | --- | --- | --- |
-| `batch` | `1..100` | 预取数量；批量越大 RPC 越少，但进程退出时可能浪费更多 ID |
-| `low_water` | `0.1..0.3` | 剩余比例低于该值时异步补充 |
-| `dial_timeout` | `1s..5s` | 建立客户端连接的超时 |
-| `call_timeout` | `1s..5s` | 单次 `BatchNext` 调用超时 |
+| `batch` | `1..100` | Prefetch size; larger batches mean fewer RPCs but may waste more IDs on process exit |
+| `low_water` | `0.1..0.3` | Async replenishment triggers when the remaining ratio drops below this value |
+| `dial_timeout` | `1s..5s` | Timeout for establishing the client connection |
+| `call_timeout` | `1s..5s` | Timeout for a single `BatchNext` call |
 
-### 直连 gRPC stub
+### Direct gRPC Stub
 
-如果不使用预取缓冲，可以直接使用生成的 `idgenpb` 客户端：
+If you do not use the prefetch buffer, you can use the generated `idgenpb` client directly:
 
 ```go
 package main
@@ -192,9 +192,9 @@ func main() {
 }
 ```
 
-## GORM 模型接入
+## GORM Model Integration
 
-`pkg/idgorm` 提供 GORM `BeforeCreate` 场景下的公共发号接缝。它只依赖最小生成器接口：
+`pkg/idgorm` provides a shared ID-assignment seam for the GORM `BeforeCreate` scenario. It depends only on a minimal generator interface:
 
 ```go
 type Generator interface {
@@ -202,7 +202,7 @@ type Generator interface {
 }
 ```
 
-`idclient.Client` 已满足该接口。
+`idclient.Client` already satisfies this interface.
 
 ```go
 package model
@@ -230,29 +230,29 @@ func (m *Order) BeforeCreate(tx *gorm.DB) error {
 }
 ```
 
-`idHook.Assign` 会保留非零显式 ID，只对零值主键发号。Snowflake worker 会在首次发号时按 `leaf_name + biz_tag` 自动分配，无需数据库预注册。
+`idHook.Assign` preserves non-zero explicit IDs and only generates IDs for zero-valued primary keys. Snowflake workers are allocated automatically on first use by `leaf_name + biz_tag`; no database pre-registration is needed.
 
-默认 `biz_tag` 从 GORM 模型的 Go 类型名推导为 `snake_case`（例如 `OrderItem` → `order_item`），新增常规模型无需维护表名映射。若要让多个模型共用一个 ID 空间，或类型名不适合作为业务标识，可实现 `idgorm.BizTagProvider` 显式返回稳定的 tag；建议需跨代码重命名保持 ID 空间不变时使用显式 tag。旧的表名到 tag 映射仍可通过 `idgorm.New(generator, map[string]string{...})` 用于兼容已有 tag 或特殊情况。
+By default, `biz_tag` is derived from the GORM model's Go type name as `snake_case` (e.g. `OrderItem` -> `order_item`), so new regular models need no table-name mapping. To make several models share one ID space, or when the type name is unsuitable as a business identifier, implement `idgorm.BizTagProvider` to return a stable tag explicitly; explicit tags are recommended when the ID space must survive code renames. The legacy table-name-to-tag mapping remains available via `idgorm.New(generator, map[string]string{...})` for compatibility with existing tags or special cases.
 
-## grpcurl 快速验证
+## Quick Verification with grpcurl
 
-开发环境默认开启 gRPC reflection：
+gRPC reflection is enabled by default in the development environment:
 
 ```bash
-# 查看服务
+# list services
 grpcurl -plaintext 127.0.0.1:9990 list
 
-# 健康检查
+# health check
 grpcurl -plaintext -d '{}' 127.0.0.1:9990 grpc.health.v1.Health/Check
 
-# 取单个 ID
+# fetch a single ID
 grpcurl -plaintext -d '{"biz_tag":"user"}' 127.0.0.1:9990 idgen.IdGen/Next
 
-# 取一批 ID
+# fetch a batch of IDs
 grpcurl -plaintext -d '{"biz_tag":"user","count":10}' 127.0.0.1:9990 idgen.IdGen/BatchNext
 ```
 
-Protobuf JSON 会把 `int64` 输出为字符串：
+Protobuf JSON emits `int64` as a string:
 
 ```json
 {
@@ -260,45 +260,44 @@ Protobuf JSON 会把 `int64` 输出为字符串：
 }
 ```
 
-## 非 Go 语言接入
+## Integration from Other Languages
 
-1. 复制或引用 [`proto/idgen.proto`](./proto/idgen.proto)。
-2. 使用对应语言的 protoc 插件生成 `idgen.IdGen` 客户端。
-3. 调用 `/idgen.IdGen/Next` 或 `/idgen.IdGen/BatchNext`。
-4. 使用 gRPC 标准健康检查 `/grpc.health.v1.Health/Check` 判断服务是否 `SERVING`。
-5. 对外 API 或 JSON 数据结构将 `int64` ID 按字符串暴露。
+1. Copy or reference [`proto/idgen.proto`](./proto/idgen.proto).
+2. Use the protoc plugin for your language to generate the `idgen.IdGen` client.
+3. Call `/idgen.IdGen/Next` or `/idgen.IdGen/BatchNext`.
+4. Use the standard gRPC health check `/grpc.health.v1.Health/Check` to determine whether the service is `SERVING`.
+5. Expose `int64` IDs as strings in external APIs and JSON data structures.
 
-## 代码结构（DDD 分层）
+## Code Structure (DDD Layers)
 
 ```text
 internal/
-├── cmd/                # cobra 入口：配置/日志/观测初始化 + server 生命周期编排
-├── config/             # 配置结构体（复用 devops-infra/config 各段）
-├── app/                # Wire 依赖注入（wire.go / providers.go / wire_gen.go）
-├── domain/idgen/       # 领域层：Snowflake 位布局、tag 生成器、Manager、
-│                       # 领域错误与端口（LeaseLifecycle / SlotCoordinator / WorkerCache）
-├── application/idgen/  # 应用层：Next / BatchNext 用例服务
-├── infrastructure/     # 基础设施层：etcdcoord（lease + 槽位协调适配）、
-│                       # workerfile（本地 worker 缓存文件）
-└── interfaces/grpc/    # 接口层：IdGen gRPC handler（参数校验、错误映射）
+├── cmd/                # cobra entrypoint: config/log/observability init + server lifecycle orchestration
+├── config/             # config structs (reusing devops-infra/config sections)
+├── app/                # Wire dependency injection (wire.go / providers.go / wire_gen.go)
+├── domain/idgen/       # domain layer: Snowflake bit layout, tag generators, Manager,
+│                       # domain errors and ports (LeaseLifecycle / SlotCoordinator / WorkerCache)
+├── application/idgen/  # application layer: Next / BatchNext use-case service
+├── infrastructure/     # infrastructure layer: etcdcoord (lease + slot coordination adapter),
+│                       # workerfile (local worker cache files)
+└── interfaces/grpc/    # interface layer: IdGen gRPC handler (parameter validation, error mapping)
 ```
 
-依赖方向：`interfaces → application → domain ← infrastructure`。领域层只依赖标准库，
-etcd 协调与磁盘缓存经端口注入；etcd lease / 槽位协调的通用实现位于共享库 `devops-infra/etcd`。
+Dependency direction: `interfaces -> application -> domain <- infrastructure`. The domain layer depends only on the standard library; etcd coordination and disk caching are injected through ports. The generic etcd lease / slot coordination implementation lives in the shared `devops-infra/etcd` library.
 
-依赖图变更后重新生成 injector：
+Regenerate the injector after dependency graph changes:
 
 ```bash
 go generate -tags=wireinject ./internal/app
 ```
 
-## 接入检查清单
+## Integration Checklist
 
-- [ ] 已确认服务地址和端口，且网络可达。
-- [ ] 已为每类业务对象确定稳定的 `biz_tag`。
-- [ ] 理解唯一性按 `biz_tag` 划分，不同 `biz_tag` 之间允许重号。
-- [ ] 只把 ID 当作唯一标识，不依赖连续性。
-- [ ] `BatchNext.count` 使用业务需要的最小合理值。
-- [ ] 对 `Unavailable` 使用指数退避重试，对参数错误先修正请求。
-- [ ] 对外 API 将 `int64` ID 序列化为字符串。
-- [ ] 明文 gRPC 只部署在可信内网，或后续按需补充 TLS/mTLS。
+- [ ] Service address and port confirmed and reachable.
+- [ ] A stable `biz_tag` determined for each kind of business object.
+- [ ] Understood that uniqueness is scoped by `biz_tag` and duplicates are allowed across different `biz_tag` values.
+- [ ] IDs treated as unique identifiers only, with no reliance on contiguity.
+- [ ] `BatchNext.count` set to the smallest reasonable value the business needs.
+- [ ] Exponential backoff retries used for `Unavailable`; parameter errors fixed before retrying.
+- [ ] `int64` IDs serialized as strings in external APIs.
+- [ ] Plaintext gRPC deployed only inside a trusted intranet, with TLS/mTLS added later as needed.

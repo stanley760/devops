@@ -1,4 +1,4 @@
-// Package tenant 提供多租户请求上下文和数据库隔离辅助能力。
+// Package tenant provides multi-tenant request context and database isolation helpers.
 package tenant
 
 import (
@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	// ErrTenantNotFound 表示当前执行上下文没有租户编号。
+	// ErrTenantNotFound indicates the current execution context has no tenant ID.
 	ErrTenantNotFound = errors.New("tenant: tenant id is not set")
-	// ErrInvalidTenantID 表示租户编号不是正数。
+	// ErrInvalidTenantID indicates the tenant ID is not a positive number.
 	ErrInvalidTenantID = errors.New("tenant: tenant id must be greater than zero")
-	// ErrContextMissing 表示 GORM 租户插件未找到租户上下文。
+	// ErrContextMissing indicates the GORM tenant plugin did not find the tenant context.
 	ErrContextMissing = errors.New("tenant: context is missing")
 )
 
@@ -31,12 +31,12 @@ type contextState struct {
 	skip   bool
 }
 
-// With 返回带有租户编号和租户编码的上下文。
+// With returns a context carrying the tenant ID and tenant code.
 func With(ctx context.Context, tenantID int64, tenantCode string) context.Context {
 	return context.WithValue(ctx, contextKey{}, contextState{tenant: Context{ID: tenantID, Code: tenantCode}})
 }
 
-// WithTenant 返回带有租户编号的上下文。
+// WithTenant returns a context carrying the tenant ID.
 func WithTenant(ctx context.Context, tenantID int64) (context.Context, error) {
 	if tenantID <= 0 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidTenantID, tenantID)
@@ -44,19 +44,19 @@ func WithTenant(ctx context.Context, tenantID int64) (context.Context, error) {
 	return With(ctx, tenantID, ""), nil
 }
 
-// From 取出租户上下文。
+// From retrieves the tenant context.
 func From(ctx context.Context) (Context, bool) {
 	state, ok := ctx.Value(contextKey{}).(contextState)
 	return state.tenant, ok && state.tenant.ID > 0
 }
 
-// TenantID 返回当前上下文中的租户编号。
+// TenantID returns the tenant ID in the current context.
 func TenantID(ctx context.Context) (int64, bool) {
 	tenant, ok := From(ctx)
 	return tenant.ID, ok
 }
 
-// RequiredTenantID 返回当前租户编号；未设置时返回 ErrTenantNotFound。
+// RequiredTenantID returns the current tenant ID, or ErrTenantNotFound when unset.
 func RequiredTenantID(ctx context.Context) (int64, error) {
 	tenant, ok := From(ctx)
 	if !ok {
@@ -65,7 +65,7 @@ func RequiredTenantID(ctx context.Context) (int64, error) {
 	return tenant.ID, nil
 }
 
-// RequiredTenantCode 返回当前租户编码；未设置或编码为空时返回 ErrTenantNotFound。
+// RequiredTenantCode returns the current tenant code, or ErrTenantNotFound when unset or empty.
 func RequiredTenantCode(ctx context.Context) (string, error) {
 	tenant, ok := From(ctx)
 	if !ok || tenant.Code == "" {
@@ -74,30 +74,30 @@ func RequiredTenantCode(ctx context.Context) (string, error) {
 	return tenant.Code, nil
 }
 
-// WithSkip 返回一个保留租户信息、但跳过行级租户过滤的上下文。
+// WithSkip returns a context that keeps tenant info but skips row-level tenant filtering.
 func WithSkip(ctx context.Context) context.Context {
 	state, _ := ctx.Value(contextKey{}).(contextState)
 	state.skip = true
 	return context.WithValue(ctx, contextKey{}, state)
 }
 
-// IsSkip 判断当前上下文是否显式豁免租户过滤。
+// IsSkip reports whether the current context explicitly exempts tenant filtering.
 func IsSkip(ctx context.Context) bool {
 	state, ok := ctx.Value(contextKey{}).(contextState)
 	return ok && state.skip
 }
 
-// Ignore 是 WithSkip 的兼容别名。
+// Ignore is a compatibility alias for WithSkip.
 func Ignore(ctx context.Context) context.Context {
 	return WithSkip(ctx)
 }
 
-// IsIgnore 是 IsSkip 的兼容别名。
+// IsIgnore is a compatibility alias for IsSkip.
 func IsIgnore(ctx context.Context) bool {
 	return IsSkip(ctx)
 }
 
-// ExecuteIgnore 在 fn 执行期间关闭租户隔离，并返回 fn 的错误。
+// ExecuteIgnore disables tenant isolation during fn's execution and returns fn's error.
 func ExecuteIgnore(ctx context.Context, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("tenant: ignore function is nil")
@@ -105,10 +105,10 @@ func ExecuteIgnore(ctx context.Context, fn func(context.Context) error) error {
 	return fn(WithSkip(ctx))
 }
 
-// Scope 为 GORM 查询增加 tenant_id 条件。
+// Scope adds a tenant_id condition to a GORM query.
 //
-// 未设置租户时会向 db 注入 ErrTenantNotFound，避免无意间查询跨租户数据。
-// 全局任务等确需跨租户查询的代码应显式传入 Ignore(ctx)。
+// When no tenant is set, ErrTenantNotFound is injected into db to avoid inadvertently querying cross-tenant data.
+// Code that genuinely needs cross-tenant queries, such as global jobs, should explicitly pass Ignore(ctx).
 func Scope(db *gorm.DB, ctx context.Context, column string) *gorm.DB {
 	if db == nil {
 		return nil

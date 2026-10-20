@@ -18,7 +18,7 @@ type TenantRoutes func(huma.API)
 type LoginLogRoutes func(huma.API)
 type OperationLogRoutes func(huma.API)
 
-// Modules 是应用层需要显式组合的业务路由模块集合。
+// Modules is the set of business route modules the application layer needs to explicitly compose.
 type Modules struct {
 	Auth          AuthRoutes
 	Users         UserRoutes

@@ -1,4 +1,5 @@
-// 登录审计管理接口（huma）。查询侧；写入侧随登录自动落库，无对应接口。
+// Login audit management endpoints (huma). Query side only; the write side
+// is persisted automatically on login and has no endpoints.
 package api
 
 import (
@@ -15,45 +16,47 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// LoginLogHandler 登录审计接口。
+// LoginLogHandler serves the login audit endpoints.
 type LoginLogHandler struct {
 	svc *service.LoginLog
 }
 
-// NewLoginLogHandler 创建 handler。
+// NewLoginLogHandler creates the handler.
 func NewLoginLogHandler(svc *service.LoginLog) *LoginLogHandler { return &LoginLogHandler{svc: svc} }
 
 // ---- Input / Output ----
 
-// LoginLogListInput GET /system/api/v1/login-logs 查询参数（分页零值走 dao 兜底；
-// 可选参数走 humaparam.Optional，huma 管线不支持裸指针 query 参数）。
+// LoginLogListInput holds the GET /system/api/v1/login-logs query parameters
+// (zero pagination values fall back in the dao; optional parameters use
+// humaparam.Optional because the huma pipeline does not support bare pointer
+// query parameters).
 type LoginLogListInput struct {
 	domain.PageParam
-	Username  string                        `query:"username" maxLength:"30" doc:"用户名，模糊匹配"`
-	IP        string                        `query:"ip" maxLength:"50" doc:"客户端 IP，模糊匹配（支持网段前缀，如 \"192.168.\"）"`
-	Result    humaparam.Optional[int8]      `query:"result" minimum:"0" maximum:"1" doc:"登录结果 0:成功；1:失败，不传为不过滤"`
-	BeginTime humaparam.Optional[time.Time] `query:"begin_time" doc:"开始时间（含），RFC3339 格式"` // RFC3339（OpenAPI 标准格式）
-	EndTime   humaparam.Optional[time.Time] `query:"end_time" doc:"结束时间（含），RFC3339 格式"`
+	Username  string                        `query:"username" maxLength:"30" doc:"Username, fuzzy match"`
+	IP        string                        `query:"ip" maxLength:"50" doc:"Client IP, fuzzy match (supports subnet prefix, e.g. \"192.168.\")"`
+	Result    humaparam.Optional[int8]      `query:"result" minimum:"0" maximum:"1" doc:"Login result 0: success; 1: failure; omitted means no filtering"`
+	BeginTime humaparam.Optional[time.Time] `query:"begin_time" doc:"Start time (inclusive), RFC3339 format"` // RFC3339 (the OpenAPI standard format)
+	EndTime   humaparam.Optional[time.Time] `query:"end_time" doc:"End time (inclusive), RFC3339 format"`
 }
 
-// LoginLogListOutput 登录审计分页列表信封。
+// LoginLogListOutput is the paginated login audit list envelope.
 type LoginLogListOutput struct {
 	Body commonResp.BaseResponse[domain.PageResult[types.LoginLogDTO]]
 }
 
-// LoginLogDeleteInput DELETE /system/api/v1/login-logs（ids 逗号分隔，如 ?ids=12,34,56）。
+// LoginLogDeleteInput is DELETE /system/api/v1/login-logs (ids are comma-separated, e.g. ?ids=12,34,56).
 type LoginLogDeleteInput struct {
-	IDs string `query:"ids" maxLength:"2000" doc:"待删除的记录 ID 列表，逗号分隔，如 12,34,56"`
+	IDs string `query:"ids" maxLength:"2000" doc:"Comma-separated list of record IDs to delete, e.g. 12,34,56"`
 }
 
-// LoginLogEmptyOutput 无数据信封（删除/清空）。
+// LoginLogEmptyOutput is the no-data envelope (delete/clean).
 type LoginLogEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
 // ---- Handlers ----
 
-// List GET /system/api/v1/login-logs。
+// List handles GET /system/api/v1/login-logs.
 func (h *LoginLogHandler) List(ctx context.Context, in *LoginLogListInput) (*LoginLogListOutput, error) {
 	page, err := h.svc.List(ctx, types.LoginLogPageQuery{
 		PageParam: in.PageParam,
@@ -69,7 +72,7 @@ func (h *LoginLogHandler) List(ctx context.Context, in *LoginLogListInput) (*Log
 	return &LoginLogListOutput{Body: response.OKBody(page)}, nil
 }
 
-// Delete DELETE /system/api/v1/login-logs（批量删除）。
+// Delete handles DELETE /system/api/v1/login-logs (batch delete).
 func (h *LoginLogHandler) Delete(ctx context.Context, in *LoginLogDeleteInput) (*LoginLogEmptyOutput, error) {
 	if err := h.svc.Delete(ctx, in.IDs); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -77,7 +80,7 @@ func (h *LoginLogHandler) Delete(ctx context.Context, in *LoginLogDeleteInput) (
 	return &LoginLogEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Clean DELETE /system/api/v1/login-logs/clean（清空本租户）。
+// Clean handles DELETE /system/api/v1/login-logs/clean (clears the current tenant).
 func (h *LoginLogHandler) Clean(ctx context.Context, _ *struct{}) (*LoginLogEmptyOutput, error) {
 	if err := h.svc.Clean(ctx); err != nil {
 		return nil, errs.ToHumaError(err)

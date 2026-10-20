@@ -1,12 +1,12 @@
-// Package logger 基于标准库 log/slog 封装应用日志。
+// Package logger wraps application logging on top of the standard library log/slog.
 //
-// 能力：
-//   - 日志级别通过配置读取（debug/info/warn/error）
-//   - 文件滚动由 timberjack 负责，对齐 logback 的 SizeAndTimeBasedRollingPolicy：
-//     单文件超过 max_size 自动切分，超过 rotation_interval 也会切分，
-//     历史文件按 max_backups / max_age 保留，并可 gzip/zstd 压缩
-//   - 控制台与文件双输出，控制台固定为易读的 text 格式
-//   - 文件写入走异步缓冲区，磁盘 IO 不会阻塞业务协程
+// Capabilities:
+//   - Log levels are read from configuration (debug/info/warn/error)
+//   - File rolling is handled by timberjack, aligned with logback's SizeAndTimeBasedRollingPolicy:
+//     a single file rolls once it exceeds max_size, and also once it exceeds rotation_interval,
+//     historical files are kept per max_backups / max_age, and can be compressed with gzip/zstd
+//   - Dual console and file output, with the console fixed to a readable text format
+//   - File writes go through an async buffer, so disk IO never blocks business goroutines
 package logging
 
 import (
@@ -29,8 +29,8 @@ var (
 	currentAsync   *asyncWriter
 )
 
-// Init 按配置初始化全局 slog 默认 logger。
-// 之后直接使用 slog.Info / slog.Error 等包级函数即可。
+// Init initializes the global slog default logger from configuration.
+// After that, use package-level functions such as slog.Info / slog.Error directly.
 func Init(cfg config.LogConfig) error {
 	level, err := parseLevel(cfg.Level)
 	if err != nil {
@@ -42,7 +42,7 @@ func Init(cfg config.LogConfig) error {
 		return err
 	}
 
-	// 落盘交给 timberjack，外面再包一层异步缓冲，避免 IO 影响业务
+	// Disk writes go to timberjack, wrapped in an async buffer to keep IO from affecting business goroutines
 	currentRolling = rolling
 	currentAsync = newAsyncWriter(rolling, cfg.Buffer)
 
@@ -60,9 +60,9 @@ func Init(cfg config.LogConfig) error {
 		return nil
 	}
 
-	// Go 1.26 起标准库提供 slog.NewMultiHandler，语义与自研实现一致：
-	// Enabled 取任一 handler，Handle 分发给所有启用的 handler。
-	// 文件与控制台格式不同（文件可配 json，控制台固定易读 text），所以必须分两个 handler。
+	// As of Go 1.26 the standard library provides slog.NewMultiHandler, semantically identical to the in-house implementation:
+	// Enabled takes any handler, and Handle dispatches to all enabled handlers.
+	// The file and console formats differ (the file can be configured as json, the console is fixed to readable text), so two handlers are required.
 	slog.SetDefault(slog.New(slog.NewMultiHandler(
 		fileHandler,
 		slog.NewTextHandler(os.Stdout, opts),
@@ -70,15 +70,15 @@ func Init(cfg config.LogConfig) error {
 	return nil
 }
 
-// Close 排空异步缓冲区并关闭日志文件，建议在程序退出前调用。
+// Close drains the async buffer and closes log files; recommended before program exit.
 func Close() error {
 	var errs []error
 
 	if currentAsync != nil {
 		if dropped := currentAsync.Dropped(); dropped > 0 {
-			// 此时异步通道即将关闭，用标准库 log 同步写 stderr，
-			// 保证这条告警不丢也不会再进缓冲队列
-			log.Printf("logger: 因缓冲区已满丢弃 %d 条日志", dropped)
+			// The async channel is about to close; use the standard library log to write synchronously to stderr,
+			// ensuring this warning is neither lost nor re-enqueued into the buffer
+			log.Printf("logger: dropped %d log entries because the buffer was full", dropped)
 		}
 		if err := currentAsync.Close(); err != nil {
 			errs = append(errs, err)
@@ -105,6 +105,6 @@ func parseLevel(s string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return 0, fmt.Errorf("不支持的日志级别: %q（可选 debug/info/warn/error）", s)
+		return 0, fmt.Errorf("unsupported log level: %q (options: debug/info/warn/error)", s)
 	}
 }

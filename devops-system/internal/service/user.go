@@ -1,7 +1,9 @@
-// 用户管理服务：CRUD + casbin g 行联动。
+// User management service: CRUD + casbin g row linkage.
 //
-// 一致性策略：业务行（user + user_role）走 DB 事务；casbin g 行在事务提交后重建。
-// g 行写失败只造成「权限缺失」而非越权（安全方向正确），返回错误提示重试。
+// Consistency strategy: business rows (user + user_role) go through a DB
+// transaction; the casbin g rows are rebuilt after the transaction commits.
+// A g row write failure only causes "missing permissions" rather than
+// over-permissioning (fail-safe), and an error is returned asking for a retry.
 package service
 
 import (
@@ -18,32 +20,35 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ensureUserVisible 单点数据权限收口（Get/Update/ResetPassword/Delete 按 ID 直查后判定）：
-// 越权一律按 404 呈现（与「用户不存在」同一响应，防存在性探测）。
-// ctx 未注入数据权限时 fail-closed 报错（受控路由已挂 HumaDataScope，漏配即暴露）。
+// ensureUserVisible is the single choke point for data permissions
+// (Get/Update/ResetPassword/Delete decide after a direct ID lookup):
+// any access violation is presented as 404 (the same response as "user does
+// not exist", guarding against existence probing). When the ctx carries no
+// data permission, it fails closed with an error (controlled routes already
+// mount HumaDataScope, so a missing mount is exposed immediately).
 func ensureUserVisible(ctx context.Context, u *model.User) error {
 	scope, ok := datascope.From(ctx)
 	if !ok {
-		return errs.New(errs.CodeInternal, "缺少数据权限上下文（受控接口未挂解析中间件）")
+		return errs.New(errs.CodeInternal, "missing data permission context (the controlled endpoint lacks the resolution middleware)")
 	}
 	if !scope.Visible(u.DeptID, u.ID) {
-		return errs.New(errs.CodeNotFound, "用户不存在")
+		return errs.New(errs.CodeNotFound, "user not found")
 	}
 	return nil
 }
 
-// User 用户管理服务。
+// User is the user management service.
 type User struct {
 	authM           *auth.Manager
-	invalidateScope func() // 数据权限缓存失效（角色分配变更时调用）
+	invalidateScope func() // data permission cache invalidation (called when role assignments change)
 }
 
-// NewUser 创建服务（authM 用于踢下线；invalidateScope 清数据权限缓存）。
+// NewUser creates the service (authM is used to force logout; invalidateScope clears the data permission cache).
 func NewUser(authM *auth.Manager, invalidateScope func()) *User {
 	return &User{authM: authM, invalidateScope: invalidateScope}
 }
 
-// List 分页查询（tenant_id 由插件注入，天然限本租户）。
+// List returns a paginated query (tenant_id is injected by the plugin, naturally scoped to this tenant).
 func (s *User) List(ctx context.Context, q types.UserPageQuery) (domain.PageResult[types.UserDTO], error) {
 	page, err := dao.ListUsers(ctx, q)
 	if err != nil {
@@ -54,7 +59,7 @@ func (s *User) List(ctx context.Context, q types.UserPageQuery) (domain.PageResu
 	}), nil
 }
 
-// Get 用户详情（基本信息 + 角色/岗位 ID；数据权限单点收口）。
+// Get returns the user details (basic info + role/post IDs; data permission single choke point).
 func (s *User) Get(ctx context.Context, id types.ID) (*types.UserDetailResp, error) {
 	u, err := dao.GetUserByID(ctx, id.Int64())
 	if err != nil {
@@ -78,14 +83,14 @@ func (s *User) Get(ctx context.Context, id types.ID) (*types.UserDetailResp, err
 	}, nil
 }
 
-// Create 创建用户：租户内唯一校验 → 发号落库 → 角色 g 行联动。
+// Create creates a user: tenant-unique validation → issue an ID and persist → role g row linkage.
 func (s *User) Create(ctx context.Context, claims *auth.AccessClaims, req types.UserCreateReq) error {
 	exists, err := dao.UsernameExists(ctx, req.Username, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errs.New(errs.CodeParam, "用户名已存在")
+		return errs.New(errs.CodeParam, "username already exists")
 	}
 	if req.Mobile != nil {
 		exists, err = dao.MobileExists(ctx, *req.Mobile, 0)
@@ -93,7 +98,7 @@ func (s *User) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 			return err
 		}
 		if exists {
-			return errs.New(errs.CodeParam, "手机号已存在")
+			return errs.New(errs.CodeParam, "mobile number already exists")
 		}
 	}
 	roleCodes, err := dao.RoleCodesByIDs(ctx, idsToInt64(req.RoleIDs))
@@ -103,7 +108,7 @@ func (s *User) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 10)
 	if err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "密码加密失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to hash password")
 	}
 
 	u := &model.User{
@@ -128,13 +133,14 @@ func (s *User) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 
 	if len(roleCodes) > 0 {
 		if err := authz.RebuildUserGrouping(u.ID, claims.TenantID, roleCodes); err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "用户已创建，但角色授权写入失败，请重试更新")
+			return errs.Wrap(err, errs.CodeInternal, "user created, but the role authorization write failed; please retry the update")
 		}
 	}
 	return nil
 }
 
-// Update 更新用户（可改 username/角色/状态等；停用即踢下线；数据权限单点收口）。
+// Update updates a user (username/roles/status etc. can be changed; disabling
+// forces logout; data permission single choke point).
 func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.UserUpdateReq) error {
 	u, err := dao.GetUserByID(ctx, id.Int64())
 	if err != nil {
@@ -149,7 +155,7 @@ func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 			return err
 		}
 		if exists {
-			return errs.New(errs.CodeParam, "用户名已存在")
+			return errs.New(errs.CodeParam, "username already exists")
 		}
 	}
 	if req.Mobile != nil && *req.Mobile != "" && (u.Mobile == nil || *u.Mobile != *req.Mobile) {
@@ -158,7 +164,7 @@ func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 			return err
 		}
 		if exists {
-			return errs.New(errs.CodeParam, "手机号已存在")
+			return errs.New(errs.CodeParam, "mobile number already exists")
 		}
 	}
 	roleCodes, err := dao.RoleCodesByIDs(ctx, idsToInt64(req.RoleIDs))
@@ -180,12 +186,12 @@ func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	if pj := dao.PostIDsJSON(req.PostIDs); pj != "" {
 		updates["post_ids"] = pj
 	} else {
-		updates["post_ids"] = nil // 空岗位存 NULL（json 列拒绝 ''）
+		updates["post_ids"] = nil // empty posts are stored as NULL (the json column rejects '')
 	}
 	if req.Mobile != nil && *req.Mobile != "" {
 		updates["mobile"] = *req.Mobile
 	} else {
-		updates["mobile"] = nil // 清空走 NULL，保 uk_tenant_mobile 多空值不冲突
+		updates["mobile"] = nil // clearing goes through NULL, so multiple NULLs never conflict on uk_tenant_mobile
 	}
 
 	if err := dao.UpdateUserWithRoles(ctx, u.ID, updates, idsToInt64(req.RoleIDs)); err != nil {
@@ -193,18 +199,18 @@ func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	}
 
 	if err := authz.RebuildUserGrouping(u.ID, claims.TenantID, roleCodes); err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "用户已更新，但角色授权刷新失败，请重试更新")
+		return errs.Wrap(err, errs.CodeInternal, "user updated, but the role authorization refresh failed; please retry the update")
 	}
-	// 角色分配已变：清数据权限缓存（含部门调动改变可见范围）
+	// Role assignments have changed: clear the data permission cache (a dept move also changes the visible scope)
 	s.invalidateScope()
-	// 状态 1→0：停用即踢下线（存量会话立即失效）
+	// Status 1→0: disabling forces logout (existing sessions are invalidated immediately)
 	if u.Status == 1 && req.Status == 0 {
 		s.authM.RevokeAllSessions(ctx, claims.TenantID, u.ID)
 	}
 	return nil
 }
 
-// ResetPassword 重置密码：更新 + 撤销全部会话（强制重新登录；数据权限单点收口）。
+// ResetPassword resets the password: update + revoke all sessions (force re-login; data permission single choke point).
 func (s *User) ResetPassword(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.ResetPasswordReq) error {
 	u, err := dao.GetUserByID(ctx, id.Int64())
 	if err != nil {
@@ -215,7 +221,7 @@ func (s *User) ResetPassword(ctx context.Context, claims *auth.AccessClaims, id 
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 10)
 	if err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "密码加密失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to hash password")
 	}
 	if err := dao.UpdateUser(ctx, u.ID, map[string]any{
 		"password": string(hash),
@@ -227,13 +233,14 @@ func (s *User) ResetPassword(ctx context.Context, claims *auth.AccessClaims, id 
 	return nil
 }
 
-// Delete 删除用户：防护（自己/内置超管）→ 软删（改写唯一键）→ 清关联与 g 行 → 踢下线。
+// Delete deletes a user: guards (self/builtin super admin) → soft-delete
+// (rewrite the unique key) → clear associations and g rows → force logout.
 func (s *User) Delete(ctx context.Context, claims *auth.AccessClaims, id types.ID) error {
 	if id.Int64() == claims.UserID {
-		return errs.New(errs.CodeParam, "不能删除当前登录用户")
+		return errs.New(errs.CodeParam, "cannot delete the currently logged-in user")
 	}
 	if id.Int64() == 1 {
-		return errs.New(errs.CodeParam, "内置管理员不可删除")
+		return errs.New(errs.CodeParam, "the builtin administrator cannot be deleted")
 	}
 	u, err := dao.GetUserByID(ctx, id.Int64())
 	if err != nil {
@@ -248,13 +255,13 @@ func (s *User) Delete(ctx context.Context, claims *auth.AccessClaims, id types.I
 	}
 
 	if err := authz.RemoveUserGrouping(u.ID, claims.TenantID); err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "用户已删除，但角色授权清理失败")
+		return errs.Wrap(err, errs.CodeInternal, "user deleted, but the role authorization cleanup failed")
 	}
 	s.authM.RevokeAllSessions(ctx, claims.TenantID, u.ID)
 	return nil
 }
 
-// toUserDTO model.User → DTO（隐藏密码）。
+// toUserDTO maps model.User → DTO (hides the password).
 func toUserDTO(u *model.User) types.UserDTO {
 	dto := types.UserDTO{
 		ID:       types.ID(u.ID),
@@ -277,7 +284,7 @@ func toUserDTO(u *model.User) types.UserDTO {
 	return dto
 }
 
-// idsToInt64 []ID → []int64。
+// idsToInt64 maps []ID → []int64.
 func idsToInt64(ids []types.ID) []int64 {
 	out := make([]int64, 0, len(ids))
 	for _, id := range ids {

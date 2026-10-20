@@ -1,7 +1,7 @@
 //go:build wireinject
 
-// Package app 装配 devops-id 的依赖图（DDD 各层 → gRPC 注册回调），
-// 与 devops-system/internal/app 同构。
+// Package app wires the devops-id dependency graph (each DDD layer -> gRPC register callbacks),
+// isomorphic with devops-system/internal/app.
 package app
 
 import (

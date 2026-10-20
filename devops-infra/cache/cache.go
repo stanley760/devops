@@ -1,4 +1,4 @@
-// Package cache 定义通用缓存接口与错误语义。
+// Package cache defines the generic cache interface and error semantics.
 package cache
 
 import (
@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// ErrNotFound 表示缓存 key 不存在或已过期。
+// ErrNotFound indicates the cache key does not exist or has expired.
 var ErrNotFound = errors.New("cache: key not found")
 
-// Cache 是业务层需要的最小缓存接口。
-// expiration <= 0 表示不过期。
+// Cache is the minimal cache interface required by the business layer.
+// expiration <= 0 means no expiration.
 type Cache interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key, value string, expiration time.Duration) error
@@ -19,12 +19,12 @@ type Cache interface {
 	Exists(ctx context.Context, key string) (bool, error)
 }
 
-// Health 支持健康检查的缓存实现。
+// Health is a cache implementation that supports health checks.
 type Health interface {
 	Ping(ctx context.Context) error
 }
 
-// Closer 支持释放连接资源的缓存实现。
+// Closer is a cache implementation that supports releasing connection resources.
 type Closer interface {
 	Close() error
 }

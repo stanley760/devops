@@ -6,8 +6,10 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// securityJWT huma 认证中间件：infra 决策 + 本套件信封呈现 + 可选 ctx 增强。
-// claims 经 securitymw 注入；认证成功后调 Deps.WithClaims（审计 actor 等业务增强）。
+// securityJWT is the huma authentication middleware: infra decision + this suite's
+// envelope presentation + optional ctx enhancement.
+// claims are injected via securitymw; after successful authentication, Deps.WithClaims is
+// called (for business enhancements such as the audit actor).
 func (k *Kit) securityJWT() Middleware {
 	authenticate := securitymw.HumaAuthenticate(k.authn, securitymw.HumaOptions{
 		OnUnauthorized:        k.deps.Envelope.Unauthorized,

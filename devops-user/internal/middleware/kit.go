@@ -1,8 +1,10 @@
-// Package middleware 的业务装配层：把 devops-infra/security/humakit 的中间件套件
-// 与本服务的中文信封文案接线。
+// Package middleware is the business wiring layer: it connects the middleware
+// kit from devops-infra/security/humakit with this service's envelope
+// messages.
 //
-// 分层：决策与链组合在 humakit（infra），本包只提供业务文案与最小绑定。
-// 装配点在 cmd/root.go。
+// Layering: decisions and chain composition live in humakit (infra); this
+// package only provides business messages and minimal binding. The wiring
+// point is cmd/root.go.
 package middleware
 
 import (
@@ -19,52 +21,64 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/auth"
 )
 
-// 类型别名：router 层拿到的是 *middleware.Kit，与 infra 同型，
-// 因此不需要「业务 Kit 包装 infra Kit」的间接层。
+// Type aliases: the router layer receives *middleware.Kit, the same type as
+// infra's, so there is no need for a "business Kit wrapping infra Kit"
+// indirection layer.
 type (
 	Kit  = humakit.Kit
 	Deps = humakit.Deps
 )
 
-// NewKit 装配本服务中间件套件。
+// NewKit wires up this service's middleware kit.
 //
-// 刻意不设置以下项（C 端无对应概念，勿照搬 devops-system）：
-//   - Authorizer / SuperAdminRole / IsPlatformAdmin：无 RBAC 与平台管理员；
-//     权限是「只能操作自己的数据」，由 service 层按 claims.UID 做行级过滤。
-//   - TenantUsable / UserRoles / User / Depts：无租户模型，也不读后台组织架构。
+// The following are deliberately not set (the C side has no corresponding
+// concepts; do not copy devops-system):
+//   - Authorizer / SuperAdminRole / IsPlatformAdmin: no RBAC and no platform
+//     admins; permissions are "you can only operate on your own data",
+//     filtered row-wise by the service layer on claims.UID.
+//   - TenantUsable / UserRoles / User / Depts: no tenant model, and the
+//     backend org structure is not read.
 //
-// 若将来确实需要权限点体系，再按需注入 Authorizer，不要预先占位。
+// If a permission-point system is ever truly needed, inject an Authorizer as
+// required; do not pre-reserve it.
 func NewKit(authn *auth.Manager, deps Deps) *Kit {
 	deps.Envelope = cEndEnvelope()
 	return humakit.NewKit(authn, deps)
 }
 
-// cEndEnvelope 本服务的中文信封文案。
+// cEndEnvelope holds this service's envelope messages.
 //
-// 文案按 C 端语气调整（「你」而非「操作」），避免照搬后台管理端措辞。
+// The wording is tuned to the C-side voice ("you" rather than "operation"),
+// avoiding admin-console phrasing.
 func cEndEnvelope() humakit.Envelope {
 	return humakit.Envelope{
-		// 未登录 / 会话已失效（含 Redis 会话态校验失败）
-		Unauthorized: writeEnvelopeMapped(http.StatusUnauthorized, "未登录或登录已过期",
-			errMsg{securitymw.ErrSessionInactive, "登录状态已失效，请重新登录"}),
-		// 认证基础设施错误：fail-closed 保持 401 并记录底层错误
-		AuthnInfra: writeEnvelope(http.StatusUnauthorized, "登录状态已失效，请重新登录", "认证基础设施错误"),
-		// 以下三槽位 C 端不会触发（未使用 Tenant / Perm / Platform 中间件），
-		// 仍给出合理文案兜底，避免 nil 回调导致 panic。
-		TenantForbidden:   writeEnvelope(http.StatusForbidden, "无权访问该资源", ""),
-		PermForbidden:     writeEnvelope(http.StatusForbidden, "无权访问该资源", ""),
-		PlatformForbidden: writeEnvelope(http.StatusForbidden, "无权访问该资源", ""),
-		AuthzInfra:        writeEnvelope(http.StatusForbidden, "无权访问该资源", "鉴权基础设施错误"),
+		// Not logged in / session expired (including Redis session state
+		// verification failure)
+		Unauthorized: writeEnvelopeMapped(http.StatusUnauthorized, "not logged in or session expired",
+			errMsg{securitymw.ErrSessionInactive, "session expired, please log in again"}),
+		// Auth infrastructure error: fail-closed, keep 401 and log the
+		// underlying error
+		AuthnInfra: writeEnvelope(http.StatusUnauthorized, "session expired, please log in again", "auth infrastructure error"),
+		// The next three slots are never triggered on the C side (Tenant /
+		// Perm / Platform middleware unused), but reasonable fallback
+		// messages are still provided to avoid a panic from nil callbacks.
+		TenantForbidden:   writeEnvelope(http.StatusForbidden, "no permission to access this resource", ""),
+		PermForbidden:     writeEnvelope(http.StatusForbidden, "no permission to access this resource", ""),
+		PlatformForbidden: writeEnvelope(http.StatusForbidden, "no permission to access this resource", ""),
+		AuthzInfra:        writeEnvelope(http.StatusForbidden, "no permission to access this resource", "authz infrastructure error"),
 	}
 }
 
-// errMsg 按 errors.Is 匹配错误值并给出对应文案。
+// errMsg matches an error value via errors.Is and gives the corresponding
+// message.
 type errMsg struct {
 	match error
 	msg   string
 }
 
-// writeEnvelope 固定状态码与文案的信封回调工厂；logKey 非空时先以 slog.Error 记录底层错误。
+// writeEnvelope is a factory for envelope callbacks with a fixed status code
+// and message; when logKey is non-empty, the underlying error is logged first
+// with slog.Error.
 func writeEnvelope(status int, msg, logKey string) func(huma.Context, error) {
 	return func(hctx huma.Context, err error) {
 		if logKey != "" {
@@ -74,7 +88,8 @@ func writeEnvelope(status int, msg, logKey string) func(huma.Context, error) {
 	}
 }
 
-// writeEnvelopeMapped 按 err 值选文案（errors.Is 遍历，wrapped error 亦可命中；默认 defaultMsg）。
+// writeEnvelopeMapped picks the message by error value (errors.Is traversal,
+// so wrapped errors also match; defaultMsg is the default).
 func writeEnvelopeMapped(status int, defaultMsg string, cases ...errMsg) func(huma.Context, error) {
 	return func(hctx huma.Context, err error) {
 		msg := defaultMsg

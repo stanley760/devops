@@ -1,11 +1,14 @@
-// operations.go devops-user 全部业务接口的 huma 注册（按模块拆分）。
+// operations.go holds the huma registration for all devops-user business
+// endpoints (split by module).
 //
-// 与 devops-system 的差异（有意为之）：
-//   - 前缀为 /user 而非 /system；
-//   - 不带 TenantHeader（OpenAPI 里的 X-Tenant-ID）——C 端无租户上下文；
-//   - 鉴权用 kit.JWT()（仅校验身份），**不用** kit.Perm(...)：
-//     C 端权限是「只能操作自己的数据」，属行级归属校验，在 service 层
-//     按 claims.UID 过滤，而非 RBAC 权限点。
+// Differences from devops-system (deliberate):
+//   - the prefix is /user instead of /system;
+//   - no TenantHeader (X-Tenant-ID in OpenAPI) — the C side has no tenant
+//     context;
+//   - authorization uses kit.JWT() (identity verification only), **not**
+//     kit.Perm(...): C-side permissions are "you can only operate on your own
+//     data", a row-level ownership check done in the service layer by
+//     filtering on claims.UID, not RBAC permission points.
 package router
 
 import (
@@ -19,7 +22,8 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/middleware"
 )
 
-// with 合并公共 Operation 字段并添加本服务的接口前缀。
+// with merges the common Operation fields and adds this service's endpoint
+// prefix.
 func with(common huma.Operation, op huma.Operation) huma.Operation {
 	op.Path = userAPIPrefix + op.Path
 	if op.Tags == nil {
@@ -31,9 +35,10 @@ func with(common huma.Operation, op huma.Operation) huma.Operation {
 	return op
 }
 
-// registerAuth 注册认证模块接口。
+// registerAuth registers the auth module endpoints.
 func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
-	// 客户端 IP 注入 ctx：登录限流需要，且必须走可信代理解析（防伪造 XFF）。
+	// Client IP injected into ctx: needed by login rate limiting, and it must
+	// go through trusted-proxy resolution (against forged XFF).
 	ipMw := huma.Middlewares{apiv1.ClientIPMiddleware}
 	common := huma.Operation{
 		Tags:      []string{"auth"},
@@ -44,9 +49,9 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "user-register",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/register",
-		Summary:     "注册",
-		Description: "创建 C 端账号并签发 access + refresh token。",
-		Security:    []map[string][]string{}, // 公开接口覆盖全局安全要求
+		Summary:     "Register",
+		Description: "Create a C-side account and issue an access + refresh token.",
+		Security:    []map[string][]string{}, // public endpoint overrides the global security requirement
 		Middlewares: ipMw,
 	}), h.Register)
 
@@ -54,19 +59,20 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "user-login",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/login",
-		Summary:     "登录",
-		Description: "校验账号密码后签发 access + refresh token。连续失败会触发限流与账号锁定。",
+		Summary:     "Log in",
+		Description: "Issue an access + refresh token after verifying the account password. Consecutive failures trigger rate limiting and account lockout.",
 		Security:    []map[string][]string{},
 		Middlewares: ipMw,
 	}), h.Login)
 
-	// ⚠️ refresh 必须匿名：调用方此刻 access 已过期，若强制携带 JWT 则永远刷不出来。
+	// ⚠️ refresh must be anonymous: the caller's access token has expired by
+	// now, and forcing a JWT would make refreshing impossible.
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-refresh",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/refresh",
-		Summary:     "刷新令牌",
-		Description: "用 refresh token 换新的 access + refresh（轮换：旧 refresh 立即失效）。",
+		Summary:     "Refresh token",
+		Description: "Exchange a refresh token for a new access + refresh pair (rotating: the old refresh token dies immediately).",
 		Security:    []map[string][]string{},
 		Middlewares: ipMw,
 	}), h.Refresh)
@@ -75,13 +81,14 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		OperationID: "user-logout",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/logout",
-		Summary:     "登出",
-		Description: "撤销当前会话（踢下线）。",
+		Summary:     "Log out",
+		Description: "Revoke the current session (force logout).",
 		Middlewares: kit.Logged(),
 	}), h.Logout)
 }
 
-// registerProfile 注册用户资料模块接口（均需登录）。
+// registerProfile registers the user profile module endpoints (all require
+// login).
 func registerProfile(api huma.API, h *apiv1.ProfileHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"profile"},
@@ -92,7 +99,7 @@ func registerProfile(api huma.API, h *apiv1.ProfileHandler, kit *middleware.Kit)
 		OperationID: "user-profile-get",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/profile",
-		Summary:     "获取当前用户资料",
+		Summary:     "Get the current user's profile",
 		Middlewares: kit.Logged(),
 	}), h.Get)
 
@@ -100,8 +107,8 @@ func registerProfile(api huma.API, h *apiv1.ProfileHandler, kit *middleware.Kit)
 		OperationID: "user-password-change",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/profile/password",
-		Summary:     "修改密码",
-		Description: "需校验原密码；成功后应重新登录。",
+		Summary:     "Change password",
+		Description: "The current password must be verified; log in again after success.",
 		Middlewares: kit.Logged(),
 	}), h.ChangePassword)
 
@@ -109,20 +116,24 @@ func registerProfile(api huma.API, h *apiv1.ProfileHandler, kit *middleware.Kit)
 		OperationID: "user-profile-update",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/profile",
-		Summary:     "修改当前用户资料",
-		Description: "只能修改自己的资料；越权由 service 层按 claims.UID 拦截。",
+		Summary:     "Update the current user's profile",
+		Description: "You can only update your own profile; unauthorized access is intercepted by the service layer on claims.UID.",
 		Middlewares: kit.Logged(),
 	}), h.Update)
 }
 
-// registerOAuth 注册三方登录模块接口。
+// registerOAuth registers the third-party login module endpoints.
 //
-// 匿名与鉴权分组（**这是本模块最容易出错的地方**）：
+// Anonymous vs authenticated grouping (**this is where this module most easily
+// goes wrong**):
 //
-//	匿名：providers / callback —— 用户选登录方式、跳转回来时都还没有本地 token；
-//	      安全性靠 callback 的 state 一次性校验，不靠登录态。
-//	鉴权：bind / bind/start / bind/list —— 是「把三方账号挂到当前用户」的
-//	      动作，必须确认操作者是登录态本人，否则可把别人的三方账号绑到自己名下。
+//	Anonymous: providers / callback — the user is picking a login method or
+//	being redirected back, and has no local token yet; security relies on the
+//	callback's one-time state verification, not on login state.
+//	Authenticated: bind / bind/start / bind/list — these "attach a
+//	third-party account to the current user", so the operator must be
+//	confirmed to be the logged-in user, otherwise someone else's third-party
+//	account could be bound to their name.
 func registerOAuth(api huma.API, h *apiv1.OAuthHandler, kit *middleware.Kit) {
 	common := huma.Operation{
 		Tags:      []string{"oauth"},
@@ -130,24 +141,26 @@ func registerOAuth(api huma.API, h *apiv1.OAuthHandler, kit *middleware.Kit) {
 	}
 	ipMw := huma.Middlewares{apiv1.ClientIPMiddleware}
 
-	// 列出可用提供方（含各自的授权地址与一次性 state）。
+	// List available providers (each with its authorize URL and a one-time
+	// state).
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "oauth-providers",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/oauth/providers",
-		Summary:     "列出可用的三方登录方式",
+		Summary:     "List available third-party login methods",
 		Middlewares: ipMw,
 	}), h.ListProviders)
 
-	// 三方回调。同一路径同时注册 GET 与 POST：
-	// GitHub/Google/微信均用 query（GET）回传；POST 分支为 form_post 类提供方预留。
-	// Method 必须显式给——huma.Register缺 method 会 panic（不是返回错误）。
+	// Third-party callback. GET and POST are registered on the same path:
+	// GitHub/Google/WeChat all use query (GET) responses; the POST branch is
+	// reserved for form_post-style providers. Method must be given explicitly
+	// — huma.Register panics without a method (it does not return an error).
 	callbackOp := huma.Operation{
 		OperationID: "oauth-callback",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/oauth/{provider}/callback",
-		Summary:     "三方授权回调",
-		Description: "由三方平台重定向调用；state 一次性校验通过后按绑定情况登录或建号。",
+		Summary:     "Third-party authorization callback",
+		Description: "Called by a redirect from the third-party platform; after one-time state verification, logs in or creates an account depending on the binding.",
 		Security:    []map[string][]string{},
 		Middlewares: ipMw,
 	}
@@ -156,34 +169,34 @@ func registerOAuth(api huma.API, h *apiv1.OAuthHandler, kit *middleware.Kit) {
 	callbackOpPost := callbackOp
 	callbackOpPost.Method = http.MethodPost
 	callbackOpPost.OperationID = "oauth-callback-post"
-	callbackOpPost.Description = "form_post 模式提供方回传时走本端点（当前三家均用 GET，留作预留）。"
+	callbackOpPost.Description = "form_post-mode providers post back through this endpoint (all three current providers use GET; reserved for future use)."
 	huma.Register(api, with(common, callbackOpPost), h.CallbackPost)
 
-	// 发起绑定（需登录）。
+	// Start a bind (requires login).
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "oauth-bind-start",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/oauth/bind/start",
-		Summary:     "发起绑定三方账号",
-		Description: "返回三方授权地址；回调时会把三方账号绑到当前登录用户。",
+		Summary:     "Start binding a third-party account",
+		Description: "Returns the third-party authorize URL; on callback the third-party account is bound to the current logged-in user.",
 		Middlewares: append(kit.Logged(), ipMw...),
 	}), h.StartBind)
 
-	// 绑定列表（需登录）。
+	// Binding list (requires login).
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "oauth-bind-list",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/oauth/bind",
-		Summary:     "列出已绑定的三方账号",
+		Summary:     "List bound third-party accounts",
 		Middlewares: kit.Logged(),
 	}), h.ListBound)
 
-	// 解绑（需登录）。
+	// Unbind (requires login).
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "oauth-unbind",
 		Method:      http.MethodDelete,
 		Path:        "/api/v1/oauth/bind",
-		Summary:     "解绑三方账号",
+		Summary:     "Unbind a third-party account",
 		Middlewares: kit.Logged(),
 	}), h.Unbind)
 }

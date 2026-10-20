@@ -1,14 +1,20 @@
-// Package dbinit 启动期建表（纯 SQL 脚本，零记账）。
+// Package dbinit creates tables at startup (pure SQL scripts, zero
+// bookkeeping).
 //
-// 与 devops-system/internal/dbinit 的差异：
-//   - **无种子数据**：C 端用户由用户自己注册，不预置任何账号，故只需 sql/schema；
-//     无 sql/datas 目录，也就没有「种子仅对本次新建表执行」的逻辑。
-//   - 同样不跨模块复用 system 的实现——它是 internal 包，不可被 devops-user 引用。
+// Differences from devops-system/internal/dbinit:
+//   - **no seed data**: C-side users register themselves, so no accounts are
+//     pre-created; only sql/schema is needed. There is no sql/datas directory,
+//     and hence no "seeds run only for newly created tables" logic.
+//   - Likewise it does not reuse system's implementation across modules —
+//     that is an internal package and cannot be referenced by devops-user.
 //
-// 跳过判定：表已存在（information_schema 判存）则整个跳过。
+// Skip rule: if the table already exists (checked via information_schema), the
+// whole script is skipped.
 //
-// ⚠️ DDL 脚本变更不作用于已存在的表——存量库 schema 变更需手动 ALTER。
-// 多实例并发首启靠 CREATE TABLE IF NOT EXISTS 兜底，不引入分布式锁。
+// ⚠️ DDL script changes do not apply to existing tables — schema changes on
+// existing databases require manual ALTER. Concurrent first-start of multiple
+// instances is covered by CREATE TABLE IF NOT EXISTS, with no distributed
+// lock.
 package dbinit
 
 import (
@@ -27,25 +33,27 @@ import (
 //go:embed sql/schema
 var scriptFS embed.FS
 
-// tablePattern 文件名主干约定：表名。
+// tablePattern is the file stem convention: the table name.
 var tablePattern = regexp.MustCompile(`^t_[a-z0-9_]+$`)
 
-// createTableRE 建表语句开头：捕获组 1 为被创建的表名。
+// createTableRE matches the start of a CREATE TABLE statement: capture group 1
+// is the created table name.
 var createTableRE = regexp.MustCompile("(?i)^CREATE TABLE (?:IF NOT EXISTS )?`?([a-z0-9_]+)`?\\s*\\(")
 
-// script 单个建表脚本（已拆分的语句序列）。
+// script is a single table-creation script (a sequence of split statements).
 type script struct {
-	Table string // 文件名主干（表名）
-	Name  string // 完整文件名
+	Table string // file stem (table name)
+	Name  string // full file name
 	Stmts []string
 }
 
-// Run 对目标库执行建表脚本。
+// Run executes the table-creation scripts against the target database.
 func Run(gdb *gorm.DB) error {
 	return runFS(gdb, scriptFS)
 }
 
-// runFS 对给定文件系统执行建表脚本（独立给单测注入 MapFS）。
+// runFS executes the table-creation scripts against a given file system
+// (separated so unit tests can inject a MapFS).
 func runFS(gdb *gorm.DB, fsys fs.FS) error {
 	ddls, err := loadScripts(fsys)
 	if err != nil {
@@ -61,24 +69,25 @@ func runFS(gdb *gorm.DB, fsys fs.FS) error {
 		}
 		if exists {
 			skipped++
-			slog.Info("表已存在，跳过建表", "table", s.Table, "file", s.Name)
+			slog.Info("table already exists, skipping creation", "table", s.Table, "file", s.Name)
 			continue
 		}
 		for _, stmt := range s.Stmts {
 			if err := gdb.Exec(stmt).Error; err != nil {
-				return fmt.Errorf("执行建表脚本 %s 失败: %w", s.Name, err)
+				return fmt.Errorf("executing schema script %s failed: %w", s.Name, err)
 			}
 		}
 		created++
-		slog.Info("建表已执行", "table", s.Table, "file", s.Name)
+		slog.Info("schema script executed", "table", s.Table, "file", s.Name)
 	}
 
-	slog.Info("dbinit 完成", "created", created, "skipped", skipped)
+	slog.Info("dbinit complete", "created", created, "skipped", skipped)
 	return nil
 }
 
-// loadScripts 加载并校验 sql/schema 下全部 .sql（文件名主干 = 表名，按名排序）。
-// 校验每份脚本恰含 1 条 CREATE TABLE 且表名与文件名主干一致。
+// loadScripts loads and validates all .sql files under sql/schema (file stem =
+// table name, sorted by name). It validates that each script contains exactly
+// 1 CREATE TABLE and that the table name matches the file stem.
 func loadScripts(fsys fs.FS) ([]script, error) {
 	paths, err := fs.Glob(fsys, "sql/schema/*.sql")
 	if err != nil {
@@ -90,7 +99,7 @@ func loadScripts(fsys fs.FS) ([]script, error) {
 		base := path.Base(p)
 		stem := strings.TrimSuffix(base, ".sql")
 		if !tablePattern.MatchString(stem) {
-			return nil, fmt.Errorf("文件名 %s 不合规（须为 <表名>.sql，表名匹配 ^t_[a-z0-9_]+$）", base)
+			return nil, fmt.Errorf("invalid file name %s (must be <table>.sql with the table matching ^t_[a-z0-9_]+$)", base)
 		}
 		content, err := fs.ReadFile(fsys, p)
 		if err != nil {
@@ -98,22 +107,22 @@ func loadScripts(fsys fs.FS) ([]script, error) {
 		}
 		stmts := splitStatements(string(content))
 		if len(stmts) != 1 {
-			return nil, fmt.Errorf("建表脚本 %s 须恰含 1 条 CREATE TABLE 语句，实际 %d 条", base, len(stmts))
+			return nil, fmt.Errorf("schema script %s must contain exactly 1 CREATE TABLE statement, got %d", base, len(stmts))
 		}
 		m := createTableRE.FindStringSubmatch(stmts[0])
 		if m == nil {
-			return nil, fmt.Errorf("建表脚本 %s 的语句不是 CREATE TABLE", base)
+			return nil, fmt.Errorf("statement in schema script %s is not a CREATE TABLE", base)
 		}
 		if m[1] != stem {
-			return nil, fmt.Errorf("建表脚本 %s 创建的表 %s 与文件名主干不一致", base, m[1])
+			return nil, fmt.Errorf("table %s created by schema script %s does not match the file stem", m[1], base)
 		}
 		out = append(out, script{Table: stem, Name: base, Stmts: stmts})
 	}
 	return out, nil
 }
 
-// tableExists 判表是否已存在：MySQL 查 information_schema；
-// 其他方言（单测 sqlite）查 sqlite_master。
+// tableExists checks whether a table already exists: MySQL queries
+// information_schema; other dialects (unit-test sqlite) query sqlite_master.
 func tableExists(gdb *gorm.DB, table string) (bool, error) {
 	var cnt int64
 	var err error
@@ -129,18 +138,23 @@ func tableExists(gdb *gorm.DB, table string) (bool, error) {
 		).Scan(&cnt).Error
 	}
 	if err != nil {
-		return false, fmt.Errorf("查询表 %s 是否存在失败: %w", table, err)
+		return false, fmt.Errorf("checking whether table %s exists failed: %w", table, err)
 	}
 	return cnt > 0, nil
 }
 
-// splitStatements 按分号切分 SQL 文本为可执行语句序列：
-//   - 单引号 '…'、双引号 "…"、反引号 `…` 字面量内的分号不算语句边界；
-//   - MySQL 反斜杠转义（'\'）与相邻双写引号（'it”s'）均在字面量内原样保留；
-//   - -- 行注释与 /* */ 块注释整体剥离（含被注释掉的分号）；
-//   - 纯注释/空白段不产出语句。
+// splitStatements splits SQL text into an executable statement sequence on
+// semicolons:
+//   - semicolons inside single-quoted '…', double-quoted "…", and backtick `…`
+//     literals are not statement boundaries;
+//   - MySQL backslash escapes ('\') and adjacent doubled quotes ('it”s') are
+//     preserved verbatim inside literals;
+//   - -- line comments and /* */ block comments are stripped wholesale
+//     (including commented-out semicolons);
+//   - pure comment/whitespace segments produce no statements.
 //
-// 方言边界：面向 MySQL（生产）与 sqlite（单测），不处理 PG 的 dollar-quoted 字符串。
+// Dialect boundary: targets MySQL (production) and sqlite (unit tests); PG
+// dollar-quoted strings are not handled.
 func splitStatements(sql string) []string {
 	var stmts []string
 	var b strings.Builder
@@ -164,7 +178,7 @@ func splitStatements(sql string) []string {
 			for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
 				i++
 			}
-			i += 2 // 跳过 "*/"；未闭合时 i 越界由外层条件兜住
+			i += 2 // skip "*/"; when unclosed, i going out of range is caught by the outer condition
 		case c == ';':
 			flush()
 			i++
@@ -177,8 +191,9 @@ func splitStatements(sql string) []string {
 	return stmts
 }
 
-// copyQuoted 把 sql[i] 起的一个带引号字面量整体复制进 b，返回字面量
-// 结束后的下标。引号未闭合时返回 len(sql)，语法错误交给数据库报错。
+// copyQuoted copies a whole quoted literal starting at sql[i] into b,
+// returning the index after the literal ends. When the quote is unclosed it
+// returns len(sql), letting the database report the syntax error.
 func copyQuoted(sql string, i int, b *strings.Builder) int {
 	q := sql[i]
 	b.WriteByte(q)
@@ -189,10 +204,10 @@ func copyQuoted(sql string, i int, b *strings.Builder) int {
 		i++
 		switch {
 		case c == '\\' && q != '`' && i < len(sql):
-			b.WriteByte(sql[i]) // MySQL 反斜杠转义：带上下一个字符
+			b.WriteByte(sql[i]) // MySQL backslash escape: take the next character too
 			i++
 		case c == q && i < len(sql) && sql[i] == q:
-			b.WriteByte(q) // 相邻双写引号（''）是字面量内转义
+			b.WriteByte(q) // adjacent doubled quotes ('') are an in-literal escape
 			i++
 		case c == q:
 			return i

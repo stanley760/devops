@@ -1,14 +1,15 @@
-// Package model 定义 devops-system 的全部表模型（t_tenant + t_system_*）。
+// Package model defines all table models of devops-system (t_tenant + t_system_*).
 //
-// 基模型已上提到 devops-common/model（与 devops-user 共用同一份实现）：
-//   - BaseModel        全局表内嵌（t_tenant、t_system_menu）
-//   - BaseTenantModel  租户表内嵌 = BaseModel + tenant_id 判别列
+// The base models have been promoted to devops-common/model (sharing the same implementation with devops-user):
+//   - BaseModel        embedded in global tables (t_tenant, t_system_menu)
+//   - BaseTenantModel  embedded in tenant tables = BaseModel + the tenant_id discriminator column
 //
-// 本文件只保留**本服务专属**的部分：租户判别列、发号器桥接、
-// 以及把 auditctx 的认证操作者接到共用实现上。
+// This file only keeps the service-specific parts: the tenant discriminator column, the ID
+// generator bridge, and wiring auditctx's authenticated operator into the shared implementation.
 //
-// 主键一律由 devops-id 发号：autoIncrement:false + BeforeCreate hook；
-// 种子数据显式指定 ID（admin=1、部门=100 起、菜单 1-7 等），ID 为 0 时才自动发号。
+// Primary keys are always assigned by devops-id: autoIncrement:false + BeforeCreate hook;
+// seed data specifies IDs explicitly (admin=1, depts from 100, menus 1-7, etc.); IDs are
+// auto-assigned only when 0.
 package model
 
 import (
@@ -21,17 +22,18 @@ import (
 	"github.com/stanley760/devops/devops-id/pkg/idgorm"
 )
 
-// idHook 本服务的 idgorm 钩子：用于 BizTagOf（按表名推导 biz_tag）。
+// idHook is this service's idgorm hook: used for BizTagOf (deriving biz_tag from the table name).
 //
-// 发号本身（BeforeCreate 分配主键）已由 commonmodel.BaseModel 负责，
-// 但 idgorm.Hook 的 BizTag 推导能力仍需保留，故保留此实例。
+// The assignment itself (BeforeCreate assigning the primary key) is already handled by
+// commonmodel.BaseModel, but idgorm.Hook's BizTag derivation capability still needs to be
+// kept, so this instance is retained.
 var idHook = idgorm.New(nil, nil)
 
-// actorFromAuditCtx 从 ctx 取认证用户名；无认证操作者时返回空串。
+// actorFromAuditCtx takes the authenticated username from ctx; returns an empty string when there is no authenticated operator.
 //
-// 抽成函数是为了让 SetIDGenerator 与 ConfigureModel 走同一条装配路径——
-// 否则只调 SetIDGenerator（漏配 ActorResolver）会导致 creator/updater 全部退化为
-// system，审计字段静默失效，且不会有任何报错。
+// Extracted into a function so that SetIDGenerator and ConfigureModel go through the same
+// assembly path — otherwise calling only SetIDGenerator (missing ActorResolver) would degrade
+// all creator/updater to system, silently invalidating the audit fields with no error raised.
 func actorFromAuditCtx(tx *gorm.DB) string {
 	actor, ok := auditctx.From(tx.Statement.Context)
 	if !ok {
@@ -40,49 +42,50 @@ func actorFromAuditCtx(tx *gorm.DB) string {
 	return strings.TrimSpace(actor.Username)
 }
 
-// AuditActorFromContext 从 ctx 取认证用户名；无认证操作者时返回空串。
+// AuditActorFromContext takes the authenticated username from ctx; returns an empty string when there is no authenticated operator.
 //
-// 导出供测试与特殊场景复用：B 端标准语义就是 auditctx里的登录用户名。
+// Exported for reuse in tests and special scenarios: the standard B-side semantics is the logged-in username in auditctx.
 func AuditActorFromContext(tx *gorm.DB) string { return actorFromAuditCtx(tx) }
 
-// ConfigureAuditActor 仅装配审计操作者解析（不动发号器）。
+// ConfigureAuditActor assembles only the audit operator resolution (without touching the ID generator).
 //
-// 用于「不发号」的路径：单测用显式 ID 构造记录时只需审计钩子正确。
+// For the "no ID assignment" path: when tests construct records with explicit IDs, only the audit hook needs to be correct.
 func ConfigureAuditActor(resolver commonmodel.ActorResolver) {
 	commonmodel.Configure(commonmodel.CurrentIDAssigner(), resolver)
 }
 
-// SetIDGenerator 注入发号客户端（server 命令装配期调用；migrate 种子不依赖）。
+// SetIDGenerator injects the ID generator client (called during server command assembly; migrate seeds do not depend on it).
 //
-// 同时配置到 commonmodel：共用 BaseModel 的 BeforeCreate 经 idHook（*idgorm.Hook，
-// 满足 IDAssigner）分配主键。ActorResolver 一并装配为 auditctx 解析（B 端语义）。
+// Also configures commonmodel: the shared BaseModel's BeforeCreate assigns primary keys via
+// idHook (*idgorm.Hook, satisfying IDAssigner). The ActorResolver is assembled as auditctx
+// resolution as well (B-side semantics).
 func SetIDGenerator(generator idgorm.Generator) {
 	idHook.SetGenerator(generator)
 	commonmodel.Configure(idHook, actorFromAuditCtx)
 }
 
-// ConfigureModel 装配共用基模型：发号器 + 认证操作者解析。
+// ConfigureModel assembles the shared base models: the ID generator + authenticated operator resolution.
 //
-// B 端语义：creator/updater 取当前登录用户名（auditctx 由中间件注入）。
-// 无认证操作者时（种子数据、登录前的写操作）共用实现回退为 system。
+// B-side semantics: creator/updater take the current logged-in username (auditctx is injected by the middleware).
+// When there is no authenticated operator (seed data, writes before login), the shared implementation falls back to system.
 func ConfigureModel(generator idgorm.Generator) {
 	SetIDGenerator(generator)
 }
 
-// IDGenerator 返回当前发号客户端（未装配时为 nil）。
+// IDGenerator returns the current ID generator client (nil when not assembled).
 func IDGenerator() idgorm.Generator { return idHook.Generator() }
 
-// BaseModel 共用全局表基模型（别名，指向 devops-common/model）。
+// BaseModel is the shared global table base model (an alias pointing to devops-common/model).
 type BaseModel = commonmodel.BaseModel
 
-// BaseTenantModel 租户表基模型：共享数据库中的 tenant_id 判别列。
+// BaseTenantModel is the tenant table base model: the tenant_id discriminator column in a shared database.
 //
-// ⚠️ 不放进 devops-common：C 端单租户，没有这个概念，
-// 放上去等于让 common 携带只有 B 端需要的字段。
+// ⚠️ Not placed in devops-common: the C-side is single-tenant and has no such concept;
+// putting it there would make common carry a field only the B-side needs.
 type BaseTenantModel struct {
 	BaseModel
 	TenantID int64 `gorm:"index;not null"`
 }
 
-// BizTagOf 模型 → biz_tag（独立 snowflake worker 空间标识）。
+// BizTagOf model → biz_tag (an independent snowflake worker space identifier).
 func BizTagOf(m any) (string, error) { return idHook.BizTagOf(m) }

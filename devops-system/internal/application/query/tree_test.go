@@ -6,7 +6,7 @@ import (
 	"github.com/stanley760/devops/devops-common/domain"
 )
 
-// node 是树测试用的载荷。
+// node is the payload used for tree tests.
 type node struct {
 	ID       int64
 	ParentID int64
@@ -20,7 +20,7 @@ func TestBuildTree(t *testing.T) {
 		{ID: 2, ParentID: 0, Order: 1, Name: "root-a"},
 		{ID: 3, ParentID: 1, Name: "child-of-1"},
 		{ID: 4, ParentID: 3, Name: "grandchild"},
-		// 父节点不存在 → 应归入根层级
+		// parent does not exist → should land at the root level
 		{ID: 5, ParentID: 99, Name: "orphan"},
 	}
 
@@ -31,14 +31,14 @@ func TestBuildTree(t *testing.T) {
 	)
 
 	if len(tree) != 3 {
-		t.Fatalf("根节点数 = %d, want 3 (1,2,5)", len(tree))
+		t.Fatalf("root count = %d, want 3 (1,2,5)", len(tree))
 	}
-	// 根按 Order 升序：2(order=1) 应在 1(order=2) 之前
+	// roots sorted by Order ascending: 2 (order=1) should come before 1 (order=2)
 	if tree[0].ID != 2 || tree[1].ID != 1 {
-		t.Fatalf("根顺序 = [%d %d], want [2 1]", tree[0].ID, tree[1].ID)
+		t.Fatalf("root order = [%d %d], want [2 1]", tree[0].ID, tree[1].ID)
 	}
 
-	// 子树挂载正确性
+	// subtree mounting correctness
 	var rootB *TreeNode[node]
 	for i := range tree {
 		if tree[i].ID == 1 {
@@ -46,17 +46,17 @@ func TestBuildTree(t *testing.T) {
 		}
 	}
 	if rootB == nil {
-		t.Fatal("未找到 ID=1 的根节点")
+		t.Fatal("root node with ID=1 not found")
 	}
 	if len(rootB.Children) != 1 || rootB.Children[0].ID != 3 {
-		t.Fatalf("ID=1 的子节点 = %v, want [3]", idsOf(rootB.Children))
+		t.Fatalf("children of ID=1 = %v, want [3]", idsOf(rootB.Children))
 	}
 	if len(rootB.Children[0].Children) != 1 || rootB.Children[0].Children[0].ID != 4 {
-		t.Fatalf("ID=3 的子节点 = %v, want [4]", idsOf(rootB.Children[0].Children))
+		t.Fatalf("children of ID=3 = %v, want [4]", idsOf(rootB.Children[0].Children))
 	}
 }
 
-// TestBuildTreeSelfParentGuard 自引用节点应归入根而非死循环。
+// TestBuildTreeSelfParentGuard checks that a self-referencing node lands at the root instead of looping forever.
 func TestBuildTreeSelfParentGuard(t *testing.T) {
 	items := []node{{ID: 7, ParentID: 7, Name: "self"}}
 	tree := BuildTree(items,
@@ -65,7 +65,7 @@ func TestBuildTreeSelfParentGuard(t *testing.T) {
 		func(n node) int { return n.Order },
 	)
 	if len(tree) != 1 || tree[0].ID != 7 {
-		t.Fatalf("自引用节点应归入根，实际 %d 个根", len(tree))
+		t.Fatalf("self-referencing node should land at the root, got %d roots", len(tree))
 	}
 }
 
@@ -82,14 +82,14 @@ func TestFlattenTree(t *testing.T) {
 	)
 	flat := FlattenTree(tree)
 	if len(flat) != 3 {
-		t.Fatalf("拍平后 = %d 个, want 3", len(flat))
+		t.Fatalf("flattened count = %d, want 3", len(flat))
 	}
 	if flat[0].ID != 1 || flat[1].ID != 2 || flat[2].ID != 3 {
-		t.Fatalf("拍平顺序 = [%d %d %d], want [1 2 3]", flat[0].ID, flat[1].ID, flat[2].ID)
+		t.Fatalf("flattened order = [%d %d %d], want [1 2 3]", flat[0].ID, flat[1].ID, flat[2].ID)
 	}
 }
 
-// TestBuildTreePreservesOrderZero 根节点 Order=0 时保持加载顺序。
+// TestBuildTreePreservesOrderZero checks that roots with Order=0 keep their load order.
 func TestBuildTreePreservesOrderZero(t *testing.T) {
 	items := []node{
 		{ID: 10, ParentID: 0, Name: "first"},
@@ -101,7 +101,7 @@ func TestBuildTreePreservesOrderZero(t *testing.T) {
 		func(n node) int { return n.Order },
 	)
 	if tree[0].ID != 10 {
-		t.Fatalf("首根 = %d, want 10（Order=0 应保持原序）", tree[0].ID)
+		t.Fatalf("first root = %d, want 10 (Order=0 should keep the original order)", tree[0].ID)
 	}
 }
 
@@ -113,16 +113,16 @@ func idsOf[T any](nodes []TreeNode[T]) []int64 {
 	return out
 }
 
-// TestPageResultMapping 分页元数据在转换中必须保持不变。
+// TestPageResultMapping checks that pagination metadata is preserved through conversion.
 func TestPageResultMapping(t *testing.T) {
 	in := domain.PageResult[int]{
 		List: []int{1, 2, 3}, Total: 42, PageNum: 2, PageSize: 3, Pages: 14,
 	}
 	out := domain.MapPage(in, func(v int) string { return string(rune('a' + v - 1)) })
 	if out.Total != in.Total || out.PageNum != in.PageNum || out.PageSize != in.PageSize || out.Pages != in.Pages {
-		t.Fatalf("分页元数据未保持: %+v", out)
+		t.Fatalf("pagination metadata not preserved: %+v", out)
 	}
 	if len(out.List) != 3 || out.List[0] != "a" {
-		t.Fatalf("列表转换错误: %v", out.List)
+		t.Fatalf("list conversion error: %v", out.List)
 	}
 }

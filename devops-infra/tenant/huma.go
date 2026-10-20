@@ -1,4 +1,4 @@
-// huma 版租户上下文中间件（D2/D7）。
+// huma-flavored tenant context middleware (D2/D7).
 package tenant
 
 import (
@@ -11,13 +11,13 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// HumaTenantContext claims → check 回调 → 租户上下文注入。
+// HumaTenantContext: claims → check callback → tenant context injection.
 //
-// 安全关键——传播机制：必须用 huma.WithContext 整体替换底层 context（等价
-// gin 版 c.Request = c.Request.WithContext(ctx)）；contextKey 未导出，只能经
-// 本包 With 构造，严禁自造 key。check 回调由业务注入（如 devops-system 的
-// tenantUsable：DB 状态查询 + Redis 缓存）；onUnauthorized/onForbidden 为
-// nil 时以统一信封终止（与 securitymw 默认一致）。
+// Security critical — propagation mechanism: the underlying context must be replaced wholesale via huma.WithContext (equivalent
+// to the gin version's c.Request = c.Request.WithContext(ctx)); contextKey is unexported and can only be constructed
+// through this package's With; rolling your own key is strictly forbidden. The check callback is injected by the business (such as devops-system's
+// tenantUsable: DB status query + Redis cache); when onUnauthorized/onForbidden are
+// nil, terminate with the unified envelope (consistent with the securitymw defaults).
 func HumaTenantContext(
 	check func(ctx context.Context, tenantID int64) bool,
 	onUnauthorized func(hctx huma.Context, err error),

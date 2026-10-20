@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 本地校验脚本：编译 + 静态检查 + 测试。
-# 用法：
-#   scripts/verify.sh build   仅编译全工作区
-#   scripts/verify.sh test    编译 + 测试全工作区
-#   scripts/verify.sh test-system  编译 + 测试 devops-system
-#   scripts/verify.sh test ./devops-system/internal/...  测试指定包
+# Local verification script: build + static checks + tests.
+# Usage:
+#   scripts/verify.sh build   build the whole workspace only
+#   scripts/verify.sh test    build + test the whole workspace
+#   scripts/verify.sh test-system   build + test devops-system
+#   scripts/verify.sh test ./devops-system/internal/...   test a specific package
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +12,7 @@ GO="${GO_BIN:-/d/GoToolchain/go/bin/go.exe}"
 cd "$ROOT"
 
 if [ ! -x "$GO" ]; then
-  echo "找不到 Go 工具链: $GO（可用 GO_BIN 环境变量覆盖）" >&2
+  echo "Go toolchain not found: $GO (override with the GO_BIN environment variable)" >&2
   exit 127
 fi
 
@@ -26,7 +26,7 @@ has_go_files() {
 build_all() {
   for m in $MODULES; do
     if ! has_go_files "$m"; then
-      echo "  - $m（无 Go 源文件，跳过）"
+      echo "  - $m (no Go source files, skipping)"
       continue
     fi
     echo "  - $m"
@@ -37,7 +37,7 @@ build_all() {
 test_all() {
   for m in $MODULES; do
     if ! has_go_files "$m"; then
-      echo "  - $m（无 Go 源文件，跳过）"
+      echo "  - $m (no Go source files, skipping)"
       continue
     fi
     echo "  - $m"
@@ -48,7 +48,7 @@ test_all() {
 vet_all() {
   for m in $MODULES; do
     if ! has_go_files "$m"; then
-      echo "  - $m（无 Go 源文件，跳过）"
+      echo "  - $m (no Go source files, skipping)"
       continue
     fi
     echo "  - $m"
@@ -56,29 +56,29 @@ vet_all() {
   done
 }
 
-echo "==> go build（全部模块）"
+echo "==> go build (all modules)"
 build_all
 
 case "${1:-test}" in
   build)
-    echo "==> 仅编译，通过"
+    echo "==> build only, passed"
     ;;
   vet)
     if [ -n "$TARGET" ]; then
       echo "==> go vet $TARGET"
       "$GO" vet "$TARGET"
     else
-      echo "==> go vet（全部模块）"
+      echo "==> go vet (all modules)"
       vet_all
     fi
-    echo "==> vet 通过"
+    echo "==> vet passed"
     ;;
   test)
     if [ -n "$TARGET" ]; then
       echo "==> go test $TARGET"
       "$GO" test "$TARGET"
     else
-      echo "==> go test（全部模块）"
+      echo "==> go test (all modules)"
       test_all
     fi
     ;;
@@ -87,7 +87,7 @@ case "${1:-test}" in
     "$GO" test ./devops-system/...
     ;;
   *)
-    echo "未知子命令: $1（支持 build|vet|test|test-system）" >&2
+    echo "Unknown subcommand: $1 (supported: build|vet|test|test-system)" >&2
     exit 2
     ;;
 esac

@@ -16,10 +16,10 @@ import (
 
 // Injectors from wire.go:
 
-// InitializeGRPC 装配发号服务依赖图：etcd client → per-tag 基础设施工厂 →
-// snowflake Manager → 应用服务 → gRPC handler → 注册回调。
-// 返回的 cleanup 逆序执行：revoke 所有 per-tag lease → 关闭 etcd client。
-// 重新生成：go generate -tags=wireinject ./internal/app
+// InitializeGRPC wires the ID generation service dependency graph: etcd client -> per-tag
+// infrastructure factory -> snowflake Manager -> application service -> gRPC handler -> register callbacks.
+// The returned cleanup runs in reverse: revoke all per-tag leases -> close the etcd client.
+// Regenerate with: go generate -tags=wireinject ./internal/app
 //
 //go:generate go run github.com/google/wire/cmd/wire
 func InitializeGRPC(cfg config.Config) (func(*grpc.Server, *health.Server), func(), error) {

@@ -24,7 +24,7 @@ var serviceSet = wire.NewSet(
 )
 
 var routeSet = wire.NewSet(
-	// NewRegister 的 docCfg 入参：wire 不自动解构注入器入参结构体，须显式提供字段 provider
+	// The docCfg parameter of NewRegister: wire does not automatically destructure injector parameter structs, so a field provider must be supplied explicitly
 	wire.FieldsOf(new(config.Config), "APIDoc"),
 	router.NewAuthRoutes,
 	router.NewUserRoutes,

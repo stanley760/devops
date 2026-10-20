@@ -1,9 +1,12 @@
-// migrate 子命令：建表 SQL + 初始数据 SQL（internal/dbinit）。
+// The migrate subcommand: schema SQL + seed data SQL (internal/dbinit).
 //
-// 与 server 启动链共用同一套初始化（dbinit.Run），手动 migrate 仅是运维
-// 兜底入口——正常情况下服务启动时自动完成。已存在的表及其种子自动跳过。
+// It shares the same initialization as the server startup chain (dbinit.Run);
+// manual migrate is only an operational fallback entry point — normally it
+// completes automatically at service startup. Existing tables and their
+// seeds are skipped automatically.
 //
-// 单库模式：全部表和种子数据都写入配置的 MySQL 数据库。
+// Single-database mode: all tables and seed data are written to the
+// configured MySQL database.
 package cmd
 
 import (
@@ -21,7 +24,7 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "建表 SQL + 初始数据 SQL（表存在即跳过，幂等，与 server 启动一致）",
+	Short: "Schema SQL + seed data SQL (existing tables are skipped, idempotent, consistent with server startup)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var cfg config.Config
 		if err := infracfg.LoadInto(&cfg); err != nil {
@@ -33,16 +36,16 @@ var migrateCmd = &cobra.Command{
 		gdb := mysql.Get()
 
 		if err := dbinit.Run(gdb); err != nil {
-			return fmt.Errorf("建表/种子失败: %w", err)
+			return fmt.Errorf("schema/seed failed: %w", err)
 		}
-		if err := authz.Init(gdb); err != nil { // 建 casbin_rule 表并加载存量策略
+		if err := authz.Init(gdb); err != nil { // creates the casbin_rule table and loads existing policies
 			return err
 		}
 		defer authz.Close()
-		if err := authz.SeedPolicies(1, 1); err != nil { // admin = 平台管理员 + 租户1超管
-			return fmt.Errorf("casbin 策略种子失败: %w", err)
+		if err := authz.SeedPolicies(1, 1); err != nil { // admin = platform admin + tenant 1 super admin
+			return fmt.Errorf("casbin policy seeding failed: %w", err)
 		}
-		fmt.Println("migrate 完成：建表 + 种子 SQL 就绪（已存在表自动跳过）；casbin_rule + 策略种子就绪")
+		fmt.Println("migrate complete: schema + seed SQL ready (existing tables skipped automatically); casbin_rule + policy seeds ready")
 		return nil
 	},
 }

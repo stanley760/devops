@@ -1,5 +1,5 @@
-// 租户管理 dao（P7）：t_tenant 为全局表（无 tenant_id，TenantPlugin 放行），
-// 平台路由 ctx 无租户亦可直接访问。
+// Tenant management dao (P7): t_tenant is a global table (no tenant_id; TenantPlugin lets it through),
+// and the platform route ctx can access it directly without a tenant.
 package dao
 
 import (
@@ -19,7 +19,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// ListTenants 分页查询租户（筛选 name/code/status）。
+// ListTenants paginates tenants (filter by name/code/status).
 func ListTenants(ctx context.Context, q types.TenantPageQuery) (domain.PageResult[model.Tenant], error) {
 	db := tenantdb.DB(ctx).Model(&model.Tenant{})
 	if q.Name != "" {
@@ -37,38 +37,38 @@ func ListTenants(ctx context.Context, q types.TenantPageQuery) (domain.PageResul
 		domain.PageParam{PageNum: q.PageNum, PageSize: q.PageSize},
 	)
 	if err != nil {
-		return domain.PageResult[model.Tenant]{}, errs.Wrap(err, errs.CodeInternal, "查询租户列表失败")
+		return domain.PageResult[model.Tenant]{}, errs.Wrap(err, errs.CodeInternal, "failed to query tenant list")
 	}
 	return page, nil
 }
 
-// GetTenantByCode 按编码取租户（登录用：未命中按 401「租户不存在」语义）。
+// GetTenantByCode fetches a tenant by code (for login: a miss maps to a 401 "tenant not found" semantics).
 func GetTenantByCode(ctx context.Context, code string) (*model.Tenant, error) {
 	var t model.Tenant
 	err := tenantdb.DB(ctx).Where("code = ?", code).First(&t).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeUnauthorized, "租户不存在")
+			return nil, errs.New(errs.CodeUnauthorized, "tenant not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询租户失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query tenant")
 	}
 	return &t, nil
 }
 
-// GetTenantByID 按 ID 取租户。
+// GetTenantByID fetches a tenant by ID.
 func GetTenantByID(ctx context.Context, tenantID int64) (*model.Tenant, error) {
 	var t model.Tenant
 	err := tenantdb.DB(ctx).Where("id = ?", tenantID).First(&t).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "租户不存在")
+			return nil, errs.New(errs.CodeNotFound, "tenant not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询租户失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query tenant")
 	}
 	return &t, nil
 }
 
-// TenantCodeExists 租户编码是否已占用（全局唯一）。
+// TenantCodeExists reports whether the tenant code is already taken (globally unique).
 func TenantCodeExists(ctx context.Context, code string, excludeID int64) (bool, error) {
 	db := tenantdb.DB(ctx).Model(&model.Tenant{}).Where("code = ?", code)
 	if excludeID > 0 {
@@ -76,65 +76,66 @@ func TenantCodeExists(ctx context.Context, code string, excludeID int64) (bool, 
 	}
 	var cnt int64
 	if err := db.Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "检查租户编码唯一性失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to check tenant code uniqueness")
 	}
 	return cnt > 0, nil
 }
 
-// CreateTenant 创建租户（主键发号，biz_tag=tenant）。
+// CreateTenant creates a tenant (primary key is assigned, biz_tag=tenant).
 func CreateTenant(ctx context.Context, t *model.Tenant) error {
 	if err := tenantdb.DB(ctx).Create(t).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "创建租户失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to create tenant")
 	}
 	return nil
 }
 
-// UpdateTenant 更新租户字段。
+// UpdateTenant updates tenant fields.
 func UpdateTenant(ctx context.Context, tenantID int64, updates map[string]any) error {
 	res := tenantdb.DB(ctx).Model(&model.Tenant{}).
 		Where("id = ?", tenantID).Updates(updates)
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新租户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update tenant")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "租户不存在")
+		return errs.New(errs.CodeNotFound, "tenant not found")
 	}
 	return nil
 }
 
-// SoftDeleteTenantTx 事务内软删租户：改写 code 绕开全局唯一索引（同 code 可重建）。
+// SoftDeleteTenantTx soft-deletes a tenant within a transaction: rewrites the code to bypass
+// the global unique index (the same code can be recreated).
 func SoftDeleteTenantTx(tx *gorm.DB, tenantID int64, code string) error {
 	res := tx.Model(&model.Tenant{}).Where("id = ?", tenantID).Updates(map[string]any{
 		"code":       code + "_del_" + strconv.FormatInt(tenantID, 10),
 		"deleted_at": time.Now(),
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "删除租户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to delete tenant")
 	}
 	return nil
 }
 
-// SoftDeleteTenant 软删租户（单事务，见 SoftDeleteTenantTx）。
+// SoftDeleteTenant soft-deletes a tenant (single transaction, see SoftDeleteTenantTx).
 func SoftDeleteTenant(ctx context.Context, tenantID int64, code string) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		return SoftDeleteTenantTx(tx, tenantID, code)
 	})
 }
 
-// HardDeleteTenant 物理删除租户行：创建流程补偿回滚用。
+// HardDeleteTenant physically deletes the tenant row: for compensating rollback in the creation flow.
 func HardDeleteTenant(ctx context.Context, tenantID int64) error {
 	return tenantdb.DB(ctx).Unscoped().Delete(&model.Tenant{}, tenantID).Error
 }
 
-// SeedTenantAdmin 建租户初始超管（super_admin 角色 + 用户 + 关联，单事务）。
-// ctx 须为新租户 ctx，用于填充 tenant_id。
+// SeedTenantAdmin creates the initial super admin for a new tenant (super_admin role + user + association, single transaction).
+// ctx must be the new tenant's ctx, used to populate tenant_id.
 func SeedTenantAdmin(ctx context.Context, role *model.Role, admin *model.User) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(role).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建租户超管角色失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create tenant super admin role")
 		}
 		if err := tx.Create(admin).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建租户超管用户失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create tenant super admin user")
 		}
 		return tx.Create(&model.UserRole{UserID: admin.ID, RoleID: role.ID}).Error
 	})

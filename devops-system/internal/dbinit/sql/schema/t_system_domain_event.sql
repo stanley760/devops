@@ -1,13 +1,14 @@
--- t_system_domain_event 领域事件表（DDD/CQRS 重构新增）。
+-- t_system_domain_event domain event table (added by the DDD/CQRS refactor).
 --
--- 用途：承载聚合状态变更后「需要投影到外部读模型」的事实（当前投影目标为
--- casbin 策略）。事件与业务行在同一事务内写入，保证状态变更与待同步事实原子落库。
+-- Purpose: carries the facts that, after an aggregate state change, "need to be projected
+-- into an external read model" (the current projection target is
+-- casbin policies). Events and business rows are written in the same transaction, guaranteeing the state change and the pending facts land atomically.
 --
--- 投影语义：
---   - projected_at IS NULL 表示待投影；投影成功后写入时间戳；
---   - 投影失败不阻塞主流程，仅累加 attempts 并记录 last_error，由重试任务补偿。
+-- Projection semantics:
+--   - projected_at IS NULL means pending projection; a timestamp is written after a successful projection;
+--   - a projection failure does not block the main flow; it only increments attempts and records last_error, compensated by a retry job.
 --
--- 无种子数据（纯运行时表），故不放 sql/datas。
+-- No seed data (a pure runtime table), so it is not placed in sql/datas.
 CREATE TABLE IF NOT EXISTS t_system_domain_event (
     id             BIGINT       NOT NULL,
     creator        VARCHAR(64)  NULL,

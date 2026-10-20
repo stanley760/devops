@@ -1,6 +1,6 @@
--- t_system_users 初始数据：租户 1（default）管理员 1=admin / Admin@123
--- （dept 101，post_ids [4]）。密码为 bcrypt(cost=10) 固化哈希（种子即代码）。
--- 显式 ID + tenant_id。ON DUPLICATE KEY UPDATE id = id 保证重复执行无副作用。
+-- t_system_users initial data: tenant 1 (default) admin 1=admin / Admin@123
+-- (dept 101, post_ids [4]). The password is a fixed bcrypt(cost=10) hash (seed as code).
+-- Explicit ID + tenant_id. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_users
     (id, tenant_id, creator, create_time, updater, update_time,
      username, password, nickname, dept_id, post_ids, email, gender, status)

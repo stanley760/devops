@@ -1,8 +1,8 @@
-# devops-id 分布式 ID 发号服务基础配置
+# Base configuration for the devops-id distributed ID generation service
 
 grpc:
   listen: ":9990"
-  reflection: false       # dev 环境自动强制开启，便于 grpcurl 调试
+  reflection: false       # automatically force-enabled in dev, for grpcurl debugging
 
 nacos:
   enabled: true
@@ -28,23 +28,23 @@ nacos:
 
 log:
   level: debug           # debug | info | warn | error
-  dir: logs              # 日志文件存放目录（devops-id 服务自身日志）
-  console: true          # 是否同时输出到控制台
+  dir: logs              # directory for log files (the devops-id service's own logs)
+  console: true          # whether to also output to the console
   format: text           # text | json
-  buffer: 4096           # 异步写入缓冲区大小（条），写满丢弃新日志
-  max_size: 100          # 单文件上限（MB），写满立即切分
-  max_backups: 30        # 保留历史文件个数，0 不限制
-  max_age: 7             # 历史文件保留天数，0 不限制
+  buffer: 4096           # async write buffer size (entries); new logs are dropped when full
+  max_size: 100          # per-file size limit (MB); rotate immediately when full
+  max_backups: 30        # number of historical files to keep, 0 for unlimited
+  max_age: 7             # days to keep historical files, 0 for unlimited
   compress: gzip         # none | gzip | zstd
-  rotation_interval: 24h  # 时间滚动间隔，留空或 0 仅按大小滚动
+  rotation_interval: 24h  # time-based rotation interval; empty or 0 rotates by size only
 
 idgen:
-  leaf_name: devops-id   # etcd 路径：idgen/snowflake/{leaf_name}/{biz_tag}/
-  worker_cache: data     # 本地缓存：{worker_cache}/{leaf_name}/{biz_tag}/worker_id + watermark
-  allow_local_fallback: false  # P0-1 fail-closed：etcd 不可用时拒绝发号，仅显式开启才降级
-  max_biz_tag_len: 64    # biz_tag 最大字节长度
-  max_generators: 1024   # 并发 generator 数上限
-  max_batch_count: 100000 # 单次批量取号上限
-  watermark_safety_margin: 5s    # 水位预留窗口（须大于 persist_interval）
-  watermark_persist_interval: 3s # 水位持久化间隔
-  watermark_max_wait: 30s        # 重启等待水位窗口最长时长
+  leaf_name: devops-id   # etcd path: idgen/snowflake/{leaf_name}/{biz_tag}/
+  worker_cache: data     # local cache: {worker_cache}/{leaf_name}/{biz_tag}/worker_id + watermark
+  allow_local_fallback: false  # P0-1 fail-closed: refuse ID generation when etcd is unavailable; degrade only when explicitly enabled
+  max_biz_tag_len: 64    # maximum byte length of biz_tag
+  max_generators: 1024   # maximum number of concurrent generators
+  max_batch_count: 100000 # maximum batch size per request
+  watermark_safety_margin: 5s    # watermark safety margin (must be greater than persist_interval)
+  watermark_persist_interval: 3s # watermark persistence interval
+  watermark_max_wait: 30s        # maximum time to wait for the watermark window on restart

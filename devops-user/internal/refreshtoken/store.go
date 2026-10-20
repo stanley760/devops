@@ -1,27 +1,37 @@
-// Package refreshtoken 实现 C 端的 refresh token 存取（Redis 键值对，非 JWT）。
+// Package refreshtoken implements C-side refresh token storage (a Redis
+// key-value pair, not a JWT).
 //
-// ## 为什么 refresh 不用 JWT
+// ## Why refresh is not a JWT
 //
-// **切勿把 access token 当 refresh 复用**：access 是无状态 JWT，任何人拿到就能
-// 一直用到过期；一旦允许用它换新 access，等于给了攻击者无限续命的凭据，
-// 且用户「登出/封禁」无法真正作废（在过期前一直有效）。
+// **Never reuse an access token as a refresh token**: access is a stateless JWT
+// that anyone holding it can use until it expires; once it is allowed to mint
+// new access tokens, it becomes an infinitely renewable credential for an
+// attacker, and user actions like "logout/ban" cannot truly revoke it (it
+// stays valid until it expires).
 //
-// 本实现用 256 位密码学随机串（base64url），服务端只存哈希：
-//   - refresh: 客户端持有明文，服务端仅存 SHA-256 哈希 → 库被拖也无法直接冒用；
-//   - 可精确作废：登出/改密/封禁时直接 DEL 键；
-//   - 可轮换：每次刷新换新串并作废旧串（旧串一次性失效）。
+// This implementation uses a 256-bit cryptographic random string (base64url),
+// and the server stores only the hash:
+//   - refresh: the client holds the plaintext and the server stores only the
+//     SHA-256 hash, so even a dumped database cannot be replayed directly;
+//   - precisely revocable: logout / password change / ban simply DEL the key;
+//   - rotatable: every refresh issues a new string and invalidates the old one
+//     (the old string dies after a single use).
 //
-// 键形（与 devops-infra/security/session 的 t{tid}:auth:* 同一命名空间风格）：
+// Key shapes (same namespace style as devops-infra/security/session's
+// t{tid}:auth:*):
 //
 //	t1:auth:refresh:{hash}    = {userID}      TTL = refresh_expire
 //	t1:auth:refreshuser:{uid} = SET<hash>     TTL = refresh_expire
 //
-// **两个键缺一不可**：`refresh:{hash}` 支持按 token 精确查找；`refreshuser:{uid}`
-// 是反查索引，让「按用户撤销全部」成为可能——没有它就做不到「改密即全端下线」
-// 与「封禁强制下线」（无法枚举某用户的全部 refresh）。
-// 与 devops-infra/security/session 的 `sids` 集合同构，语义一致。
+// **Both keys are required**: `refresh:{hash}` supports exact lookup by token;
+// `refreshuser:{uid}` is the reverse index that makes "revoke everything for a
+// user" possible — without it, neither "password change logs out all devices"
+// nor "ban forces logout" can be implemented (there is no way to enumerate all
+// of a user's refresh tokens). It is isomorphic with the `sids` set in
+// devops-infra/security/session and has the same semantics.
 //
-// userID 而非 "tid:uid"：C 端单租户，tid 恒为 auth.DefaultTenantID，无信息量。
+// userID rather than "tid:uid": the C side is single-tenant, so tid is always
+// auth.DefaultTenantID and carries no information.
 package refreshtoken
 
 import (
@@ -39,36 +49,39 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// ErrNotFound token 不存在、已过期或已被轮换作废。
+// ErrNotFound means the token does not exist, has expired, or was invalidated
+// by rotation.
 //
-// 三者**必须**返回同一个错误：区分会让攻击者判断某个 token 是否曾经有效。
-var ErrNotFound = errors.New("refresh token 不存在或已过期")
+// All three cases **must** return the same error: distinguishing them would let
+// an attacker tell whether a token was ever valid.
+var ErrNotFound = errors.New("refresh token does not exist or has expired")
 
-// Store refresh token 的存取。
+// Store stores and retrieves refresh tokens.
 type Store struct {
 	rdb    *goredis.Client
 	prefix string
 	ttl    time.Duration
 }
 
-// NewStore 创建存储。prefix 建议传 "t1"（C 端单租户）。
+// NewStore creates a store. prefix should be "t1" (the C side is single-tenant).
 func NewStore(rdb *goredis.Client, prefix string, ttl time.Duration) *Store {
 	return &Store{rdb: rdb, prefix: prefix, ttl: ttl}
 }
 
-// key 哈希后的 Redis 键。
+// key is the Redis key for a hashed token.
 func (s *Store) key(hash string) string {
 	return fmt.Sprintf("%s:auth:refresh:%s", s.prefix, hash)
 }
 
-// userKey 用户 → 其全部 refresh 哈希的反查索引。
+// userKey is the reverse index from a user to all of their refresh hashes.
 func (s *Store) userKey(userID int64) string {
 	return fmt.Sprintf("%s:auth:refreshuser:%d", s.prefix, userID)
 }
 
-// Generate 生成明文 token 及其哈希（明文只在此刻存在一次，返回给调用方）。
+// Generate generates the plaintext token and its hash (the plaintext exists
+// only at this moment and is returned to the caller).
 func Generate() (plain string, hash string, err error) {
-	buf := make([]byte, 32) // 256 位
+	buf := make([]byte, 32) // 256 bits
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", err
 	}
@@ -76,20 +89,22 @@ func Generate() (plain string, hash string, err error) {
 	return plain, Hash(plain), nil
 }
 
-// Hash 明文 → 服务端存储用的哈希（base64url，无填充）。
+// Hash maps plaintext to the hash stored server-side (base64url, unpadded).
 func Hash(plain string) string {
 	sum := sha256.Sum256([]byte(plain))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// Save 保存 token → userID 映射，并登记到用户的反查索引。
+// Save stores the token → userID mapping and registers it in the user's
+// reverse index.
 func (s *Store) Save(ctx context.Context, hash string, userID int64) error {
 	if err := s.check(); err != nil {
 		return err
 	}
 	if s.ttl <= 0 {
-		// 零值 TTL 会让 Redis 立即删除，等于 token 不可用——显式失败好过静默失效。
-		return fmt.Errorf("refreshtoken: TTL 未配置")
+		// A zero TTL would make Redis delete the key immediately, rendering the
+		// token unusable — failing explicitly beats silent expiry.
+		return fmt.Errorf("refreshtoken: TTL is not configured")
 	}
 	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, s.key(hash), strconv.FormatInt(userID, 10), s.ttl)
@@ -99,7 +114,7 @@ func (s *Store) Save(ctx context.Context, hash string, userID int64) error {
 	return err
 }
 
-// Lookup 查出 token 对应的 userID。
+// Lookup looks up the userID for a token.
 func (s *Store) Lookup(ctx context.Context, hash string) (int64, error) {
 	if err := s.check(); err != nil {
 		return 0, err
@@ -113,27 +128,30 @@ func (s *Store) Lookup(ctx context.Context, hash string) (int64, error) {
 	}
 	uid, convErr := strconv.ParseInt(v, 10, 64)
 	if convErr != nil {
-		// 值损坏：删掉坏键，避免持续报错堆积。
+		// Corrupted value: delete the bad key to avoid a pile-up of errors.
 		_ = s.rdb.Del(ctx, s.key(hash)).Err()
 		return 0, ErrNotFound
 	}
 	return uid, nil
 }
 
-// Rotate 作废旧 token 并签发新的：原子完成，避免并发刷新时签出多个有效 token。
+// Rotate invalidates the old token and issues a new one atomically, preventing
+// concurrent refreshes from minting multiple valid tokens.
 //
-// 实现用 Lua 保证「查到→ 校验归属 → 删旧 → 写新」的原子性。
-// 若分步执行，并发刷新会各自查到同一个旧 token 并各自签发新 token（重放漏洞）；
-// 只有原子操作才能保证「一个 refresh token 只能用一次」。
+// A Lua script guarantees the atomicity of "lookup → verify ownership → delete
+// old → write new". Done step by step, concurrent refreshes would each find the
+// same old token and each mint a new one (a replay vulnerability); only an
+// atomic operation can guarantee "a refresh token can be used only once".
 func (s *Store) Rotate(ctx context.Context, oldHash, newHash string, userID int64) error {
 	if err := s.check(); err != nil {
 		return err
 	}
 	if s.ttl <= 0 {
-		return fmt.Errorf("refreshtoken: TTL 未配置")
+		return fmt.Errorf("refreshtoken: TTL is not configured")
 	}
-	// 顺带校验 userID 归属：不匹配说明哈希碰撞或数据被篡改，宁可拒绝。
-	// 返回 -1 时不动任何键。
+	// Also verifies userID ownership: a mismatch means a hash collision or
+	// tampered data, so it is better to reject.
+	// On -1 no keys are touched.
 	const rotateScript = `
 local v = redis.call('GET', KEYS[1])
 if v == false then return 0 end
@@ -155,18 +173,20 @@ return 1`
 	case 1:
 		return nil
 	case -1:
-		return fmt.Errorf("refreshtoken: token 归属不匹配")
+		return fmt.Errorf("refreshtoken: token ownership mismatch")
 	default:
 		return ErrNotFound
 	}
 }
 
-// Delete 作废指定 token（登出 / 改密 / 封禁时调用）。
+// Delete invalidates a specific token (called on logout / password change /
+// ban).
 func (s *Store) Delete(ctx context.Context, hash string) error {
 	if err := s.check(); err != nil {
 		return err
 	}
-	// 先查归属再一并清理反查索引；查不到就直接 DEL 主键（可能是脏数据）。
+	// Look up ownership first so the reverse index can be cleaned too; if the
+	// lookup misses, DEL the primary key directly (possibly dirty data).
 	v, err := s.rdb.Get(ctx, s.key(hash)).Result()
 	if errors.Is(err, goredis.Nil) {
 		return s.rdb.Del(ctx, s.key(hash)).Err()
@@ -185,10 +205,13 @@ func (s *Store) Delete(ctx context.Context, hash string) error {
 	return err
 }
 
-// RevokeUser 撤销某用户的**全部** refresh token（改密即全端下线、封禁强制下线）。
+// RevokeUser revokes **all** of a user's refresh tokens (a password change
+// logs out all devices; a ban forces logout).
 //
-// 依赖 userKey 反查索引；无索引的老数据会被跳过（其 refresh 仍可用到过期），
-// 这是升级期的已知取舍——可通过让用户重新登录来收敛。
+// It relies on the userKey reverse index; old data without the index is
+// skipped (its refresh tokens remain usable until expiry). This is a known
+// trade-off during the upgrade period — it can be converged by having users
+// log in again.
 func (s *Store) RevokeUser(ctx context.Context, userID int64) error {
 	if err := s.check(); err != nil {
 		return err
@@ -198,7 +221,8 @@ func (s *Store) RevokeUser(ctx context.Context, userID int64) error {
 		return err
 	}
 	if len(hashes) == 0 {
-		// 索引不存在或已空：仍 DEL 一次以清理可能残留的空键。
+		// The index does not exist or is empty: still DEL once to clean up any
+		// leftover empty key.
 		return s.rdb.Del(ctx, s.userKey(userID)).Err()
 	}
 	pipe := s.rdb.Pipeline()
@@ -210,7 +234,8 @@ func (s *Store) RevokeUser(ctx context.Context, userID int64) error {
 	return err
 }
 
-// RevokeUserExcept 撤销某用户除 keepHash 外的全部 refresh（保留当前设备登录）。
+// RevokeUserExcept revokes all of a user's refresh tokens except keepHash
+// (keeping the current device logged in).
 func (s *Store) RevokeUserExcept(ctx context.Context, userID int64, keepHash string) error {
 	if err := s.check(); err != nil {
 		return err
@@ -228,7 +253,8 @@ func (s *Store) RevokeUserExcept(ctx context.Context, userID int64, keepHash str
 	}
 	pipe.Del(ctx, s.userKey(userID))
 	if keepHash != "" {
-		// 保留的那枚要重新登记，否则反查索引会把它弄丢。
+		// The kept token must be re-registered, otherwise the reverse index
+		// loses it.
 		pipe.SAdd(ctx, s.userKey(userID), keepHash)
 		pipe.Expire(ctx, s.userKey(userID), s.ttl)
 	}
@@ -236,7 +262,8 @@ func (s *Store) RevokeUserExcept(ctx context.Context, userID int64, keepHash str
 	return err
 }
 
-// check 校验客户端可用（未装配时显式失败，不静默放行）。
+// check verifies the client is usable (it fails explicitly when not wired up,
+// rather than silently allowing access).
 func (s *Store) check() error {
 	if s == nil || s.rdb == nil {
 		return fmt.Errorf("refreshtoken: redis client is nil")
@@ -244,18 +271,22 @@ func (s *Store) check() error {
 	return nil
 }
 
-// ConstantTimeEqual 常数时间比较两个哈希字符串（长度不等时也走常数路径）。
+// ConstantTimeEqual compares two hash strings in constant time (even unequal
+// lengths take the constant-time path).
 func ConstantTimeEqual(a, b string) bool {
 	if len(a) != len(b) {
-		// 长度不同直接判否会短路——但哈希长度固定且非攻击者可控，
-		// 且此处比较的是「我方算出的哈希」与「存储的哈希」，无枚举意义。
+		// Returning false immediately on length mismatch would short-circuit,
+		// but the hash length is fixed and not attacker-controlled, and what is
+		// compared here is "our computed hash" against "the stored hash", so
+		// there is nothing to enumerate.
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// IsHashLike 粗判字符串是否像哈希（长度校验，用于提前拒绝明显非法的输入，
-// 避免拿超长串去查 Redis）。
+// IsHashLike roughly checks whether a string looks like a hash (length check,
+// used to reject obviously invalid input early and avoid querying Redis with an
+// oversized string).
 func IsHashLike(s string) bool {
 	return len(s) == 43 && !strings.ContainsAny(s, " \t\n")
 }

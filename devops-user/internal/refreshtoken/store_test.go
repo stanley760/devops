@@ -5,30 +5,33 @@ import (
 	"testing"
 )
 
-// TestGenerate 明文与哈希的形态契约。
+// TestGenerate covers the shape contract between plaintext and hash.
 //
-// 契约：明文 43 字符 base64url（32 字节随机）、哈希 43 字符且**不等于**明文。
-// 若两者相同则说明存储的就是明文，库被拖即可直接冒用。
+// Contract: the plaintext is 43 chars of base64url (32 random bytes), and the
+// hash is 43 chars and **not equal** to the plaintext. If they were equal, the
+// stored value would be the plaintext, and a dumped database could be replayed
+// directly.
 func TestGenerate(t *testing.T) {
 	plain, hash, err := Generate()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plain) != 43 {
-		t.Fatalf("plain 长度 = %d, want 43", len(plain))
+		t.Fatalf("plain length = %d, want 43", len(plain))
 	}
 	if len(hash) != 43 {
-		t.Fatalf("hash 长度 = %d, want 43", len(hash))
+		t.Fatalf("hash length = %d, want 43", len(hash))
 	}
 	if plain == hash {
-		t.Fatal("hash 与 plain 相同——服务端会存到明文")
+		t.Fatal("hash equals plain — the server would store the plaintext")
 	}
 	if !IsHashLike(Hash(plain)) {
-		t.Fatal("Hash(plain) 不符合哈希形态")
+		t.Fatal("Hash(plain) does not match the hash shape")
 	}
 }
 
-// TestGenerateUnique 两次生成必须不同（否则等于固定凭据）。
+// TestGenerateUnique two generations must differ (otherwise it is a fixed
+// credential).
 func TestGenerateUnique(t *testing.T) {
 	seen := make(map[string]struct{}, 100)
 	for i := 0; i < 100; i++ {
@@ -37,32 +40,34 @@ func TestGenerateUnique(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, dup := seen[plain]; dup {
-			t.Fatalf("第 %d 次生成了重复明文", i)
+			t.Fatalf("duplicate plaintext generated on iteration %d", i)
 		}
 		if _, dup := seen[hash]; dup {
-			t.Fatalf("第 %d 次生成了重复哈希", i)
+			t.Fatalf("duplicate hash generated on iteration %d", i)
 		}
 		seen[plain] = struct{}{}
 		seen[hash] = struct{}{}
 	}
 }
 
-// TestHashDeterministic 同一明文恒得同一哈希（否则查库必然 miss）。
+// TestHashDeterministic the same plaintext always yields the same hash
+// (otherwise lookups are guaranteed to miss).
 func TestHashDeterministic(t *testing.T) {
 	plain := "some-refresh-token"
 	if Hash(plain) != Hash(plain) {
-		t.Fatal("Hash 不确定性——无法用于查库")
+		t.Fatal("Hash is non-deterministic — unusable for lookups")
 	}
 	if Hash(plain) == Hash(plain+"x") {
-		t.Fatal("不同明文得到相同哈希")
+		t.Fatal("different plaintexts produced the same hash")
 	}
 }
 
-// TestIsHashLike 拒绝明显非法的输入，避免拿超长串去查 Redis。
+// TestIsHashLike rejects obviously invalid input, avoiding oversized Redis
+// lookups.
 func TestIsHashLike(t *testing.T) {
 	_, hash, _ := Generate()
 	if !IsHashLike(hash) {
-		t.Fatal("合法哈希应通过")
+		t.Fatal("a valid hash should pass")
 	}
 	for _, bad := range []string{
 		"",
@@ -71,20 +76,20 @@ func TestIsHashLike(t *testing.T) {
 		"has space here 123456789012345678901234567890",
 	} {
 		if IsHashLike(bad) {
-			t.Fatalf("非法输入 %q 不应通过", bad)
+			t.Fatalf("invalid input %q should not pass", bad)
 		}
 	}
 }
 
-// TestConstantTimeEqual 长度相同才可能相等。
+// TestConstantTimeEqual equality is only possible when lengths match.
 func TestConstantTimeEqual(t *testing.T) {
 	if ConstantTimeEqual("abc", "abc") != true {
-		t.Fatal("相同应判等")
+		t.Fatal("equal inputs should compare equal")
 	}
 	if ConstantTimeEqual("abc", "abd") != false {
-		t.Fatal("不同应判不等")
+		t.Fatal("different inputs should compare unequal")
 	}
 	if ConstantTimeEqual("abc", "abcd") != false {
-		t.Fatal("长度不同应直接判不等")
+		t.Fatal("different lengths should compare unequal")
 	}
 }

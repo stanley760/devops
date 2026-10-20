@@ -1,8 +1,9 @@
-# Alertmanager 路由配置（dev compose 内挂载为 /etc/alertmanager/alertmanager.yml）。
-# dev：dev-sink 为无外部集成的兜底接收器——告警不外发，但 Alertmanager UI
-# （http://localhost:9093）可见完整告警列表/分组/静默，用于验证规则命中。
-# 生产：把 dev-sink 替换为钉钉/企业微信/邮件 webhook（webhook_configs /
-# email_configs），并按 severity 增加子路由。
+# Alertmanager routing config (mounted at /etc/alertmanager/alertmanager.yml in the dev compose stack).
+# dev: dev-sink is a fallback receiver with no external integration — alerts are not forwarded,
+# but the Alertmanager UI (http://localhost:9093) shows the full alert list/grouping/silences
+# to verify that rules fire.
+# prod: replace dev-sink with a DingTalk/WeCom/email webhook (webhook_configs /
+# email_configs) and add sub-routes by severity.
 global:
   resolve_timeout: 5m
 
@@ -15,4 +16,4 @@ route:
 
 receivers:
   - name: dev-sink
-    # 空接收器：无集成的合法配置
+    # Empty receiver: a valid config with no integrations

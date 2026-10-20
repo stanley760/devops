@@ -1,148 +1,148 @@
-# devops 任务运行器（替代 Makefile）
+# devops task runner (Makefile replacement)
 #
-# 语法要点（just 与 make 的关键差异）：
-#   - 缩进用【空格】，命令之间不用制表符
-#   - 变量插值用 {{var}}，shell 命令用反引号
-#   - 每个 recipe 默认独立 shell，跨行状态需显式声明（见下方 set shell）
-#   - 用 `just --list` 查看全部命令
+# Syntax notes (key differences between just and make):
+#   - Indentation uses [spaces]; no tabs between commands
+#   - Variable interpolation uses {{var}}; shell commands use backticks
+#   - Each recipe gets its own shell by default; cross-line state must be declared explicitly (see set shell below)
+#   - Use `just --list` to see all commands
 
-# 版本号：从 git tag 推导，无 tag 时回退 dev。
+# Version number: derived from the git tag, falling back to dev when there is no tag.
 #
-# 注意：git describe 在多 tag 仓库下会返回 "devops-common/v0.1.1-dirty" 这类
-# 含斜杠的值，而 docker tag 不允许斜杠（会报 "invalid reference format"）。
-# 故把斜杠与非法字符统一替换为短横线。
+# Note: git describe in a multi-tag repo returns values like "devops-common/v0.1.1-dirty"
+# that contain slashes, and docker tags do not allow slashes (it reports "invalid reference format").
+# So slashes and illegal characters are uniformly replaced with hyphens.
 version := `git describe --tags --always --dirty 2>/dev/null | tr '/' '-' | tr -cd '[:alnum:]._-' || echo dev`
 
-# 本地 Go 工具链（模块缓存在 /d/Go/pkg）；可用 `just GO=/path/to/go test` 覆盖
+# Local Go toolchain (module cache at /d/Go/pkg); override with `just GO=/path/to/go test`
 go := env_var_or_default("GO", "/d/GoToolchain/go/bin/go.exe")
 
 compose := "docker compose -f deploy/docker-compose.yml"
 dev_compose := "docker compose -f deploy/docker-compose-dev.yml"
 
-# go.work 是多模块工作区，`go build ./...` 在根目录会报
-# "directory prefix . does not contain modules listed in go.work"，
-# 必须逐个模块指定。
+# go.work is a multi-module workspace; `go build ./...` in the root directory reports
+# "directory prefix . does not contain modules listed in go.work",
+# so modules must be specified one by one.
 modules := "devops-common devops-id devops-infra devops-system devops-user"
 
-# 列出全部可用命令
+# List all available commands
 default:
     @just --list --unsorted
 
-# ---------- 容器构建 ----------
+# ---------- Container Build ----------
 
-# 构建 devops-id 镜像
+# Build the devops-id image
 build-id:
     docker build -f devops-id/Dockerfile --build-arg VERSION={{version}} -t devops-id:{{version}} .
 
-# 构建 devops-system 镜像
+# Build the devops-system image
 build-system:
     docker build -f devops-system/Dockerfile --build-arg VERSION={{version}} -t devops-system:{{version}} .
 
-# 构建全部镜像
+# Build all images
 build: build-id build-system
 
-# ---------- 生产编排（deploy/docker-compose.yml）----------
+# ---------- Production orchestration (deploy/docker-compose.yml) ----------
 
-# 建业务表与种子数据（幂等，表存在即跳过）
+# Create business tables and seed data (idempotent; skipped if tables exist)
 migrate:
     {{compose}} run --rm devops-system migrate
 
-# 启动生产编排
+# Start the production orchestration
 up:
     {{compose}} up -d
 
-# 停止生产编排
+# Stop the production orchestration
 down:
     {{compose}} down
 
-# 跟踪生产编排日志
+# Follow production orchestration logs
 logs:
     {{compose}} logs -f
 
-# 查看生产编排状态
+# Show production orchestration status
 ps:
     {{compose}} ps
 
-# ---------- 开发编排（deploy/docker-compose-dev.yml）----------
-# 只启中间件 + 网关 + 可观测栈；业务服务由本地 go run 启动。
+# ---------- Dev orchestration (deploy/docker-compose-dev.yml) ----------
+# Starts only middleware + gateway + observability stack; business services are started via local go run.
 
-# 启动开发环境依赖
+# Start dev environment dependencies
 dev-up:
     {{dev_compose}} up -d mysql redis nacos etcd higress
     {{dev_compose}} up -d jaeger prometheus alertmanager grafana
 
-# 停止开发环境依赖
+# Stop dev environment dependencies
 dev-down:
     {{dev_compose}} down
 
-# 跟踪开发环境日志
+# Follow dev environment logs
 dev-logs:
     {{dev_compose}} logs -f
 
-# 查看开发环境状态
+# Show dev environment status
 dev-ps:
     {{dev_compose}} ps
 
-# 用一次性容器执行建表与种子初始化
+# Run table creation and seed initialization in a one-shot container
 dev-migrate:
     {{dev_compose}} build devops-system
     {{dev_compose}} --profile app run --rm devops-system migrate
 
-# ---------- 本地校验（不走容器）----------
+# ---------- Local checks (no containers) ----------
 
-# 编译全工作区（逐模块）
+# Build the whole workspace (module by module)
 build-local:
     #!/usr/bin/env bash
     set -euo pipefail
     for m in {{modules}}; do
-        echo "==> 编译 $m"
+        echo "==> building $m"
         {{go}} build "./$m/..."
     done
 
-# 静态检查全工作区（逐模块）
+# Vet the whole workspace (module by module)
 vet:
     #!/usr/bin/env bash
     set -euo pipefail
     for m in {{modules}}; do
-        echo "==> vet $m"
+        echo "==> vetting $m"
         {{go}} vet "./$m/..."
     done
 
-# 跑全工作区测试（逐模块）
+# Run the whole workspace's tests (module by module)
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     for m in {{modules}}; do
-        echo "==> 测试 $m"
+        echo "==> testing $m"
         {{go}} test "./$m/..."
     done
 
-# 只测 devops-system
+# Test devops-system only
 test-system:
     {{go}} test ./devops-system/...
 
-# 只测新增的领域层与应用层
+# Test only the new domain and application layers
 test-domain:
     {{go}} test ./devops-system/internal/domain/... ./devops-system/internal/application/... ./devops-system/internal/arch/...
 
-# 格式化（gofmt）
+# Format (gofmt)
 #
-# 不能写成 `{{go}} fmt ./devops-system/... ...`：go fmt 不启用 workspace 模式
-# （cmd/go 的 fmtcmd 未调用 modload InitWorkfile，见 golang/go 源码
-# internal/fmtcmd/fmt.go），在工作区根目录下会把所有模块前缀判为
-# "does not contain main module or its selected dependencies"。
-# 因此逐模块进入目录后执行，go fmt 本身在该模块内工作正常。
+# It cannot be written as `{{go}} fmt ./devops-system/... ...`: go fmt does not enable workspace mode
+# (cmd/go's fmtcmd does not call modload InitWorkfile; see golang/go source
+# internal/fmtcmd/fmt.go), so in the workspace root all module prefixes are judged as
+# "does not contain main module or its selected dependencies".
+# Hence enter each module's directory and run it there; go fmt itself works fine within that module.
 fmt:
     #!/usr/bin/env bash
     set -euo pipefail
     for m in {{modules}}; do
-        echo "==> 格式化 $m"
+        echo "==> formatting $m"
         (cd "$m" && {{go}} fmt ./...)
     done
 
-# 编译 + vet + 测试：提交前跑这个
+# Build + vet + test: run this before committing
 check: build-local vet test
 
-# 清空 Go 构建缓存
+# Clear the Go build cache
 clean:
     {{go}} clean -cache -testcache

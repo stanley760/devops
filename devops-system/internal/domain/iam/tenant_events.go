@@ -6,52 +6,54 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// 租户域事件名。
+// Tenant domain event names.
 const (
 	EventTenantDisabled    = "iam.tenant.disabled"
 	EventTenantAdminSeeded = "iam.tenant.admin_seeded"
 )
 
-// TenantDisabled 租户被停用 → 撤销该租户全部会话（全员下线）。
+// TenantDisabled: tenant disabled → revoke all sessions of that tenant (everyone offline).
 //
-// 投影：auth.RevokeTenantSessions。
-// 改造前为 service/tenant.go:169/192 的同步调用，失败仅记日志；
-// 现以事件表达，投影失败可重试且不丢。
+// Projection: auth.RevokeTenantSessions.
+// Before the refactor these were synchronous calls at service/tenant.go:169/192; failure was only logged.
+// Now expressed as events: projection failures can be retried without loss.
 type TenantDisabled struct {
 	shared.BaseEvent
 	TenantID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e TenantDisabled) EventName() string { return EventTenantDisabled }
 
 func (e TenantDisabled) aggregateInfo() (string, int64) { return "iam.tenant", e.TenantID }
 
 func (e TenantDisabled) eventTenantID() int64 { return e.TenantID }
 
-// TenantAdminSeeded 新租户初始超管已创建 → 写入域内全通 p 行与 g 行绑定。
+// TenantAdminSeeded: the new tenant's initial super admin has been created → write the in-domain all-wildcard p row and g row binding.
 //
-// 改造前为 service/tenant.go:110 的同步调用 authz.SeedTenantAdmin，
-// 失败时返回 "租户已创建，但超管授权写入失败，请重试"——
-// 业务数据已提交而授权未生效，客户端无从判断该重试还是人工介入。
-// 现以事件表达：主流程返回成功，投影失败由重试任务补偿且不会丢失。
+// Before the refactor this was the synchronous call authz.SeedTenantAdmin at service/tenant.go:110;
+// on failure it returned "tenant created, but super admin authorization write failed, please retry" —
+// business data was already committed while the authorization was not in effect, leaving the client
+// no way to tell whether to retry or intervene manually.
+// Now expressed as an event: the main flow returns success, and projection failures are compensated
+// by retry tasks without loss.
 type TenantAdminSeeded struct {
 	shared.BaseEvent
 	TenantID    int64
 	AdminUserID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e TenantAdminSeeded) EventName() string { return EventTenantAdminSeeded }
 
 func (e TenantAdminSeeded) aggregateInfo() (string, int64) { return "iam.tenant", e.TenantID }
 
 func (e TenantAdminSeeded) eventTenantID() int64 { return e.TenantID }
 
-// TenantEventPayload 是租户域事件的持久化载荷编解码入口。
+// TenantEventPayload is the persistence payload encode/decode entry for tenant domain events.
 type TenantEventPayload struct{}
 
-// Decode 按事件名还原事件实例。未知事件名返回 ok=false。
+// Decode restores an event instance by event name. An unknown event name returns ok=false.
 func (TenantEventPayload) Decode(name string, raw []byte) (shared.Event, bool, error) {
 	switch name {
 	case EventTenantDisabled:

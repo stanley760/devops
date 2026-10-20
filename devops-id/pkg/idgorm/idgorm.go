@@ -15,7 +15,7 @@ import (
 )
 
 // ErrGeneratorNotInitialized is returned when a model is created before an ID generator is injected.
-var ErrGeneratorNotInitialized = errors.New("ID 生成器未初始化（SetIDGenerator 未装配）")
+var ErrGeneratorNotInitialized = errors.New("ID generator not initialized (SetIDGenerator not wired)")
 
 // Generator allocates one ID for a registered biz_tag.
 type Generator interface {
@@ -62,7 +62,7 @@ func (h *Hook) Generator() Generator {
 // Assign skips an explicit non-zero ID and otherwise assigns a generated ID.
 func (h *Hook) Assign(tx *gorm.DB, dst *int64) error {
 	if dst == nil {
-		return errors.New("ID 目标不能为空")
+		return errors.New("ID target must not be nil")
 	}
 	if *dst != 0 {
 		return nil
@@ -102,7 +102,7 @@ func (h *Hook) Assign(tx *gorm.DB, dst *int64) error {
 	}
 	id, err := generator.Next(ctx, bizTag)
 	if err != nil {
-		return fmt.Errorf("ID 生成失败(biz_tag=%s): %w", bizTag, err)
+		return fmt.Errorf("ID generation failed (biz_tag=%s): %w", bizTag, err)
 	}
 	*dst = id
 	return nil
@@ -112,7 +112,7 @@ func (h *Hook) Assign(tx *gorm.DB, dst *int64) error {
 // compatibility with the legacy table-to-tag mapping.
 func (h *Hook) BizTagOf(model any) (string, error) {
 	if model == nil {
-		return "", errors.New("biz_tag 模型不能为空")
+		return "", errors.New("biz_tag model must not be nil")
 	}
 
 	if table, ok := model.(string); ok {
@@ -121,13 +121,13 @@ func (h *Hook) BizTagOf(model any) (string, error) {
 
 	modelValue := reflect.ValueOf(model)
 	if modelValue.Kind() == reflect.Pointer && modelValue.IsNil() {
-		return "", errors.New("biz_tag 模型不能是 nil 指针")
+		return "", errors.New("biz_tag model must not be a nil pointer")
 	}
 
 	if provider, ok := model.(BizTagProvider); ok {
 		tag := strings.TrimSpace(provider.BizTag())
 		if tag == "" {
-			return "", errors.New("模型 BizTag() 不能返回空值")
+			return "", errors.New("model BizTag() must not return an empty value")
 		}
 		return tag, nil
 	}
@@ -137,7 +137,7 @@ func (h *Hook) BizTagOf(model any) (string, error) {
 		modelType = modelType.Elem()
 	}
 	if modelType.Name() == "" {
-		return "", fmt.Errorf("无法从模型类型 %s 推导 biz_tag", modelType)
+		return "", fmt.Errorf("cannot derive biz_tag from model type %s", modelType)
 	}
 	return toSnakeCase(modelType.Name()), nil
 }
@@ -146,7 +146,7 @@ func (h *Hook) legacyBizTagOf(table string) (string, error) {
 	if bizTag, ok := h.legacyBizTag(table); ok {
 		return bizTag, nil
 	}
-	return "", fmt.Errorf("表 %s 无对应 biz_tag（未配置发号映射）", table)
+	return "", fmt.Errorf("no biz_tag mapped for table %s (ID mapping not configured)", table)
 }
 
 func (h *Hook) legacyBizTag(table string) (string, bool) {

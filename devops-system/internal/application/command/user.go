@@ -1,12 +1,18 @@
-// Package command 是 CQRS 写侧：命令定义与处理器。
+// Package command is the CQRS write side: command definitions and handlers.
 //
-// 写侧统一走「加载聚合 → 调用聚合行为 → 仓储保存（含事件落库）」，
-// 不直接触碰查询模型。事务边界由 shared.TxManager 显式声明。
+// The write side uniformly follows "load aggregate → invoke aggregate
+// behavior → repository save (including event persistence)" and never
+// touches the query model directly. The transaction boundary is declared
+// explicitly by shared.TxManager.
 //
-// 相比改造前 service 层的三个关键改进：
-//  1. 事务边界上移到应用层，跨聚合用例可原子化（原先只能手工补偿）；
-//  2. 业务规则在聚合内（充血模型），处理器只做编排，不再写 if 判断业务；
-//  3. casbin 授权同步改由领域事件驱动，失败不影响主流程响应。
+// Three key improvements over the pre-refactor service layer:
+//  1. The transaction boundary moved up to the application layer, so
+//     cross-aggregate use cases can be atomic (previously only manual
+//     compensation was possible);
+//  2. Business rules live inside the aggregates (rich domain model); the
+//     handlers only orchestrate and no longer contain business ifs;
+//  3. casbin authorization sync is now driven by domain events, so failures
+//     do not affect the main-flow response.
 package command
 
 import (
@@ -18,46 +24,47 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// errParam 构造参数错误（400）。
+// errParam builds a parameter error (400).
 func errParam(msg string) error { return errs.New(errs.CodeParam, msg) }
 
-// hashPassword 计算口令哈希。
+// hashPassword computes the password hash.
 //
-// 注入点：生产用 bcrypt，测试可传替身，从而在无数据库的情况下
-// 单测命令处理器的完整流程。
+// Injection point: production uses bcrypt, while tests can pass a double,
+// letting command handlers be unit-tested end to end without a database.
 func hashPassword(plain string, hasher func(string) (string, error)) (string, error) {
 	if hasher == nil {
-		return "", errs.New(errs.CodeInternal, "口令哈希函数未装配")
+		return "", errs.New(errs.CodeInternal, "password hash function not wired up")
 	}
 	h, err := hasher(plain)
 	if err != nil {
-		return "", errs.Wrap(err, errs.CodeInternal, "密码加密失败")
+		return "", errs.Wrap(err, errs.CodeInternal, "password encryption failed")
 	}
 	return h, nil
 }
 
-// UserCommand 用户写侧命令处理器。
+// UserCommand is the write-side user command handler.
 //
-// 依赖全部为端口（接口），故可注入内存假实现做单元测试——
-// 这正是改造前 service 层零测试覆盖的结构性原因：dao 是包级函数，
-// 无法注入替身。
+// All dependencies are ports (interfaces), so in-memory fakes can be injected
+// for unit tests — this is exactly why the pre-refactor service layer had
+// zero test coverage: the dao exposed package-level functions, making
+// doubles impossible to inject.
 type UserCommand struct {
 	users iam.UserRepository
 	txs   shared.TxManager
 	now   shared.NowFunc
 }
 
-// NewUserCommand 构造用户命令处理器。
+// NewUserCommand constructs the user command handler.
 func NewUserCommand(users iam.UserRepository, txs shared.TxManager) *UserCommand {
 	return &UserCommand{users: users, txs: txs, now: shared.SystemNow}
 }
 
-// CreateUserCmd 创建用户命令。
+// CreateUserCmd is the create-user command.
 type CreateUserCmd struct {
-	// TenantID 目标租户（由 claims 解析，handler 层传入）。
+	// TenantID is the target tenant (parsed from claims, passed in by the handler layer).
 	TenantID int64
 	Username string
-	// Password 明文口令；处理器负责加密，领域层只见摘要。
+	// Password is the plaintext password; the handler encrypts it, and the domain layer only ever sees the digest.
 	Password string
 	Nickname string
 	Remark   string
@@ -69,29 +76,33 @@ type CreateUserCmd struct {
 	Avatar   string
 	Status   int8
 	RoleIDs  []int64
-	// HashPassword 口令哈希函数（注入便于测试，缺省用 bcrypt）。
+	// HashPassword is the password hash function (injected for testability; defaults to bcrypt).
 	HashPassword func(string) (string, error)
 }
 
-// CreateUser 创建用户。
+// CreateUser creates a user.
 //
-// 一致性：用户行 + 角色关联 + 领域事件在单一事务内提交。
-// 授权（casbin g 行）由 UserRolesAssigned 事件的投影器完成，不在本事务内，
-// 因此不再出现「用户已创建但授权失败，请重试」的语义模糊错误。
+// Consistency: the user row, role associations, and domain events commit in a
+// single transaction. Authorization (casbin g rows) is done by the projector
+// for the UserRolesAssigned event, outside this transaction, so the
+// semantically vague error "user created but authorization failed, please
+// retry" no longer occurs.
 func (c *UserCommand) Create(ctx context.Context, cmd CreateUserCmd) error {
 	hash, err := hashPassword(cmd.Password, cmd.HashPassword)
 	if err != nil {
 		return err
 	}
 
-	// 唯一性预检：快路径拦截，真正的唯一性由数据库唯一索引兜底
-	//（并发下两个请求可能同时通过预检，靠 uk_tenant_username 保证不重复）。
+	// Uniqueness pre-check: a fast-path rejection; real uniqueness is
+	// guaranteed by the database unique index (under concurrency two requests
+	// can pass the pre-check simultaneously; uk_tenant_username keeps them
+	// from duplicating).
 	exists, err := c.users.UsernameExists(ctx, cmd.Username, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errParam("用户名已存在")
+		return errParam("username already exists")
 	}
 	if cmd.Mobile != nil && *cmd.Mobile != "" {
 		exists, err = c.users.MobileExists(ctx, *cmd.Mobile, 0)
@@ -99,7 +110,7 @@ func (c *UserCommand) Create(ctx context.Context, cmd CreateUserCmd) error {
 			return err
 		}
 		if exists {
-			return errParam("手机号已存在")
+			return errParam("mobile number already exists")
 		}
 	}
 
@@ -133,7 +144,7 @@ func (c *UserCommand) Create(ctx context.Context, cmd CreateUserCmd) error {
 	})
 }
 
-// UpdateUserCmd 更新用户命令。
+// UpdateUserCmd is the update-user command.
 type UpdateUserCmd struct {
 	TenantID     int64
 	UserID       int64
@@ -152,24 +163,26 @@ type UpdateUserCmd struct {
 	HashPassword func(string) (string, error)
 }
 
-// UpdateUser 更新用户（资料 + 角色 + 状态）。
+// UpdateUser updates a user (profile + roles + status).
 //
-// 规则均由聚合承担：角色变更记录事件（触发 g 行同步与数据权限缓存失效），
-// 状态 1→0 记录 UserDeactivated 事件（触发踢下线）。
+// All rules are owned by the aggregate: a role change records an event
+// (triggering g-row sync and data-scope cache invalidation), and a 1→0
+// status change records a UserDeactivated event (triggering a forced
+// logout).
 func (c *UserCommand) Update(ctx context.Context, cmd UpdateUserCmd) error {
 	u, err := c.users.Get(ctx, cmd.UserID)
 	if err != nil {
 		return err
 	}
 
-	// 唯一性：仅在值变化时校验（避免无谓查询）。
+	// Uniqueness: only validate when the value has changed (avoids pointless queries).
 	if u.Username != cmd.Username {
 		exists, err := c.users.UsernameExists(ctx, cmd.Username, u.ID)
 		if err != nil {
 			return err
 		}
 		if exists {
-			return errParam("用户名已存在")
+			return errParam("username already exists")
 		}
 	}
 	if cmd.Mobile != nil && *cmd.Mobile != "" && (u.Mobile == nil || *u.Mobile != *cmd.Mobile) {
@@ -178,7 +191,7 @@ func (c *UserCommand) Update(ctx context.Context, cmd UpdateUserCmd) error {
 			return err
 		}
 		if exists {
-			return errParam("手机号已存在")
+			return errParam("mobile number already exists")
 		}
 	}
 
@@ -207,7 +220,7 @@ func (c *UserCommand) Update(ctx context.Context, cmd UpdateUserCmd) error {
 	})
 }
 
-// ResetPasswordCmd 重置密码命令。
+// ResetPasswordCmd is the reset-password command.
 type ResetPasswordCmd struct {
 	TenantID     int64
 	UserID       int64
@@ -215,10 +228,11 @@ type ResetPasswordCmd struct {
 	HashPassword func(string) (string, error)
 }
 
-// ResetPassword 重置密码。
+// ResetPassword resets a password.
 //
-// 重置后需强制重新登录——由 UserPasswordChanged 事件触发全会话撤销，
-// 领域层不直接调用 auth（保持领域层零基础设施依赖）。
+// A reset forces re-login — the UserPasswordChanged event triggers
+// revocation of all sessions, and the domain layer never calls auth
+// directly (keeping the domain layer free of infrastructure dependencies).
 func (c *UserCommand) ResetPassword(ctx context.Context, cmd ResetPasswordCmd) error {
 	u, err := c.users.Get(ctx, cmd.UserID)
 	if err != nil {
@@ -238,15 +252,15 @@ func (c *UserCommand) ResetPassword(ctx context.Context, cmd ResetPasswordCmd) e
 	})
 }
 
-// DeleteUserCmd 删除用户命令。
+// DeleteUserCmd is the delete-user command.
 type DeleteUserCmd struct {
 	TenantID int64
 	UserID   int64
-	// ActorID 操作者；用于「不能删除自己」的领域校验。
+	// ActorID is the operator; used by the "cannot delete yourself" domain check.
 	ActorID int64
 }
 
-// DeleteUser 软删用户。
+// DeleteUser soft-deletes a user.
 func (c *UserCommand) Delete(ctx context.Context, cmd DeleteUserCmd) error {
 	u, err := c.users.Get(ctx, cmd.UserID)
 	if err != nil {
@@ -263,7 +277,7 @@ func (c *UserCommand) Delete(ctx context.Context, cmd DeleteUserCmd) error {
 	})
 }
 
-// UpdateProfileCmd 修改本人资料命令。
+// UpdateProfileCmd is the update-own-profile command.
 type UpdateProfileCmd struct {
 	TenantID int64
 	UserID   int64
@@ -274,7 +288,7 @@ type UpdateProfileCmd struct {
 	Avatar   string
 }
 
-// UpdateProfile 修改本人资料（不改角色与状态）。
+// UpdateProfile updates the current user's profile (roles and status unchanged).
 func (c *UserCommand) UpdateProfile(ctx context.Context, cmd UpdateProfileCmd) error {
 	u, err := c.users.Get(ctx, cmd.UserID)
 	if err != nil {

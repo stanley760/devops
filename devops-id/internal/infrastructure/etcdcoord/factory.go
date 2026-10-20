@@ -1,6 +1,7 @@
-// Package etcdcoord 组装发号域的 etcd 基础设施：lease 生命周期与 worker
-// 槽位协调由共享库 devops-infra/etcd 提供，本包按 biz_tag 构造 TagInfra
-// 并把全部基础设施错误适配为领域错误。
+// Package etcdcoord assembles the etcd infrastructure for the ID generation domain:
+// lease lifecycle and worker slot coordination are provided by the shared
+// devops-infra/etcd library; this package builds TagInfra per biz_tag and
+// adapts all infrastructure errors into domain errors.
 package etcdcoord
 
 import (
@@ -10,9 +11,9 @@ import (
 	"time"
 )
 
-// NewInfraFactory 返回按 biz_tag 构造领域 TagInfra 的工厂。
-// client 为 nil 时 Lease/Slots 为 nil（领域层走本地模式）；
-// cacheRoot 为空时默认 "data"。
+// NewInfraFactory returns a factory that builds the domain TagInfra per biz_tag.
+// When client is nil, Lease/Slots are nil (the domain layer runs in local mode);
+// when cacheRoot is empty, it defaults to "data".
 func NewInfraFactory(client *etcdinfra.Client, leafName string, leaseTTL time.Duration, cacheRoot string) iddomain.TagInfraFactory {
 	if cacheRoot == "" {
 		cacheRoot = "data"
@@ -28,7 +29,7 @@ func NewInfraFactory(client *etcdinfra.Client, leafName string, leaseTTL time.Du
 	}
 }
 
-// 编译期端口断言：基础设施实现必须满足领域端口。
+// Compile-time port assertions: infrastructure implementations must satisfy the domain ports.
 var (
 	_ iddomain.LeaseLifecycle  = leaseAdapter{}
 	_ iddomain.SlotCoordinator = slotCoordinatorAdapter{}

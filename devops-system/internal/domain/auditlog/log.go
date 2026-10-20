@@ -1,8 +1,9 @@
-// Package auditlog 是审计日志限界上下文：登录日志与操作日志。
+// Package auditlog is the audit log bounded context: login logs and operation logs.
 //
-// 两者都是只追加（append-only）的记录型数据，无聚合间引用、无业务不变量，
-// 因此以「记录」而非「聚合根」建模——这是 DDD 中对简单模型的正确取舍：
-// 不为了形式上的聚合而给日志强加不存在的生命周期。
+// Both are append-only record-shaped data with no cross-aggregate references and no business
+// invariants, so they are modeled as "records" rather than "aggregate roots" — this is the
+// correct trade-off in DDD for simple models: don't force a non-existent lifecycle onto logs
+// just for the sake of a formal aggregate.
 package auditlog
 
 import (
@@ -15,21 +16,21 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/iam"
 )
 
-// 登录结果（与既有 DB 列口径一致）。
+// Login result (consistent with the existing DB column semantics).
 const (
 	LoginResultSuccess int8 = 0
 	LoginResultFailure int8 = 1
 )
 
-// LoginLog 登录日志记录（t_system_login_log）。
+// LoginLog is the login log record (t_system_login_log).
 //
-// 字段名与列名对齐：result（0 成功 1 失败）、code（业务码）。
-// geo_* 四项来自 geo-ip 插件注入的 X-Higress-Geo-* 头。
+// Field names align with column names: result (0 success 1 failure), code (business code).
+// The four geo_* fields come from the X-Higress-Geo-* headers injected by the geo-ip plugin.
 type LoginLog struct {
 	ID       int64
 	TenantID int64
 	Username string
-	// UserID 用户命中后填；未知用户为 0。
+	// UserID is filled once the user is matched; 0 for unknown users.
 	UserID      int64
 	IP          string
 	UserAgent   string
@@ -38,13 +39,13 @@ type LoginLog struct {
 	GeoCity     string
 	GeoISP      string
 	Result      int8
-	// Code 业务码（同 auth_login 指标的 code 标签）。
+	// Code is the business code (same as the code label of the auth_login metric).
 	Code int
-	// CreateTime 即登录发生时间（表无独立 login_time 列，用基类审计时间）。
+	// CreateTime is the login time (the table has no separate login_time column; uses the base audit time).
 	CreateTime time.Time
 }
 
-// LoginLogFilter 登录日志查询条件（列名对齐 t_system_login_log）。
+// LoginLogFilter is the login log query filter (column names aligned with t_system_login_log).
 type LoginLogFilter struct {
 	domain.PageParam
 	Username  string
@@ -54,14 +55,14 @@ type LoginLogFilter struct {
 	EndTime   *string
 }
 
-// OperationLog 操作日志记录（t_system_operation_log）。
+// OperationLog is the operation log record (t_system_operation_log).
 //
-// 字段名与列名对齐：user_name/user_ip/geo_isp（列名带 user/geo 前缀）、
-// request_url/request_method、result（0 成功 1 失败）、code（HTTP 状态码）。
+// Field names align with column names: user_name/user_ip/geo_isp (columns prefixed with user/geo),
+// request_url/request_method, result (0 success 1 failure), code (HTTP status code).
 //
-// 写入路径不在本服务：操作审计由 humakit 审计采集中间件经
-// devops-infra/audit.Sink 落库（保持既有双轨制）。本领域模型仅承载
-// 查询侧读模型与管理端删除/清空。
+// The write path is not in this service: operation auditing is persisted by the humakit
+// audit-collection middleware via devops-infra/audit.Sink (preserving the existing dual-track
+// approach). This domain model only carries the query-side read model and admin delete/clean.
 type OperationLog struct {
 	ID       int64
 	TenantID int64
@@ -70,9 +71,9 @@ type OperationLog struct {
 	UserName string
 	UserType int64
 	Module   string
-	// SubModule 二级模块，如 user。
+	// SubModule is the second-level module, e.g. user.
 	SubModule string
-	// BizID 业务主键，如被改动的用户 ID。
+	// BizID is the business primary key, e.g. the ID of the modified user.
 	BizID         int64
 	Contents      string
 	Extra         string
@@ -89,7 +90,7 @@ type OperationLog struct {
 	CreateTime    time.Time
 }
 
-// OperationLogFilter 操作日志查询条件（列名对齐 t_system_operation_log）。
+// OperationLogFilter is the operation log query filter (column names aligned with t_system_operation_log).
 type OperationLogFilter struct {
 	domain.PageParam
 	Module    string
@@ -101,36 +102,36 @@ type OperationLogFilter struct {
 	EndTime   *string
 }
 
-// LoginLogWriter 登录日志写入端口（写侧）。
+// LoginLogWriter is the login log write port (write side).
 type LoginLogWriter interface {
 	Append(ctx context.Context, l *LoginLog) error
 }
 
-// OperationLogWriter 操作日志写入端口（写侧）。
+// OperationLogWriter is the operation log write port (write side).
 type OperationLogWriter interface {
 	Append(ctx context.Context, l *OperationLog) error
 }
 
-// LoginLogReader 登录日志读端口。
+// LoginLogReader is the login log read port.
 type LoginLogReader interface {
 	List(ctx context.Context, f LoginLogFilter) (domain.PageResult[*LoginLog], error)
-	// DeleteByIDs 物理删除（审计日志清理属物理删，既有实现用 Unscoped）。
+	// DeleteByIDs physically deletes (audit log cleanup is a physical delete; the existing implementation uses Unscoped).
 	DeleteByIDs(ctx context.Context, ids []int64) error
-	// Clean 清空当前租户的登录日志。
+	// Clean clears the login logs of the current tenant.
 	Clean(ctx context.Context) error
 }
 
-// OperationLogReader 操作日志读端口。
+// OperationLogReader is the operation log read port.
 type OperationLogReader interface {
 	List(ctx context.Context, f OperationLogFilter) (domain.PageResult[*OperationLog], error)
 	DeleteByIDs(ctx context.Context, ids []int64) error
 	Clean(ctx context.Context) error
 }
 
-// IDList 解析逗号分隔 ID 字符串为 ID 切片。
+// IDList parses a comma-separated ID string into an ID slice.
 //
-// 改造前 service/login_log.go 与 service/operation_log.go 各有一份逐字相同的
-// parseIDsCSV，现收敛到领域层唯一实现。
+// Before the refactor, service/login_log.go and service/operation_log.go each had a verbatim
+// identical parseIDsCSV; it is now consolidated into a single implementation in the domain layer.
 func IDList(raw string) []int64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -148,7 +149,7 @@ func IDList(raw string) []int64 {
 	return ids
 }
 
-// ClipRunes 按 rune 截断字符串（审计日志字段长度收口，防止超列截断）。
+// ClipRunes truncates a string by rune (single funnel for audit log field lengths, preventing over-column truncation).
 func ClipRunes(s string, max int) string {
 	if max <= 0 {
 		return ""

@@ -1,17 +1,17 @@
-# 构建上下文为仓库根（Dockerfile 只 COPY 被构建的那一个模块），排除无关内容
+# The build context is the repo root (the Dockerfile only COPYs the one module being built); exclude irrelevant content
 .git
 .idea
 .vscode
 .DS_Store
 Thumbs.db
 
-# 运行时产物与本地状态
+# Build artifacts and local state
 **/logs/
 **/data/
 .tools/
 
-# 部署编排文件不参与镜像构建
+# Deployment orchestration files are not part of image builds
 deploy/
 
-# 文档
+# Documentation
 *.md

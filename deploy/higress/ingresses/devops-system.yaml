@@ -5,15 +5,19 @@ metadata:
   namespace: higress-system
   annotations:
     higress.io/destination: devops-system.DEVOPS-GROUP.public.nacos:9999
-    # 流量入口收口已改为 JWT 化：
-    #   - 网关侧：wasmplugins/jwt-auth-2.0.0.yaml 验签 Authorization 头，
-    #     通过 claims_to_headers 覆盖注入 X-Tenant-ID / X-Jwt-Uid 等内部头；
-    #   - 应用侧：devops-infra/security/gateway.Enforce 独立校验 JWT。
+    # Traffic-ingress containment is now JWT-based:
+    #   - Gateway side: wasmplugins/jwt-auth-2.0.0.yaml verifies the Authorization header
+    #     and, via claims_to_headers, overrides and injects internal headers such as
+    #     X-Tenant-ID / X-Jwt-Uid;
+    #   - Application side: devops-infra/security/gateway.Enforce independently verifies the JWT.
     #
-    # 原「注入静态 X-Gateway-Token + 常量时间比较」的机制已移除：该凭据不表达身份、
-    # 无过期、无吊销，泄露即无限重放，且需在 ingress 与配置间维护共享密钥。
-    # 登录/刷新/jwks.json 由 devops-system-public.yaml 承载（匿名），
-    # 靠 Higress 最长前缀匹配绕开 jwt-auth——插件按 Ingress 资源挂载，不支持路径匹配。
+    # The former "inject a static X-Gateway-Token + constant-time comparison" mechanism
+    # has been removed: that credential expressed no identity, had no expiry and no
+    # revocation, leaked = unlimited replay, and required maintaining a shared secret
+    # across the ingress and configs.
+    # login/refresh/jwks.json are served by devops-system-public.yaml (anonymous),
+    # bypassing jwt-auth via Higress longest-prefix matching — the plugin mounts per
+    # Ingress resource and does not support path matching.
   creationTimestamp: "2026-09-28T09:06:38Z"
   labels:
     higress.io/domain_higress-default-domain: "true"
@@ -47,8 +51,8 @@ spec:
     - host: api.devops.local
       http:
         paths:
-          # 只路由业务 API 与 JWKS（Higress jwt-auth 插件拉取验签公钥）。
-          # 运维端点（/metrics /apidoc /healthz /readyz）仅内网访问，禁止经公网网关暴露。
+          # Route only the business API and JWKS (the Higress jwt-auth plugin fetches the verification public key).
+          # Ops endpoints (/metrics /apidoc /healthz /readyz) are internal-only and must not be exposed via the public gateway.
           - path: /system
             pathType: Prefix
             backend:

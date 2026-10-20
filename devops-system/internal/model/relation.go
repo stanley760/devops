@@ -1,24 +1,25 @@
-// 关联表（租户表）：用户-角色、角色-菜单。
-// 复合主键、无独立 ID、不走发号；物理删除（无 deleted_at）——
-// 分配/取消分配是幂等操作，软删会使复合主键无法重建同组合行。
+// Association tables (tenant tables): user-role and role-menu.
+// Composite primary keys, no independent IDs, no ID assignment; physical deletion (no deleted_at) —
+// assigning/unassigning are idempotent operations, and soft deletion would make the composite
+// primary key unable to rebuild rows with the same combination.
 package model
 
-// UserRole 用户-角色关联。
+// UserRole is the user-role association.
 type UserRole struct {
 	TenantID int64 `gorm:"primaryKey"`
 	UserID   int64 `gorm:"primaryKey;index:idx_user_role_user"`
 	RoleID   int64 `gorm:"primaryKey;index:idx_user_role_role"`
 }
 
-// TableName 表名。
+// TableName is the table name.
 func (UserRole) TableName() string { return "t_system_user_role" }
 
-// RoleMenu 角色-菜单关联（菜单全局，但授权按租户的角色发生）。
+// RoleMenu is the role-menu association (menus are global, but authorization happens per-tenant's roles).
 type RoleMenu struct {
 	TenantID int64 `gorm:"primaryKey"`
 	RoleID   int64 `gorm:"primaryKey;index:idx_role_menu_role"`
 	MenuID   int64 `gorm:"primaryKey;index:idx_role_menu_menu"`
 }
 
-// TableName 表名。
+// TableName is the table name.
 func (RoleMenu) TableName() string { return "t_system_role_menu" }

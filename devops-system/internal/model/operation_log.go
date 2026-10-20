@@ -4,32 +4,32 @@ import (
 	commonaudit "github.com/stanley760/devops/devops-common/audit"
 )
 
-// OperationLog 操作审计表（租户表）。
+// OperationLog is the operation audit table (tenant table).
 //
-// 由 humakit 审计采集中间件经 audit.Sink 写入（契约见 devops-common/audit），
-// 列宽与契约常量一一对应；查询/删除/清空走管理端
-// /system/api/v1/operation-logs（system:operationlog:* 权限门控）。
+// Written by the humakit audit-collection middleware via audit.Sink (contract see devops-common/audit);
+// column widths correspond one-to-one to the contract constants; query/delete/clean go through the
+// admin endpoint /system/api/v1/operation-logs (system:operationlog:* permission gated).
 //
-// 与登录审计（LoginLog）的分工：LoginLog 记录"能否登录"这一条认证链路的
-// 尝试与结果；OperationLog 记录"B 端管理操作做了什么"，覆盖用户/角色/菜单/
-// 部门/岗位/租户的写操作。
+// Division of labor with the login audit (LoginLog): LoginLog records the attempts and results of
+// the "can log in" authentication chain; OperationLog records "what the B-side admin operations did",
+// covering write operations on users/roles/menus/depts/posts/tenants.
 type OperationLog struct {
 	BaseTenantModel
 
-	// 链路与操作者
-	TraceID  string               `gorm:"column:trace_id;size:100;not null;default:'';index"` // 链路追踪编号，可与日志/链路系统互查
-	UserID   int64                `gorm:"not null;default:0;index"`                           // 操作者用户编号，未知为 0
-	UserName string               `gorm:"size:30;not null;default:'';index"`                  // 操作者名称（快照，避免改名后无法追溯）
-	UserType commonaudit.UserType `gorm:"not null;default:0"`                                 // 操作者类别：1 会员(C端) / 2 管理员(B端)
+	// trace and operator
+	TraceID  string               `gorm:"column:trace_id;size:100;not null;default:'';index"` // trace ID, cross-checkable with the logging/tracing system
+	UserID   int64                `gorm:"not null;default:0;index"`                           // operator user ID; 0 if unknown
+	UserName string               `gorm:"size:30;not null;default:'';index"`                  // operator name (snapshot, so it stays traceable after a rename)
+	UserType commonaudit.UserType `gorm:"not null;default:0"`                                 // operator category: 1 member (C-side) / 2 admin (B-side)
 
-	// 操作定位
-	Module    string `gorm:"size:50;not null;default:'';index"` // 一级模块，如 system
-	SubModule string `gorm:"size:50;not null;default:'';index"` // 二级模块，如 user
-	BizID     int64  `gorm:"column:biz_id;not null;default:0"`  // 业务主键，如被改动的用户 ID
+	// operation location
+	Module    string `gorm:"size:50;not null;default:'';index"` // first-level module, e.g. system
+	SubModule string `gorm:"size:50;not null;default:'';index"` // second-level module, e.g. user
+	BizID     int64  `gorm:"column:biz_id;not null;default:0"`  // business primary key, e.g. the ID of the modified user
 
-	// 内容与来源
-	Contents      string `gorm:"type:text"`                    // 变更内容摘要；一期通常为空
-	Extra         string `gorm:"type:text"`                    // 扩展信息（JSON），如耗时
+	// content and source
+	Contents      string `gorm:"type:text"`                    // change content summary; usually empty in phase 1
+	Extra         string `gorm:"type:text"`                    // extended info (JSON), e.g. duration
 	RequestMethod string `gorm:"size:16;not null;default:''"`  //
 	RequestURL    string `gorm:"size:255;not null;default:''"` //
 	UserIP        string `gorm:"size:50;not null;default:'';index"`
@@ -39,18 +39,18 @@ type OperationLog struct {
 	GeoCity       string `gorm:"size:64;not null;default:''"`
 	GeoISP        string `gorm:"size:64;not null;default:''"`
 
-	// 结果
-	Result int8 `gorm:"not null;default:0"` // 0 成功 1 失败
-	Code   int  `gorm:"not null;default:0"` // HTTP 状态码，与响应信封一致
+	// result
+	Result int8 `gorm:"not null;default:0"` // 0 success 1 failure
+	Code   int  `gorm:"not null;default:0"` // HTTP status code, consistent with the response envelope
 }
 
-// TableName 表名。
+// TableName is the table name.
 func (OperationLog) TableName() string { return "t_system_operation_log" }
 
-// FromRecord 把审计契约记录映射为本表实体。
+// FromRecord maps an audit contract record to this table's entity.
 //
-// 供 devops-infra/audit 的 GORSink 使用：契约层（devops-common/audit）不
-// 感知 gorm tag 与表结构，落库映射由业务表侧完成。
+// For use by devops-infra/audit's GORSink: the contract layer (devops-common/audit) does not
+// know gorm tags and table structures; the persistence mapping is done on the business table side.
 func FromRecord(rec commonaudit.Record) *OperationLog {
 	return &OperationLog{
 		TenantID:      rec.TenantID,

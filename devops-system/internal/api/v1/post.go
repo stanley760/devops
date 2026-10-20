@@ -1,4 +1,4 @@
-// 岗位管理接口（huma）。
+// Post management endpoints (huma).
 package api
 
 import (
@@ -15,58 +15,58 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// PostHandler 岗位管理接口。
+// PostHandler serves the post management endpoints.
 type PostHandler struct {
 	svc *service.Post
 }
 
-// NewPostHandler 创建 handler。
+// NewPostHandler creates the handler.
 func NewPostHandler(svc *service.Post) *PostHandler { return &PostHandler{svc: svc} }
 
 // ---- Input / Output ----
 
-// PostListInput GET /system/api/v1/posts 查询参数（分页零值走 dao 兜底，分页字段不加 minimum）。
+// PostListInput holds the GET /system/api/v1/posts query parameters (zero pagination values fall back in the dao, so pagination fields carry no minimum).
 type PostListInput struct {
 	domain.PageParam
-	Code   string                   `query:"code" maxLength:"64" doc:"岗位编码"`
-	Name   string                   `query:"name" maxLength:"50" doc:"岗位名称"`
-	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"岗位状态 0:禁用；1:启用"`
+	Code   string                   `query:"code" maxLength:"64" doc:"Post code"`
+	Name   string                   `query:"name" maxLength:"50" doc:"Post name"`
+	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"Post status 0: disabled; 1: enabled"`
 }
 
-// PostListOutput 岗位分页列表信封。
+// PostListOutput is the paginated post list envelope.
 type PostListOutput struct {
 	Body commonResp.BaseResponse[domain.PageResult[types.PostDTO]]
 }
 
-// PostIDInput path 参数。
+// PostIDInput holds the path parameter.
 type PostIDInput struct {
-	ID types.ParamID `path:"id" doc:"岗位id"`
+	ID types.ParamID `path:"id" doc:"Post ID"`
 }
 
-// PostGetOutput 岗位详情信封。
+// PostGetOutput is the post detail envelope.
 type PostGetOutput struct {
 	Body commonResp.BaseResponse[types.PostDTO]
 }
 
-// PostCreateInput POST /system/api/v1/posts。
+// PostCreateInput is POST /system/api/v1/posts.
 type PostCreateInput struct {
 	Body types.PostSaveReq
 }
 
-// PostEmptyOutput 无数据信封（创建/更新/删除）。
+// PostEmptyOutput is the no-data envelope (create/update/delete).
 type PostEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// PostUpdateInput PUT /system/api/v1/posts/{id}。
+// PostUpdateInput is PUT /system/api/v1/posts/{id}.
 type PostUpdateInput struct {
-	ID   types.ParamID `path:"id" doc:"岗位id"`
+	ID   types.ParamID `path:"id" doc:"Post ID"`
 	Body types.PostSaveReq
 }
 
 // ---- Handlers ----
 
-// List GET /system/api/v1/posts。
+// List handles GET /system/api/v1/posts.
 func (h *PostHandler) List(ctx context.Context, in *PostListInput) (*PostListOutput, error) {
 	page, err := h.svc.List(ctx, types.PostPageQuery{
 		PageParam: in.PageParam,
@@ -80,7 +80,7 @@ func (h *PostHandler) List(ctx context.Context, in *PostListInput) (*PostListOut
 	return &PostListOutput{Body: response.OKBody(page)}, nil
 }
 
-// Get GET /system/api/v1/posts/{id}。
+// Get handles GET /system/api/v1/posts/{id}.
 func (h *PostHandler) Get(ctx context.Context, in *PostIDInput) (*PostGetOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -93,7 +93,7 @@ func (h *PostHandler) Get(ctx context.Context, in *PostIDInput) (*PostGetOutput,
 	return &PostGetOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Create POST /system/api/v1/posts（code 创建后不可改）。
+// Create handles POST /system/api/v1/posts (the code cannot be changed after creation).
 func (h *PostHandler) Create(ctx context.Context, in *PostCreateInput) (*PostEmptyOutput, error) {
 	if err := h.svc.Create(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -101,7 +101,7 @@ func (h *PostHandler) Create(ctx context.Context, in *PostCreateInput) (*PostEmp
 	return &PostEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Update PUT /system/api/v1/posts/{id}。
+// Update handles PUT /system/api/v1/posts/{id}.
 func (h *PostHandler) Update(ctx context.Context, in *PostUpdateInput) (*PostEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -113,7 +113,7 @@ func (h *PostHandler) Update(ctx context.Context, in *PostUpdateInput) (*PostEmp
 	return &PostEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Delete DELETE /system/api/v1/posts/{id}。
+// Delete handles DELETE /system/api/v1/posts/{id}.
 func (h *PostHandler) Delete(ctx context.Context, in *PostIDInput) (*PostEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {

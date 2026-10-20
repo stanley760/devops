@@ -1,5 +1,5 @@
--- t_system_post 初始数据：租户 1（default）岗位 1=ceo、2=se、3=ops、4=user。
--- 显式 ID + tenant_id。ON DUPLICATE KEY UPDATE id = id 保证重复执行无副作用。
+-- t_system_post initial data: tenant 1 (default) posts 1=ceo, 2=se, 3=ops, 4=user.
+-- Explicit ID + tenant_id. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_post
     (id, tenant_id, creator, create_time, updater, update_time, code, name, sort, status)
 VALUES

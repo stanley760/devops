@@ -28,9 +28,9 @@ func TestRecovery(t *testing.T) {
 		Msg  string `json:"msg"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("panic 后未返回统一信封: %v, body=%s", err, w.Body.String())
+		t.Fatalf("no unified envelope returned after panic: %v, body=%s", err, w.Body.String())
 	}
-	if body.Code != http.StatusInternalServerError || body.Msg != "服务器内部错误" {
-		t.Fatalf("信封不符合: %s", w.Body.String())
+	if body.Code != http.StatusInternalServerError || body.Msg != "internal server error" {
+		t.Fatalf("envelope mismatch: %s", w.Body.String())
 	}
 }

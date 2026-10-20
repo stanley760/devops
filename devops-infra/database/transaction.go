@@ -1,7 +1,7 @@
-// Package database 定义跨数据库适配器的事务语义。
+// Package database defines transaction semantics across database adapters.
 //
-// 业务层只依赖 Transaction / ExecutorFromContext，不感知 MySQL DSN、
-// 连接池或 GORM Transaction 的参数细节。
+// The business layer depends only on Transaction / ExecutorFromContext, unaware of MySQL DSN,
+// connection pool, or GORM Transaction parameter details.
 package database
 
 import (
@@ -12,20 +12,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// Executor 是可开启事务的数据库执行器。
-// *gorm.DB 天然满足该接口，测试中也可以用自定义 fake 替换。
+// Executor is a database executor that can start transactions.
+// *gorm.DB naturally satisfies this interface; tests can also replace it with a custom fake.
 type Executor interface {
 	Transaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error
 }
 
-// TxFunc 事务函数。fn 收到的 context 已携带当前事务，
-// Repository 通过 ExecutorFromContext 取出并复用同一个事务。
+// TxFunc is a transaction function. The context received by fn already carries the current transaction,
+// which a Repository retrieves via ExecutorFromContext and reuses.
 type TxFunc func(ctx context.Context) error
 
 type txContextKey struct{}
 
-// Transaction 在 executor 上执行 fn，并把事务注入 context。
-// 事务边界由 service 层控制，Repository 不再自行 Begin/Commit/Rollback。
+// Transaction executes fn on the executor and injects the transaction into the context.
+// Transaction boundaries are controlled by the service layer; Repositories no longer Begin/Commit/Rollback on their own.
 func Transaction(ctx context.Context, executor Executor, fn TxFunc) error {
 	if executor == nil {
 		return errors.New("database: executor is nil")
@@ -42,7 +42,7 @@ func Transaction(ctx context.Context, executor Executor, fn TxFunc) error {
 	})
 }
 
-// ExecutorFromContext 取出当前事务；不存在时返回 false。
+// ExecutorFromContext retrieves the current transaction; returns false when absent.
 func ExecutorFromContext(ctx context.Context) (*gorm.DB, bool) {
 	tx, ok := ctx.Value(txContextKey{}).(*gorm.DB)
 	return tx, ok && tx != nil

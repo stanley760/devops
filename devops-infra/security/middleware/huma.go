@@ -1,7 +1,8 @@
-// huma 版认证/鉴权中间件（D2/D7）。
+// Huma-flavored authentication/authorization middleware (D2/D7).
 //
-// 决策在 infra，呈现靠 HumaOptions 回调注入——
-// 默认回调以统一信封（code/msg/data）呈现 401/403/503，业务侧可注入文案定制。
+// Decisions live in infra; presentation is injected via HumaOptions callbacks.
+// The default callbacks render 401/403/503 using the unified envelope
+// (code/msg/data), and business code may inject custom text.
 package middleware
 
 import (
@@ -17,33 +18,36 @@ import (
 	securityjwt "github.com/stanley760/devops/devops-infra/security/jwt"
 )
 
-// ErrNotPlatformAdmin 非平台管理员（供回调区分文案，行为仍为拒绝）。
+// ErrNotPlatformAdmin is returned when the caller is not a platform admin
+// (lets callbacks tailor the message; the behavior is still a rejection).
 var ErrNotPlatformAdmin = errors.New("middleware: not a platform admin")
 
-// claimsContextKey claims 在 context.Context 中的键。
+// claimsContextKey is the context.Context key under which claims are stored.
 type claimsContextKey struct{}
 
-// BearerAuthenticator 框架无关认证决策接口。
-// *Authenticator 与业务门面（如 devops-system 的 auth.Manager）均实现此接口。
+// BearerAuthenticator is the framework-agnostic authentication decision interface.
+// *Authenticator and business facades (e.g. devops-system's auth.Manager) both implement it.
 type BearerAuthenticator interface {
 	Authenticate(ctx context.Context, bearerHeader string) (*securityjwt.Claims, error)
 }
 
-// HumaOptions 错误呈现回调（与 GinOptions 同构）。
+// HumaOptions holds error-presentation callbacks (isomorphic to GinOptions).
 type HumaOptions struct {
 	OnUnauthorized        func(hctx huma.Context, err error)
 	OnForbidden           func(hctx huma.Context, err error)
 	OnInfrastructureError func(hctx huma.Context, err error)
 }
 
-// HumaCurrentClaims 从 context 取认证载荷（HumaAuthenticate 之后可用）。
+// HumaCurrentClaims reads the authenticated claims from the context
+// (available after HumaAuthenticate has run).
 func HumaCurrentClaims(ctx context.Context) *securityjwt.Claims {
 	claims, _ := ctx.Value(claimsContextKey{}).(*securityjwt.Claims)
 	return claims
 }
 
-// HumaAuthenticate huma 认证中间件：Bearer 解析 → token 解析 → 会话态；
-// 通过后 claims 经 huma.WithValue 注入 context。
+// HumaAuthenticate is the huma authentication middleware:
+// Bearer parsing -> token parsing -> session state. On success the claims
+// are injected into the context via huma.WithValue.
 func HumaAuthenticate(authn BearerAuthenticator, opts HumaOptions) func(huma.Context, func(huma.Context)) {
 	opts = withHumaDefaults(opts)
 	return func(hctx huma.Context, next func(huma.Context)) {
@@ -58,13 +62,14 @@ func HumaAuthenticate(authn BearerAuthenticator, opts HumaOptions) func(huma.Con
 			} else {
 				opts.OnUnauthorized(hctx, err)
 			}
-			return // 不调 next 即中断
+			return // not calling next short-circuits the chain
 		}
 		next(huma.WithValue(hctx, claimsContextKey{}, claims))
 	}
 }
 
-// claimsOrReject claims 缺失时已写 401 并返回 false；业务中间件 fail-closed 守卫的公共收口。
+// claimsOrReject returns false when claims are missing (a 401 has already been
+// written); it is the shared entry point for fail-closed guards in business middleware.
 func claimsOrReject(hctx huma.Context, opts HumaOptions) (*securityjwt.Claims, bool) {
 	claims := HumaCurrentClaims(hctx.Context())
 	if claims == nil {
@@ -74,8 +79,8 @@ func claimsOrReject(hctx huma.Context, opts HumaOptions) (*securityjwt.Claims, b
 	return claims, true
 }
 
-// HumaRequirePermission 域内鉴权（uid × tid × perm）。
-// authorizer 未装配（nil）时 fail-closed 拒绝（与 gin 版行为一致）。
+// HumaRequirePermission performs in-domain authorization (uid x tid x perm).
+// When the authorizer is not wired (nil) it fails closed, matching the gin version.
 func HumaRequirePermission(authorizer securityauthz.Authorizer, permission string, opts HumaOptions) func(huma.Context, func(huma.Context)) {
 	opts = withHumaDefaults(opts)
 	return func(hctx huma.Context, next func(huma.Context)) {
@@ -105,8 +110,9 @@ func HumaRequirePermission(authorizer securityauthz.Authorizer, permission strin
 	}
 }
 
-// HumaRequirePlatformPermission 平台管理员鉴权（g2 校验 + dom="*" Enforce）。
-// 非平台管理员与 Enforce 拒绝均走 OnForbidden，以不同错误值区分文案。
+// HumaRequirePlatformPermission performs platform-admin authorization
+// (g2 check + Enforce with dom="*"). Both "not a platform admin" and an
+// Enforce denial go through OnForbidden, distinguished by different error values.
 func HumaRequirePlatformPermission(authorizer securityauthz.Authorizer, permission string, opts HumaOptions) func(huma.Context, func(huma.Context)) {
 	opts = withHumaDefaults(opts)
 	return func(hctx huma.Context, next func(huma.Context)) {
@@ -141,7 +147,9 @@ func HumaRequirePlatformPermission(authorizer securityauthz.Authorizer, permissi
 	}
 }
 
-// withHumaDefaults 默认回调以统一信封呈现（文案为 HTTP 状态短语），避免忘注入回调时返回无 body 的裸状态码。
+// withHumaDefaults renders the unified envelope by default (message is the HTTP
+// status phrase), so a forgotten callback injection does not yield a bare status
+// code with no body.
 func withHumaDefaults(opts HumaOptions) HumaOptions {
 	if opts.OnUnauthorized == nil {
 		opts.OnUnauthorized = func(hctx huma.Context, _ error) {

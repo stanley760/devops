@@ -18,13 +18,13 @@ func TestNormalizeConfig(t *testing.T) {
 		t.Fatalf("normalizeConfig() error = %v", err)
 	}
 	if cfg.Charset != "utf8mb4" || cfg.MaxIdleConns != 2 || cfg.ConnMaxLifetime != time.Hour {
-		t.Fatalf("默认值未生效: %+v", cfg)
+		t.Fatalf("defaults did not take effect: %+v", cfg)
 	}
 }
 
 func TestNormalizeConfigRequiresHost(t *testing.T) {
 	if _, err := normalizeConfig(config.MysqlConfig{}); err == nil {
-		t.Fatal("缺少 host 时应返回错误")
+		t.Fatal("should return an error when host is missing")
 	}
 }
 

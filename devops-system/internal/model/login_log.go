@@ -1,25 +1,25 @@
-// t_system_login_log 登录审计表（租户表）。每次登录尝试（成功与失败）各记一行，
-// 供审计追溯；由 service.Auth.login 的 defer 落库（尽力而为，不影响登录结果；
-// dao.CreateLoginLog 落库前按列宽截断，杜绝超长 UA/Geo 头整行被拒）。
-// 查询/删除/清空走管理端 /system/api/v1/login-logs（system:loginlog:* 权限门控）。
-// 租户校验失败的尝试无租户 ctx（TenantPlugin fail-closed 拒绝落库），
-// 仅在访问日志与 auth_login 指标可见——审计表只覆盖租户已解析的路径。
+// t_system_login_log login audit table (tenant table). One row per login attempt (success and failure alike),
+// for audit tracing; persisted by service.Auth.login's defer (best-effort, does not affect the login result;
+// dao.CreateLoginLog truncates to the column width before persistence, preventing overlong UA/Geo headers from getting the whole row rejected).
+// Query/delete/clean go through the admin endpoint /system/api/v1/login-logs (system:loginlog:* permission gated).
+// Attempts failing tenant validation have no tenant ctx (TenantPlugin fails closed and rejects persistence),
+// visible only in the access log and the auth_login metric — the audit table only covers the tenant-resolved path.
 package model
 
-// LoginLog 登录审计。
+// LoginLog is the login audit.
 type LoginLog struct {
 	BaseTenantModel
-	Username    string `gorm:"size:30;not null;index"`   // 尝试登录的用户名（失败也记录）
-	UserID      int64  `gorm:"not null;default:0;index"` // 用户命中后填；未知用户为 0
-	IP          string `gorm:"size:50;not null;index"`   // 客户端真实 IP（XFF 链 + trusted_proxies 解析）
-	UserAgent   string `gorm:"size:512"`                 // 登录端 UA
-	GeoCountry  string `gorm:"size:64"`                  // 以下四项来自 geo-ip 插件注入的 X-Higress-Geo-* 头
+	Username    string `gorm:"size:30;not null;index"`   // username attempted for login (recorded even on failure)
+	UserID      int64  `gorm:"not null;default:0;index"` // filled once the user is matched; 0 for unknown users
+	IP          string `gorm:"size:50;not null;index"`   // client's real IP (XFF chain + trusted_proxies resolution)
+	UserAgent   string `gorm:"size:512"`                 // login-end UA
+	GeoCountry  string `gorm:"size:64"`                  // the four fields below come from the X-Higress-Geo-* headers injected by the geo-ip plugin
 	GeoProvince string `gorm:"size:64"`
 	GeoCity     string `gorm:"size:64"`
 	GeoIsp      string `gorm:"size:64"`
-	Result      int8   `gorm:"not null;default:0"`   // 0成功 1失败
-	Code        int    `gorm:"not null;default:200"` // 业务码（同 auth_login 指标的 code 标签）
+	Result      int8   `gorm:"not null;default:0"`   // 0 success 1 failure
+	Code        int    `gorm:"not null;default:200"` // business code (same as the code label of the auth_login metric)
 }
 
-// TableName 表名。
+// TableName is the table name.
 func (LoginLog) TableName() string { return "t_system_login_log" }

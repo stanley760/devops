@@ -1,24 +1,24 @@
-# devops-id 发号服务镜像（多阶段构建：静态编译 + alpine 运行时）。
+# devops-id ID generation service image (multi-stage build: static compile + alpine runtime).
 #
-# 构建上下文为仓库根。镜像内以 GOWORK=off 构建：只复制本模块源码，
-# 兄弟模块（devops-infra → devops-common）由 go.mod 的 require 从代理拉取，
-# 与外部使用者的真实拉取路径一致，因此这些版本必须已发布。
+# The build context is the repository root. The image builds with GOWORK=off: only this module's source is copied,
+# and sibling modules (devops-infra -> devops-common) are pulled from the proxy via go.mod requires,
+# matching the real resolution path of external users, so those versions must already be published.
 #   docker build -f devops-id/Dockerfile -t devops-id:dev .
 #
-# 镜像内配置仅为占位（config/config.yaml），实际环境差异通过
-# APP_ENV 合并环境文件覆盖（挂载 devops-id-prod.yaml，见 deploy/）。
+# The in-image config is only a placeholder (config/config.yaml); real environment differences are applied
+# by merging environment files via APP_ENV (mounting devops-id-prod.yaml, see deploy/).
 FROM golang:1.27-alpine AS builder
 
 ARG VERSION=dev
-# 默认走国内代理（与宿主机 go env GOPROXY 一致），海外构建可 --build-arg GOPROXY= 覆盖
+# Uses a domestic proxy by default (matching the host's go env GOPROXY); overseas builds can override with --build-arg GOPROXY=
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
-# 关闭工作区模式：镜像内只存在本模块，兄弟模块按 require 版本从代理解析
+# Disable workspace mode: only this module exists in the image; sibling modules resolve from the proxy at their require versions
 ENV GOWORK=off
 
 WORKDIR /src
 
-# 依赖描述先于源码拷贝，go.sum 不变时命中层缓存
+# Copy dependency descriptors before source so the layer cache hits when go.sum is unchanged
 COPY devops-id/go.mod devops-id/go.sum devops-id/
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY devops-id/ devops-id/
 
-# CGO_ENABLED=0 静态编译；-trimpath 去掉本机路径
+# CGO_ENABLED=0 for a static build; -trimpath removes local paths
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd devops-id && \
@@ -50,11 +50,11 @@ ENV TZ=Asia/Shanghai \
     APP_ENV=prod
 EXPOSE 9990
 
-# gRPC 无 HTTP 端点，容器级健康检查退化为 TCP 探活；
-# K8s 请用原生 grpc 探针（见 deploy/k8s/devops.yaml）
+# gRPC has no HTTP endpoint, so the container-level health check degrades to a TCP probe;
+# on K8s use the native grpc probe (see deploy/k8s/devops.yaml)
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD nc -z 127.0.0.1 9990 || exit 1
 
-# 优雅退出由程序自身处理（revoke lease 立即释放槽位），务必用 exec 形式传信号
+# Graceful shutdown is handled by the program itself (revoking the lease releases the slot immediately); always use exec form so signals are delivered
 ENTRYPOINT ["devops-id"]
 CMD ["server"]

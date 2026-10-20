@@ -13,43 +13,47 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Provider 是三方登录提供方的抽象。
+// Provider is the abstraction of a third-party login provider.
 type Provider interface {
-	// Name 提供方标识。
+	// Name is the provider identifier.
 	Name() string
-	// AuthCodeURL 生成授权跳转地址（含 state）。
+	// AuthCodeURL generates the authorize redirect URL (including state).
 	AuthCodeURL(state string) string
-	// Exchange 用授权码换 token，再拉取用户信息。
+	// Exchange exchanges the authorization code for a token, then fetches user
+	// info.
 	//
-	// ctx 应带 oauth2.HTTPClient（本包已设置），否则走默认客户端。
+	// ctx should carry oauth2.HTTPClient (already set by this package);
+	// otherwise the default client is used.
 	Exchange(ctx context.Context, code string) (*UserInfo, string, string, error)
-	// Enabled 该提供方是否可用（凭据齐备）。
+	// Enabled reports whether the provider is usable (credentials complete).
 	Enabled() bool
 }
 
-// httpClient 三方交互用的 HTTP 客户端。
+// httpClient is the HTTP client for third-party interactions.
 //
-// 显式设超时：http.DefaultClient 无超时，对端卡住会把请求挂死，
-// 登录链路上的挂起会累积成雪崩。
+// The timeout is set explicitly: http.DefaultClient has no timeout, so a stuck
+// peer would hang requests, and hangs on the login path accumulate into an
+// avalanche.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// oauthCtx 附加 oauth2 库所需的 HTTP 客户端。
+// oauthCtx attaches the HTTP client required by the oauth2 library.
 //
-// 不能设 oauth2.HTTPClient 包级变量（那是 context key 类型，非客户端），
-// 只能在调Exchange 时用 context 传入。
+// The oauth2.HTTPClient package-level variable cannot be set (it is a context
+// key type, not a client); it can only be passed via context when calling
+// Exchange.
 func oauthCtx(ctx context.Context) context.Context {
 	return context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 }
 
 // ---------------------------------------------------------------- GitHub
 
-// GitHubProvider GitHub OAuth（不实现 OIDC，无 id_token）。
+// GitHubProvider is GitHub OAuth (no OIDC, no id_token).
 type GitHubProvider struct {
 	cfg    oauth2.Config
-	apiURL string // 便于测试注入 mock
+	apiURL string // for injecting a mock in tests
 }
 
-// NewGitHubProvider 构造 GitHub provider。
+// NewGitHubProvider constructs a GitHub provider.
 func NewGitHubProvider(cfg Config) *GitHubProvider {
 	return &GitHubProvider{
 		cfg: oauth2.Config{
@@ -66,18 +70,18 @@ func NewGitHubProvider(cfg Config) *GitHubProvider {
 	}
 }
 
-// Name 实现 Provider。
+// Name implements Provider.
 func (p *GitHubProvider) Name() string { return "github" }
 
-// Enabled 实现 Provider。
+// Enabled implements Provider.
 func (p *GitHubProvider) Enabled() bool {
 	return p.cfg.ClientID != "" && p.cfg.ClientSecret != "" && p.cfg.RedirectURL != ""
 }
 
-// AuthCodeURL 实现 Provider。
+// AuthCodeURL implements Provider.
 func (p *GitHubProvider) AuthCodeURL(state string) string { return p.cfg.AuthCodeURL(state) }
 
-// githubUser 是 GitHub /user 响应。
+// githubUser is the GitHub /user response.
 type githubUser struct {
 	ID        int64  `json:"id"`
 	Login     string `json:"login"`
@@ -86,17 +90,18 @@ type githubUser struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-// Exchange 实现 Provider：换 token 后调 /user 拉信息。
+// Exchange implements Provider: exchanges the token then calls /user to fetch
+// info.
 func (p *GitHubProvider) Exchange(ctx context.Context, code string) (*UserInfo, string, string, error) {
 	tok, err := p.cfg.Exchange(oauthCtx(ctx), code)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("%w: github token 交换失败", ErrExchangeFailed)
+		return nil, "", "", fmt.Errorf("%w: github token exchange failed", ErrExchangeFailed)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.apiURL+"/user", nil)
 	if err != nil {
 		return nil, "", "", err
 	}
-	// GitHub 的 API 是 Bearer 认证。
+	// GitHub's API uses Bearer authentication.
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "devops-user")
@@ -107,7 +112,7 @@ func (p *GitHubProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", "", fmt.Errorf("%w: github /user 返回 %d", ErrExchangeFailed, resp.StatusCode)
+		return nil, "", "", fmt.Errorf("%w: github /user returned %d", ErrExchangeFailed, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -115,33 +120,34 @@ func (p *GitHubProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 	}
 	var gu githubUser
 	if err := json.Unmarshal(body, &gu); err != nil {
-		return nil, "", "", fmt.Errorf("解析 github 用户信息失败: %w", err)
+		return nil, "", "", fmt.Errorf("failed to parse github user info: %w", err)
 	}
 	if gu.ID == 0 {
-		return nil, "", "", fmt.Errorf("%w: github 未返回用户 id", ErrExchangeFailed)
+		return nil, "", "", fmt.Errorf("%w: github did not return a user id", ErrExchangeFailed)
 	}
 	nickname := gu.Name
 	if nickname == "" {
 		nickname = gu.Login
 	}
 	return &UserInfo{
-		// GitHub 的数字 ID 是稳定标识；**不可用 login**（可改名）。
+		// GitHub's numeric ID is a stable identifier; **do not use login**
+		// (it can be renamed).
 		ProviderUserID: fmt.Sprintf("%d", gu.ID),
 		Nickname:       nickname,
-		Email:          gu.Email, // 可能为公开邮箱，未经验证
+		Email:          gu.Email, // may be a public email, unverified
 		AvatarURL:      gu.AvatarURL,
 	}, tok.AccessToken, tok.RefreshToken, nil
 }
 
 // ---------------------------------------------------------------- Google
 
-// GoogleProvider Google OAuth 2.0（OIDC）。
+// GoogleProvider is Google OAuth 2.0 (OIDC).
 type GoogleProvider struct {
 	cfg       oauth2.Config
-	verifyURL string // 便于测试注入 mock
+	verifyURL string // for injecting a mock in tests
 }
 
-// NewGoogleProvider 构造 Google provider。
+// NewGoogleProvider constructs a Google provider.
 func NewGoogleProvider(cfg Config) *GoogleProvider {
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
@@ -166,29 +172,31 @@ func NewGoogleProvider(cfg Config) *GoogleProvider {
 	}
 }
 
-// Name 实现 Provider。
+// Name implements Provider.
 func (p *GoogleProvider) Name() string { return "google" }
 
-// Enabled 实现 Provider。
+// Enabled implements Provider.
 func (p *GoogleProvider) Enabled() bool {
 	return p.cfg.ClientID != "" && p.cfg.ClientSecret != "" && p.cfg.RedirectURL != ""
 }
 
-// AuthCodeURL 实现 Provider。
+// AuthCodeURL implements Provider.
 func (p *GoogleProvider) AuthCodeURL(state string) string { return p.cfg.AuthCodeURL(state) }
 
-// Exchange 实现 Provider。
+// Exchange implements Provider.
 //
-// ⚠️ **id_token 必须验签**：Google 的 id_token 是 JWT，但 decode 后不能直接信。
-// 这里调tokeninfo 端点校验（等价验签 + 校验 iss/aud/exp），比本地验签更简单
-// 且不易漏校验项（nonce、azp 等）。
+// ⚠️ **id_token must be verified**: Google's id_token is a JWT, but it cannot
+// be trusted just by decoding it. Here the tokeninfo endpoint is called to
+// verify it (equivalent to signature verification + iss/aud/exp checks), which
+// is simpler than local verification and less likely to miss checks (nonce,
+// azp, etc.).
 func (p *GoogleProvider) Exchange(ctx context.Context, code string) (*UserInfo, string, string, error) {
 	tok, err := p.cfg.Exchange(oauthCtx(ctx), code)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("%w: google token 交换失败", ErrExchangeFailed)
+		return nil, "", "", fmt.Errorf("%w: google token exchange failed", ErrExchangeFailed)
 	}
 	if tok.AccessToken == "" || !strings.HasPrefix(tok.TokenType, "Bearer") && tok.TokenType == "" {
-		return nil, "", "", fmt.Errorf("%w: google 未返回 access token", ErrExchangeFailed)
+		return nil, "", "", fmt.Errorf("%w: google did not return an access token", ErrExchangeFailed)
 	}
 	info, err := p.verifyIDToken(ctx, tok.AccessToken)
 	if err != nil {
@@ -197,18 +205,18 @@ func (p *GoogleProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 	return info, tok.AccessToken, tok.RefreshToken, nil
 }
 
-// googleTokenInfo 是 tokeninfo 响应。
+// googleTokenInfo is the tokeninfo response.
 type googleTokenInfo struct {
 	Sub           string `json:"sub"`
 	Email         string `json:"email"`
-	EmailVerified any    `json:"email_verified"` // 可能是 bool 或 string
+	EmailVerified any    `json:"email_verified"` // may be bool or string
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
 	Aud           string `json:"aud"`
 	Iss           string `json:"iss"`
 }
 
-// verifyIDToken 校验并解析 id_token（经 tokeninfo 端点）。
+// verifyIDToken verifies and parses the id_token (via the tokeninfo endpoint).
 func (p *GoogleProvider) verifyIDToken(ctx context.Context, accessToken string) (*UserInfo, error) {
 	url := p.verifyURL + "?access_token=" + accessToken
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -221,7 +229,7 @@ func (p *GoogleProvider) verifyIDToken(ctx context.Context, accessToken string) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: google tokeninfo 返回 %d", ErrExchangeFailed, resp.StatusCode)
+		return nil, fmt.Errorf("%w: google tokeninfo returned %d", ErrExchangeFailed, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -229,62 +237,73 @@ func (p *GoogleProvider) verifyIDToken(ctx context.Context, accessToken string) 
 	}
 	var ti googleTokenInfo
 	if err := json.Unmarshal(body, &ti); err != nil {
-		return nil, fmt.Errorf("解析 google tokeninfo 失败: %w", err)
+		return nil, fmt.Errorf("failed to parse google tokeninfo: %w", err)
 	}
 	if ti.Sub == "" {
-		return nil, fmt.Errorf("%w: google id_token 缺少 sub", ErrExchangeFailed)
+		return nil, fmt.Errorf("%w: google id_token is missing sub", ErrExchangeFailed)
 	}
-	// aud 必须是本应用的 client_id，否则是「拿别处的 token 来冒用」。
+	// aud must be this app's client_id, otherwise it is "using someone else's
+	// token to impersonate".
 	if p.cfg.ClientID != "" && ti.Aud != "" && ti.Aud != p.cfg.ClientID {
-		return nil, fmt.Errorf("%w: google aud 不匹配", ErrExchangeFailed)
+		return nil, fmt.Errorf("%w: google aud mismatch", ErrExchangeFailed)
 	}
-	// iss 必须是 Google。
+	// iss must be Google.
 	if ti.Iss != "" && !strings.HasPrefix(ti.Iss, "https://accounts.google.com") {
-		return nil, fmt.Errorf("%w: google iss 非法", ErrExchangeFailed)
+		return nil, fmt.Errorf("%w: google iss is invalid", ErrExchangeFailed)
 	}
 	return &UserInfo{
-		ProviderUserID: ti.Sub, // sub 是 OIDC 稳定标识
+		ProviderUserID: ti.Sub, // sub is the OIDC stable identifier
 		Nickname:       ti.Name,
 		Email:          ti.Email,
 		AvatarURL:      ti.Picture,
 	}, nil
 }
 
-// ---------------------------------------------------------------- 微信
+// ---------------------------------------------------------------- WeChat
 
-// WeChatProvider 微信开放平台「网站应用」扫码登录。
+// WeChatProvider is WeChat Open Platform "Website App" QR code login.
 //
-// 文档：https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Wechat_Login.html
+// Docs: https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Wechat_Login.html
 //
-// ## 与 GitHub / Google 的四点关键差异（照抄标准库必踩）
+// ## Four key differences from GitHub / Google (copying the standard library
+// blindly will trip on these)
 //
-//  1. **授权端点不是标准 OAuth2 端点**：是 `open.weixin.qq.com/connect/qrconnect`，
-//     且 URL 末尾必须带 `#wechat_redirect` fragment——**没有它微信直接报「链接无法访问」**。
-//     `x/oauth2` 的 `Config.AuthCodeURL()` 生成不出这个 fragment，故本provider 手写 URL。
-//  2. **`redirect_uri` 必须 urlEncode**：微信要求对整个回调地址编码。
-//     而 `url.Values.Encode()` 会把 `%` 编码成 `%25`，导致双重编码。必须手工拼接。
-//  3. **scope 固定 `snsapi_login`**：其他值（如 `snsapi_base`）会直接拒绝，
-//     且 scope 在开放平台后台申请后不可改。
-//  4. **无 id_token、无签名可验**：身份凭据是 `access_token + openid`。
-//     安全性来自「code 一次性 + 10 分钟过期」+ 全程 HTTPS，
-//     故必须**校验返回的 openid 非空**，不能因缺字段而放行。
+//  1. **The authorize endpoint is not a standard OAuth2 endpoint**: it is
+//     `open.weixin.qq.com/connect/qrconnect`, and the URL must end with the
+//     `#wechat_redirect` fragment — **without it WeChat directly reports "the
+//     link cannot be accessed"**. `x/oauth2`'s `Config.AuthCodeURL()` cannot
+//     generate that fragment, so this provider writes the URL by hand.
+//  2. **`redirect_uri` must be urlEncoded**: WeChat requires the entire
+//     callback address to be encoded. `url.Values.Encode()` would encode `%`
+//     into `%25`, causing double encoding. It must be assembled manually.
+//  3. **scope is fixed to `snsapi_login`**: other values (e.g. `snsapi_base`)
+//     are rejected outright, and scope cannot be changed after being requested
+//     in the Open Platform console.
+//  4. **No id_token, nothing to verify with a signature**: the identity
+//     credential is `access_token + openid`. Security comes from "one-time
+//     code + 10-minute expiry" + HTTPS throughout, so the returned **openid
+//     must be verified non-empty** and must not be allowed through just
+//     because a field is missing.
 //
-// ## 绑定键的选择：unionid 优先，openid 兜底
+// ## Binding key choice: unionid first, openid as fallback
 //
-// openid 对「当前开放平台账号」唯一，unionid 在**同一开放平台账号下的所有应用**
-// （网站应用/公众号/移动应用）唯一。用 unionid 作绑定键可跨应用识别同一用户；
-// 未绑定开放平台账号时 unionid 可能为空，此时退回 openid。
+// openid is unique per "the current Open Platform account", while unionid is
+// unique across **all apps under the same Open Platform account** (website app
+// / official account / mobile app). Using unionid as the binding key
+// identifies the same user across apps; when the Open Platform account is not
+// linked, unionid may be empty, in which case fall back to openid.
 type WeChatProvider struct {
 	clientID     string
 	clientSecret string
 	redirectURL  string
-	// apiBase 便于测试注入 mock。
+	// apiBase is for injecting a mock in tests.
 	apiBase string
 }
 
-// NewWeChatProvider 构造微信 provider。
+// NewWeChatProvider constructs a WeChat provider.
 func NewWeChatProvider(cfg Config) *WeChatProvider {
-	// 微信网站应用的 scope 只有一个合法值，不接受自定义。
+	// The WeChat website app's scope has only one legal value and does not
+	// accept customization.
 	_ = cfg.Scopes
 	return &WeChatProvider{
 		clientID:     cfg.ClientID,
@@ -294,35 +313,40 @@ func NewWeChatProvider(cfg Config) *WeChatProvider {
 	}
 }
 
-// Name 实现 Provider。
+// Name implements Provider.
 func (p *WeChatProvider) Name() string { return "wechat" }
 
-// Enabled 实现 Provider。
+// Enabled implements Provider.
 func (p *WeChatProvider) Enabled() bool {
 	return p.clientID != "" && p.clientSecret != "" && p.redirectURL != ""
 }
 
-// AuthCodeURL 实现 Provider。
+// AuthCodeURL implements Provider.
 //
-// 手工拼 URL 而不用 url.Values.Encode()：微信要求 redirect_uri 只编码一层，
-// 而 Encode() 会把已编码的 % 再编码成 %25（双重编码，导致微信解析出错误的回调地址）。
+// The URL is assembled by hand instead of using url.Values.Encode(): WeChat
+// requires redirect_uri to be encoded only once, while Encode() re-encodes the
+// already-encoded % into %25 (double encoding, causing WeChat to parse an
+// incorrect callback address).
 func (p *WeChatProvider) AuthCodeURL(state string) string {
-	// ⚠️ redirect_uri 必须 urlEncode（含协议、端口、路径）。
+	// ⚠️ redirect_uri must be urlEncoded (including protocol, port, and path).
 	return "https://open.weixin.qq.com/connect/qrconnect" +
 		"?appid=" + url.QueryEscape(p.clientID) +
 		"&redirect_uri=" + url.QueryEscape(p.redirectURL) +
 		"&response_type=code" +
-		// 网页应用目前仅支持 snsapi_login，填其他值会被微信拒。
+		// Web apps currently only support snsapi_login; other values are
+		// rejected by WeChat.
 		"&scope=snsapi_login" +
 		"&state=" + url.QueryEscape(state) +
-		// ⚠️ 必须以 #wechat_redirect 结尾，否则微信提示「该链接无法访问」。
+		// ⚠️ It must end with #wechat_redirect, otherwise WeChat shows "this
+		// link cannot be accessed".
 		"#wechat_redirect"
 }
 
-// wechatTokenResp 是 /sns/oauth2/access_token 的响应。
+// wechatTokenResp is the /sns/oauth2/access_token response.
 //
-// ⚠️ 微信所有接口**出错时也返回 HTTP 200**，错误在 body 的 errcode 里。
-// 只判 HTTP 状态码会把失败当成功，必须显式判errcode。
+// ⚠️ **All WeChat endpoints return HTTP 200 even on error**; the error is in
+// the body's errcode. Checking only the HTTP status code would treat failures
+// as successes, so errcode must be checked explicitly.
 type wechatTokenResp struct {
 	AccessToken  string `json:"access_token"`
 	ExpiresIn    int64  `json:"expires_in"`
@@ -334,9 +358,10 @@ type wechatTokenResp struct {
 	ErrMsg       string `json:"errmsg"`
 }
 
-// wechatUserInfo 是 /sns/userinfo 的响应。
+// wechatUserInfo is the /sns/userinfo response.
 //
-// ⚠️ 2021-10-20 起微信不再返回 sex / province / city / country，故此处不含这些字段。
+// ⚠️ Since 2021-10-20 WeChat no longer returns sex / province / city /
+// country, so these fields are not included here.
 type wechatUserInfo struct {
 	OpenID     string   `json:"openid"`
 	Nickname   string   `json:"nickname"`
@@ -347,7 +372,7 @@ type wechatUserInfo struct {
 	ErrMsg     string   `json:"errmsg"`
 }
 
-// Exchange 实现 Provider：换 access_token → 拉用户信息。
+// Exchange implements Provider: exchanges access_token → fetches user info.
 func (p *WeChatProvider) Exchange(ctx context.Context, code string) (*UserInfo, string, string, error) {
 	tr, err := p.fetchToken(ctx, code)
 	if err != nil {
@@ -357,10 +382,13 @@ func (p *WeChatProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 	if err != nil {
 		return nil, "", "", err
 	}
-	// 绑定键：unionid 优先（跨应用稳定），缺失时退回 openid。
+	// Binding key: unionid first (stable across apps), falling back to openid
+	// when absent.
 	//
-	// ⚠️ 两者都空说明微信返回异常响应，必须拒绝——否则会写入空绑定键，
-	// 使所有「微信未返回标识」的账号互相错绑。
+	// ⚠️ Both being empty means WeChat returned an abnormal response and must
+	// be rejected — otherwise an empty binding key would be written, causing
+	// all "WeChat returned no identifier" accounts to be misbound to each
+	// other.
 	providerUserID := info.UnionID
 	if providerUserID == "" {
 		providerUserID = tr.UnionID
@@ -369,7 +397,7 @@ func (p *WeChatProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 		providerUserID = tr.OpenID
 	}
 	if providerUserID == "" {
-		return nil, "", "", fmt.Errorf("%w: 微信未返回 openid/unionid", ErrExchangeFailed)
+		return nil, "", "", fmt.Errorf("%w: wechat did not return openid/unionid", ErrExchangeFailed)
 	}
 	if info.OpenID == "" {
 		info.OpenID = tr.OpenID
@@ -377,15 +405,17 @@ func (p *WeChatProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 	return &UserInfo{
 		ProviderUserID: providerUserID,
 		Nickname:       info.Nickname,
-		//⚠️ 微信接口**不返回邮箱**（且不允许索取），故 Email 恒为空。
-		// 这意味着「邮箱找回密码」对纯微信用户不可用，需另设绑定手机号/邮箱流程。
+		//⚠️ **WeChat APIs do not return an email** (and it cannot be
+		// requested), so Email is always empty. This means "password recovery
+		// by email" is unavailable for pure WeChat users; a separate
+		// mobile/email binding flow is needed.
 		AvatarURL: p.normalizeAvatar(info.HeadImgURL),
 	}, tr.AccessToken, tr.RefreshToken, nil
 }
 
-// fetchToken 用 code 换 access_token。
+// fetchToken exchanges the code for an access_token.
 //
-// 接口：GET /sns/oauth2/access_token
+// Endpoint: GET /sns/oauth2/access_token
 //
 //	?appid=&secret=&code=&grant_type=authorization_code
 func (p *WeChatProvider) fetchToken(ctx context.Context, code string) (*wechatTokenResp, error) {
@@ -396,27 +426,29 @@ func (p *WeChatProvider) fetchToken(ctx context.Context, code string) (*wechatTo
 	q.Set("grant_type", "authorization_code")
 	body, err := p.getJSON(ctx, p.apiBase+"/sns/oauth2/access_token?"+q.Encode())
 	if err != nil {
-		return nil, fmt.Errorf("%w: 微信 token 交换请求失败: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: wechat token exchange request failed: %v", ErrExchangeFailed, err)
 	}
 	var tr wechatTokenResp
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: 解析微信 token 响应失败: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: failed to parse wechat token response: %v", ErrExchangeFailed, err)
 	}
-	// 微信错误也返回 200，必须显式判 errcode。常见：
-	//   40029 invalid code（code 过期/已用/不属于本appid）
+	// WeChat errors also return 200, so errcode must be checked explicitly.
+	// Common ones:
+	//   40029 invalid code (code expired/already used/does not belong to this
+	//   appid)
 	//   40013 invalid appid   40125 invalid appsecret
 	if tr.ErrCode != 0 {
-		return nil, fmt.Errorf("%w: 微信返回 errcode=%d errmsg=%s", ErrExchangeFailed, tr.ErrCode, tr.ErrMsg)
+		return nil, fmt.Errorf("%w: wechat returned errcode=%d errmsg=%s", ErrExchangeFailed, tr.ErrCode, tr.ErrMsg)
 	}
 	if tr.AccessToken == "" {
-		return nil, fmt.Errorf("%w: 微信未返回 access_token", ErrExchangeFailed)
+		return nil, fmt.Errorf("%w: wechat did not return access_token", ErrExchangeFailed)
 	}
 	return &tr, nil
 }
 
-// fetchUserInfo 拉取用户基本信息。
+// fetchUserInfo fetches basic user info.
 //
-// 接口：GET /sns/userinfo?access_token=&openid=
+// Endpoint: GET /sns/userinfo?access_token=&openid=
 func (p *WeChatProvider) fetchUserInfo(ctx context.Context, accessToken, openID string) (*wechatUserInfo, error) {
 	q := url.Values{}
 	q.Set("access_token", accessToken)
@@ -424,20 +456,20 @@ func (p *WeChatProvider) fetchUserInfo(ctx context.Context, accessToken, openID 
 	q.Set("lang", "zh_CN")
 	body, err := p.getJSON(ctx, p.apiBase+"/sns/userinfo?"+q.Encode())
 	if err != nil {
-		return nil, fmt.Errorf("%w: 微信用户信息请求失败: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: wechat user info request failed: %v", ErrExchangeFailed, err)
 	}
 	var ui wechatUserInfo
 	if err := json.Unmarshal(body, &ui); err != nil {
-		return nil, fmt.Errorf("%w: 解析微信用户信息失败: %v", ErrExchangeFailed, err)
+		return nil, fmt.Errorf("%w: failed to parse wechat user info: %v", ErrExchangeFailed, err)
 	}
-	// 40003 invalid openid / 42001 access_token 超时
+	// 40003 invalid openid / 42001 access_token expired
 	if ui.ErrCode != 0 {
-		return nil, fmt.Errorf("%w: 微信用户信息 errcode=%d errmsg=%s", ErrExchangeFailed, ui.ErrCode, ui.ErrMsg)
+		return nil, fmt.Errorf("%w: wechat user info errcode=%d errmsg=%s", ErrExchangeFailed, ui.ErrCode, ui.ErrMsg)
 	}
 	return &ui, nil
 }
 
-// getJSON 发起 GET 并读取响应体。
+// getJSON issues a GET and reads the response body.
 func (p *WeChatProvider) getJSON(ctx context.Context, rawURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -455,18 +487,22 @@ func (p *WeChatProvider) getJSON(ctx context.Context, rawURL string) ([]byte, er
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
-// normalizeAvatar 规整头像 URL。
+// normalizeAvatar normalizes the avatar URL.
 //
-// 微信头像 URL 末尾的 `/0` 表示 640×640，`/46`~`/132` 是小图。
-// 统一取 `/0` 拿原图，且去掉协议前缀带来的 http/https 混用问题。
+// A trailing `/0` on a WeChat avatar URL means 640×640, while `/46`~`/132`
+// are thumbnails. `/0` is uniformly used to get the original image, avoiding
+// the http/https mixing caused by the protocol prefix.
 //
-// ⚠️ **微信头像 URL 在用户改头像后即失效**。故它只能作为「展示快照」，
-// 重要场景须把图片转存到自己存储（本项目当前未做，见 model/oauth.go 的 AvatarURL 注释）。
+// ⚠️ **WeChat avatar URLs stop working once the user changes their avatar**.
+// So it can only serve as a "display snapshot"; important scenarios must
+// re-host the image in their own storage (not currently done in this project;
+// see the AvatarURL comment in model/oauth.go).
 func (p *WeChatProvider) normalizeAvatar(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	// 去掉末尾的尺寸段（形如 .../0 或 .../96），再补 /0 取原图。
+	// Strip the trailing size segment (like .../0 or .../96), then append /0
+	// for the original image.
 	if i := strings.LastIndex(raw, "/"); i > 0 {
 		last := raw[i+1:]
 		switch last {
@@ -477,7 +513,7 @@ func (p *WeChatProvider) normalizeAvatar(raw string) string {
 	return raw + "/0"
 }
 
-// errNotImplemented 未实现占位错误。
+// errNotImplemented is a placeholder error for unimplemented behavior.
 type errNotImplemented string
 
 func (e errNotImplemented) Error() string { return string(e) }

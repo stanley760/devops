@@ -1,5 +1,5 @@
--- t_system_post 岗位表（租户表）。
--- 复合唯一索引 uk_tenant_code(tenant_id,code) 内联声明。
+-- t_system_post post table (tenant table).
+-- The composite unique index uk_tenant_code(tenant_id,code) is declared inline.
 CREATE TABLE IF NOT EXISTS t_system_post (
     id          BIGINT       NOT NULL,
     creator     VARCHAR(64)  NULL,

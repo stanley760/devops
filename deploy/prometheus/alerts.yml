@@ -1,15 +1,15 @@
-# Prometheus 告警规则（dev compose 内挂载为 /etc/prometheus/alerts.yml）。
-# 规则在 Prometheus 侧评估，命中后经 Alertmanager 路由（dev 无外部集成，
-# 仅在 Alertmanager UI http://localhost:9093 可见；生产把 dev-sink 换成
-# 钉钉/企业微信/邮件 webhook 即可）。
+# Prometheus alert rules (mounted at /etc/prometheus/alerts.yml in the dev compose stack).
+# Rules are evaluated on the Prometheus side; fired alerts are routed via Alertmanager
+# (dev has no external integration, so they are only visible in the Alertmanager UI
+# at http://localhost:9093; in prod, swap dev-sink for a DingTalk/WeCom/email webhook).
 #
-# 阈值为 dev 起步值，生产按 SLO 调整。指标名与 dashboard 同源：
-#   http_server_requests_total     业务 HTTP RED（otelgin 自定义埋点）
-#   rpc_client_call_duration_seconds   gRPC client（otelgrpc stats handler，devops-system/devops-user → devops-id）
-#   go_sql_*                       MySQL 连接池（client_golang DBStatsCollector）
-#   db_client_connections_*        Redis 连接池（redisotel）
-#   auth_login_total/auth_register_total  认证业务指标（service 层 OTel counter）
-# HTTP/认证规则按 service_name 分组告警，devops-system 与 devops-user 各自独立触发。
+# Thresholds are dev starting values — tune per SLO in prod. Metric names match the dashboard:
+#   http_server_requests_total     business HTTP RED (otelgin custom instrumentation)
+#   rpc_client_call_duration_seconds   gRPC client (otelgrpc stats handler, devops-system/devops-user → devops-id)
+#   go_sql_*                       MySQL connection pool (client_golang DBStatsCollector)
+#   db_client_connections_*        Redis connection pool (redisotel)
+#   auth_login_total/auth_register_total  auth business metrics (service-layer OTel counter)
+# HTTP/auth rules are grouped by service_name; devops-system and devops-user fire independently.
 groups:
   - name: devops-availability
     rules:
@@ -19,8 +19,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "抓取目标失联 {{ $labels.instance }}"
-          description: "Prometheus 连续 1 分钟无法抓取 {{ $labels.instance }} 的 /metrics，服务可能下线或网络不通。"
+          summary: "Scrape target down {{ $labels.instance }}"
+          description: "Prometheus has failed to scrape /metrics on {{ $labels.instance }} for 1 minute; the service may be down or unreachable."
 
   - name: devops-service-slo
     rules:
@@ -33,8 +33,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "HTTP 5xx 错误率超 1%（{{ $labels.service_name }}）"
-          description: "{{ $labels.service_name }} 5xx 占比持续 5 分钟超过 1%（当前 {{ $value | humanizePercentage }}）。"
+          summary: "HTTP 5xx error rate above 1% ({{ $labels.service_name }})"
+          description: "{{ $labels.service_name }} 5xx share has exceeded 1% for 5 minutes (currently {{ $value | humanizePercentage }})."
 
       - alert: DevOpsHTTPP99High
         expr: |
@@ -45,8 +45,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "HTTP P99 延迟超 1s（{{ $labels.service_name }} {{ $labels.route }}）"
-          description: "{{ $labels.service_name }} 路由 {{ $labels.route }} 的 P99 延迟 {{ $value | humanize }} 持续 5 分钟超过 1s。"
+          summary: "HTTP P99 latency above 1s ({{ $labels.service_name }} {{ $labels.route }})"
+          description: "P99 latency for route {{ $labels.route }} on {{ $labels.service_name }} has been above 1s ({{ $value | humanize }}) for 5 minutes."
 
       - alert: DevOpsGRPCClientErrorRateHigh
         expr: |
@@ -59,8 +59,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "gRPC 客户端错误率超 5%"
-          description: "调用 devops-id 的非 OK 状态占比持续 5 分钟超过 5%，发号缓冲正在被同步重试拖慢。"
+          summary: "gRPC client error rate above 5%"
+          description: "Share of non-OK statuses on calls to devops-id has exceeded 5% for 5 minutes; the ID-generation buffer is being slowed by synchronous retries."
 
   - name: devops-dependencies-use
     rules:
@@ -70,8 +70,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "SQL 连接池等待（{{ $labels.db_name }}）"
-          description: "连接池出现等待（{{ $value }}/s），MaxOpenConns 不足或慢查询拖住连接。"
+          summary: "SQL connection pool waiting ({{ $labels.db_name }})"
+          description: "Connection pool is waiting ({{ $value }}/s): MaxOpenConns may be too small, or slow queries are holding connections."
 
       - alert: DevOpsRedisPoolWaiting
         expr: sum by (pool_name) (rate(db_client_connections_waits[5m])) > 0
@@ -79,8 +79,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Redis 连接池等待（{{ $labels.pool_name }}）"
-          description: "Redis 连接池出现等待 {{ $value }}/s，PoolSize 不足或慢命令阻塞。"
+          summary: "Redis connection pool waiting ({{ $labels.pool_name }})"
+          description: "Redis connection pool is waiting at {{ $value }}/s: PoolSize may be too small, or slow commands are blocking."
 
       - alert: DevOpsRedisPoolTimeouts
         expr: sum by (pool_name) (rate(db_client_connections_timeouts[5m])) > 0
@@ -88,8 +88,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Redis 连接池获取超时（{{ $labels.pool_name }}）"
-          description: "Redis 取连接超时 {{ $value }}/s，请求正被拒绝：Redis 不可用或池耗尽。"
+          summary: "Redis connection pool acquisition timeout ({{ $labels.pool_name }})"
+          description: "Redis connection acquisition is timing out at {{ $value }}/s and requests are being rejected: Redis is unavailable or the pool is exhausted."
 
   - name: devops-runtime
     rules:
@@ -99,10 +99,10 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "goroutine 数量异常（{{ $labels.instance }}）"
-          description: "{{ $labels.instance }} 的 goroutine 数 {{ $value }} 持续 10 分钟高于 2000，疑似泄漏或阻塞。"
+          summary: "Goroutine count abnormal ({{ $labels.instance }})"
+          description: "Goroutine count on {{ $labels.instance }} has been above 2000 ({{ $value }}) for 10 minutes; suspect a leak or blockage."
 
-  # 发号缓冲（idclient SDK 指标，消费方进程导出）与登录业务指标
+  # ID-generation buffer (idclient SDK metrics exported by consumer processes) and login business metrics
   - name: devops-idgen-business
     rules:
       - alert: DevOpsIDBufferExhausted
@@ -111,8 +111,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "发号缓冲耗尽（biz_tag={{ $labels.biz_tag }}）"
-          description: "{{ $labels.service_name }} 的 biz_tag={{ $labels.biz_tag }} 本地缓冲持续 2 分钟为 0：下一次发号将同步 RPC，若补充仍失败，用户创建等写路径开始 fail-fast 返回 500。检查 devops-id 可用性与 {{ $labels.service_name }} → devops-id 网络。"
+          summary: "ID generation buffer exhausted (biz_tag={{ $labels.biz_tag }})"
+          description: "Local buffer for biz_tag={{ $labels.biz_tag }} on {{ $labels.service_name }} has been 0 for 2 minutes: the next ID generation will fall back to a synchronous RPC, and if refilling still fails, write paths such as user creation start failing fast with 500. Check devops-id availability and the {{ $labels.service_name }} → devops-id network."
 
       - alert: DevOpsIDRefillFailing
         expr: sum by (biz_tag, trigger) (rate(idgen_refill_failures_total[5m])) > 0
@@ -120,8 +120,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "发号缓冲补充失败（{{ $labels.biz_tag }}，{{ $labels.trigger }}）"
-          description: "biz_tag={{ $labels.biz_tag }} 补充失败率 {{ $value }}/s 持续 5 分钟。trigger=sync 说明已阻塞业务请求；async 为后台预取失败，是缓冲耗尽的早期信号。检查 devops-id / etcd 状态。"
+          summary: "ID generation buffer refill failing ({{ $labels.biz_tag }}, {{ $labels.trigger }})"
+          description: "Refill failure rate for biz_tag={{ $labels.biz_tag }} has been {{ $value }}/s for 5 minutes. trigger=sync means business requests are already blocking; async is background prefetch failure — an early signal of buffer exhaustion. Check devops-id / etcd health."
 
       - alert: DevOpsLoginFailureRateHigh
         expr: |
@@ -132,9 +132,9 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "登录失败率超 50%（{{ $labels.service_name }}）"
-          description: "{{ $labels.service_name }} 登录失败占比 {{ $value | humanizePercentage }} 持续 10 分钟超过 50%：
-            可能是暴力破解（401 为主）或认证链路故障（500 为主），按 auth_login_total 的 result/code 标签区分并查访问日志。"
+          summary: "Login failure rate above 50% ({{ $labels.service_name }})"
+          description: "Login failure share on {{ $labels.service_name }} has exceeded 50% ({{ $value | humanizePercentage }}) for 10 minutes:
+            likely brute force (mostly 401) or an auth chain failure (mostly 500); distinguish via the result/code labels on auth_login_total and check access logs."
 
       - alert: DevOpsRegisterFailureRateHigh
         expr: |
@@ -145,6 +145,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "注册 5xx 失败率超 30%（{{ $labels.service_name }}）"
-          description: "{{ $labels.service_name }} 注册因服务端错误失败占比 {{ $value | humanizePercentage }}
-            持续 10 分钟超过 30%（仅统计 code=5xx，参数类 4xx 不计）：发号、数据库或口令加密链路故障。"
+          summary: "Registration 5xx failure rate above 30% ({{ $labels.service_name }})"
+          description: "Server-error failure share on {{ $labels.service_name }} registrations has been {{ $value | humanizePercentage }}
+            for 10 minutes, above 30% (only code=5xx counted; 4xx parameter errors excluded):
+            failure in the ID generation, database, or password hashing chain."

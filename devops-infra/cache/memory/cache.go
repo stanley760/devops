@@ -1,4 +1,4 @@
-// Package memory 提供进程内缓存实现，适合单实例、测试和降级场景。
+// Package memory provides an in-process cache implementation, suitable for single-instance, test, and degradation scenarios.
 package memory
 
 import (
@@ -15,7 +15,7 @@ type entry struct {
 	expiresAt time.Time
 }
 
-// Cache 是并发安全的内存缓存。
+// Cache is a concurrency-safe in-memory cache.
 var _ cacheinf.Cache = (*Cache)(nil)
 
 type Cache struct {
@@ -24,7 +24,7 @@ type Cache struct {
 	now     func() time.Time
 }
 
-// New 创建内存缓存。
+// New creates an in-memory cache.
 func New() *Cache {
 	return &Cache{
 		entries: make(map[string]entry),
@@ -32,7 +32,7 @@ func New() *Cache {
 	}
 }
 
-// Get 读取缓存；key 不存在或已过期时返回 cache.ErrNotFound。
+// Get reads the cache; returns cache.ErrNotFound when the key does not exist or has expired.
 func (c *Cache) Get(_ context.Context, key string) (string, error) {
 	c.mu.RLock()
 	item, ok := c.entries[key]
@@ -49,7 +49,7 @@ func (c *Cache) Get(_ context.Context, key string) (string, error) {
 	return item.value, nil
 }
 
-// Set 写入缓存；expiration <= 0 表示不过期。
+// Set writes the cache; expiration <= 0 means no expiration.
 func (c *Cache) Set(_ context.Context, key, value string, expiration time.Duration) error {
 	var expiresAt time.Time
 	if expiration > 0 {
@@ -62,7 +62,7 @@ func (c *Cache) Set(_ context.Context, key, value string, expiration time.Durati
 	return nil
 }
 
-// Delete 删除一个或多个 key。
+// Delete removes one or more keys.
 func (c *Cache) Delete(_ context.Context, keys ...string) error {
 	c.mu.Lock()
 	for _, key := range keys {
@@ -72,7 +72,7 @@ func (c *Cache) Delete(_ context.Context, keys ...string) error {
 	return nil
 }
 
-// Exists 判断 key 是否存在且未过期。
+// Exists reports whether the key exists and has not expired.
 func (c *Cache) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := c.Get(ctx, key)
 	if errors.Is(err, cacheinf.ErrNotFound) {

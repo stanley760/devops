@@ -1,4 +1,4 @@
-// 租户管理接口（huma ，平台级路由用 kit.plat）。
+// Tenant management endpoints (huma; platform-level routes use kit.plat).
 package api
 
 import (
@@ -15,69 +15,69 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// TenantHandler 租户管理接口。
+// TenantHandler serves the tenant management endpoints.
 type TenantHandler struct {
 	svc *service.Tenant
 }
 
-// NewTenantHandler 创建 handler。
+// NewTenantHandler creates the handler.
 func NewTenantHandler(svc *service.Tenant) *TenantHandler { return &TenantHandler{svc: svc} }
 
 // ---- Input / Output ----
 
-// TenantListInput GET /system/api/v1/tenants 查询参数。
+// TenantListInput holds the GET /system/api/v1/tenants query parameters.
 type TenantListInput struct {
 	domain.PageParam
-	Name   string                   `query:"name" maxLength:"30" doc:"租户名称"`
-	Code   string                   `query:"code" maxLength:"30" doc:"租户编码"`
-	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"租户状态 0:停用；1:启用"`
+	Name   string                   `query:"name" maxLength:"30" doc:"Tenant name"`
+	Code   string                   `query:"code" maxLength:"30" doc:"Tenant code"`
+	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"Tenant status 0: disabled; 1: enabled"`
 }
 
-// TenantListOutput 租户分页列表信封。
+// TenantListOutput is the paginated tenant list envelope.
 type TenantListOutput struct {
 	Body commonResp.BaseResponse[domain.PageResult[types.TenantDTO]]
 }
 
-// TenantIDInput path 参数。
+// TenantIDInput holds the path parameter.
 type TenantIDInput struct {
-	ID types.ParamID `path:"id" doc:"租户id"`
+	ID types.ParamID `path:"id" doc:"Tenant ID"`
 }
 
-// TenantGetOutput 租户详情信封。
+// TenantGetOutput is the tenant detail envelope.
 type TenantGetOutput struct {
 	Body commonResp.BaseResponse[types.TenantDTO]
 }
 
-// TenantCreateInput POST /system/api/v1/tenants（含租户初始超管，创建后即可登录）。
+// TenantCreateInput is POST /system/api/v1/tenants (includes the tenant's initial super admin, who can log in right after creation).
 type TenantCreateInput struct {
 	Body types.TenantCreateReq
 }
 
-// TenantCreateOutput 创建响应信封（返回新建租户）。
+// TenantCreateOutput is the create response envelope (returns the new tenant).
 type TenantCreateOutput struct {
 	Body commonResp.BaseResponse[types.TenantDTO]
 }
 
-// TenantEmptyOutput 无数据信封。
+// TenantEmptyOutput is the no-data envelope.
 type TenantEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// TenantUpdateInput PUT /system/api/v1/tenants/{id}（名称/联系人/过期时间）。
+// TenantUpdateInput is PUT /system/api/v1/tenants/{id} (name / contact / expiry time).
 type TenantUpdateInput struct {
-	ID   types.ParamID `path:"id" doc:"租户id"`
+	ID   types.ParamID `path:"id" doc:"Tenant ID"`
 	Body types.TenantUpdateReq
 }
 
-// TenantStatusInput PUT /system/api/v1/tenants/{id}/status（停用即全员下线）。
+// TenantStatusInput is PUT /system/api/v1/tenants/{id}/status (disabling takes everyone offline).
 type TenantStatusInput struct {
-	ID   types.ParamID `path:"id" doc:"租户id"`
+	ID   types.ParamID `path:"id" doc:"Tenant ID"`
 	Body types.TenantStatusReq
 }
 
 // ---- Handlers ----
 
-// List GET /system/api/v1/tenants。
+// List handles GET /system/api/v1/tenants.
 func (h *TenantHandler) List(ctx context.Context, in *TenantListInput) (*TenantListOutput, error) {
 	page, err := h.svc.List(ctx, types.TenantPageQuery{
 		PageParam: in.PageParam,
@@ -91,7 +91,7 @@ func (h *TenantHandler) List(ctx context.Context, in *TenantListInput) (*TenantL
 	return &TenantListOutput{Body: response.OKBody(page)}, nil
 }
 
-// Get GET /system/api/v1/tenants/{id}。
+// Get handles GET /system/api/v1/tenants/{id}.
 func (h *TenantHandler) Get(ctx context.Context, in *TenantIDInput) (*TenantGetOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -104,7 +104,7 @@ func (h *TenantHandler) Get(ctx context.Context, in *TenantIDInput) (*TenantGetO
 	return &TenantGetOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Create POST /system/api/v1/tenants（含租户初始超管）。
+// Create handles POST /system/api/v1/tenants (includes the tenant's initial super admin).
 func (h *TenantHandler) Create(ctx context.Context, in *TenantCreateInput) (*TenantCreateOutput, error) {
 	resp, err := h.svc.Create(ctx, auth.ClaimsFrom(ctx), in.Body)
 	if err != nil {
@@ -113,7 +113,7 @@ func (h *TenantHandler) Create(ctx context.Context, in *TenantCreateInput) (*Ten
 	return &TenantCreateOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Update PUT /system/api/v1/tenants/{id}（名称/联系人/过期时间）。
+// Update handles PUT /system/api/v1/tenants/{id} (name / contact / expiry time).
 func (h *TenantHandler) Update(ctx context.Context, in *TenantUpdateInput) (*TenantEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -125,7 +125,7 @@ func (h *TenantHandler) Update(ctx context.Context, in *TenantUpdateInput) (*Ten
 	return &TenantEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// UpdateStatus PUT /system/api/v1/tenants/{id}/status（停用即全员下线）。
+// UpdateStatus handles PUT /system/api/v1/tenants/{id}/status (disabling takes everyone offline).
 func (h *TenantHandler) UpdateStatus(ctx context.Context, in *TenantStatusInput) (*TenantEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -137,7 +137,7 @@ func (h *TenantHandler) UpdateStatus(ctx context.Context, in *TenantStatusInput)
 	return &TenantEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Delete DELETE /system/api/v1/tenants/{id}（默认租户不可删；需先停用）。
+// Delete handles DELETE /system/api/v1/tenants/{id} (the default tenant cannot be deleted; disable it first).
 func (h *TenantHandler) Delete(ctx context.Context, in *TenantIDInput) (*TenantEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {

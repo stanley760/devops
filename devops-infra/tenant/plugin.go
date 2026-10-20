@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// RegisterPlugin 在 GORM 上注册租户字段自动填充和行级过滤回调。
+// RegisterPlugin registers the tenant field auto-fill and row-level filtering callbacks on GORM.
 func RegisterPlugin(gdb *gorm.DB) error {
 	if gdb == nil {
 		return ErrContextMissing

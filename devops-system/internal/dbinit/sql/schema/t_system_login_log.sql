@@ -1,5 +1,5 @@
--- t_system_login_log 登录审计表（租户表）：每次登录尝试（成功与失败）各记一行。
--- geo_* 来自 geo-ip 插件注入的 X-Higress-Geo-* 头；code 业务码与 auth_login 指标对齐。
+-- t_system_login_log login audit table (tenant table): one row per login attempt (success and failure).
+-- geo_* comes from the X-Higress-Geo-* headers injected by the geo-ip plugin; the code business code aligns with the auth_login metric.
 CREATE TABLE IF NOT EXISTS t_system_login_log (
     id          BIGINT       NOT NULL,
     creator     VARCHAR(64)  NULL,

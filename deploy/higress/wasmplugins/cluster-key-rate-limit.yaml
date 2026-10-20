@@ -1,7 +1,7 @@
-# 集群限流（Redis 集群级计数，多网关实例共享）：每 IP 100 QPS，超限 429。
-# 2026-09-30 从 higress-data 卷抢救入库（此前仅存在于运行时卷，违反 git 真源约定）。
-# 依赖 mcpbridges/default.yaml 的 devops-redis DNS 服务来源（redis.devops.local 网络别名，
-# 见 docker-compose-dev.yml 的 redis 服务）。密码生产从密管注入，不提交明文。
+# Cluster rate limiting (Redis cluster-level counting, shared across gateway instances): 100 QPS per IP, 429 when exceeded.
+# Rescued into git from the higress-data volume on 2026-09-30 (it previously existed only in the runtime volume, violating the git-as-source-of-truth convention).
+# Depends on the devops-redis DNS service source in mcpbridges/default.yaml (the redis.devops.local network alias,
+# see the redis service in docker-compose-dev.yml). Passwords are injected from secrets management in production, never committed in plaintext.
 apiVersion: extensions.higress.io/v1alpha1
 kind: WasmPlugin
 metadata:
@@ -18,8 +18,8 @@ spec:
     - ingress:
         - devops-system
         - devops-system-gray-route
-      # matchRules 命中后的 config 会整体替换 defaultConfig，
-      # 因此 redis 连接信息必须在每条命中规则里重复携带。
+      # The config after a matchRules hit replaces defaultConfig entirely,
+      # so the redis connection info must be repeated in every matched rule.
       config:
         redis:
           service_name: devops-redis.dns

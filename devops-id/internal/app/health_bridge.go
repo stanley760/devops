@@ -7,25 +7,25 @@ import (
 	"sync"
 )
 
-// HealthBridge 将领域健康状态同步到 gRPC health server。
+// HealthBridge syncs domain health state to the gRPC health server.
 //
-// 映射策略（readiness / liveness 分离）：
-//   - ""（默认）和 "idgen.IdGen"：仅 Serving 时 SERVING，Degraded/NotServing → NOT_SERVING
-//     ——readiness 探针摘流
-//   - "idgen.IdGen.live"：Serving+Degraded 时 SERVING，仅 NotServing → NOT_SERVING
-//     ——liveness 探针，防止降级 Pod 被反复重启
+// Mapping strategy (readiness / liveness separation):
+//   - "" (default) and "idgen.IdGen": SERVING only when Serving; Degraded/NotServing -> NOT_SERVING
+//     -- the readiness probe removes traffic
+//   - "idgen.IdGen.live": SERVING when Serving+Degraded; NOT_SERVING only when NotServing
+//     -- the liveness probe, preventing degraded Pods from being restarted repeatedly
 type HealthBridge struct {
 	mu    sync.Mutex
 	hc    *health.Server
 	state iddomain.HealthState
 }
 
-// NewHealthBridge 创建健康桥。Bind 之前事件仅记录状态，不触达 gRPC。
+// NewHealthBridge creates a health bridge. Before Bind, events only record state and do not reach gRPC.
 func NewHealthBridge() *HealthBridge {
 	return &HealthBridge{state: iddomain.HealthServing}
 }
 
-// Bind 绑定 gRPC health server 并立即应用当前状态。
+// Bind binds the gRPC health server and immediately applies the current state.
 func (b *HealthBridge) Bind(hc *health.Server) {
 	b.mu.Lock()
 	b.hc = hc
@@ -34,10 +34,10 @@ func (b *HealthBridge) Bind(hc *health.Server) {
 	b.apply(state)
 }
 
-// OnState 实现 iddomain.Observer 的状态回调。
+// OnState implements the iddomain.Observer state callback.
 func (b *HealthBridge) OnState(_ string, state iddomain.HealthState) {
 	b.mu.Lock()
-	// 整体状态取最差值（tag="" 表示整体）。
+	// The overall state takes the worst value (tag="" means overall).
 	if state > b.state {
 		b.state = state
 	}
@@ -49,20 +49,20 @@ func (b *HealthBridge) OnState(_ string, state iddomain.HealthState) {
 	}
 }
 
-// OnFallbackActive 实现 iddomain.Observer（本地降级触发 NOT_SERVING 摘流）。
+// OnFallbackActive implements iddomain.Observer (local fallback triggers NOT_SERVING to remove traffic).
 func (b *HealthBridge) OnFallbackActive(_ string) {
 	b.OnState("", iddomain.HealthNotServing)
 }
 
-// OnLeaseLost 实现 iddomain.Observer（lease 失效 → NOT_SERVING）。
+// OnLeaseLost implements iddomain.Observer (lease expiry -> NOT_SERVING).
 func (b *HealthBridge) OnLeaseLost(_ string) {
 	b.OnState("", iddomain.HealthNotServing)
 }
 
-// OnClockRollback 实现 iddomain.Observer（时钟回拨为暂态，不改变健康状态）。
+// OnClockRollback implements iddomain.Observer (clock rollback is transient and does not change health state).
 func (b *HealthBridge) OnClockRollback(_ string, _ int64) {}
 
-// apply 将状态写入三个 health service name。
+// apply writes the state to the three health service names.
 func (b *HealthBridge) apply(state iddomain.HealthState) {
 	b.mu.Lock()
 	hc := b.hc
@@ -70,12 +70,12 @@ func (b *HealthBridge) apply(state iddomain.HealthState) {
 	if hc == nil {
 		return
 	}
-	// readiness：仅完全健康时 SERVING
+	// readiness: SERVING only when fully healthy
 	readiness := healthpb.HealthCheckResponse_SERVING
 	if state != iddomain.HealthServing {
 		readiness = healthpb.HealthCheckResponse_NOT_SERVING
 	}
-	// liveness：降级仍存活，仅 NotServing 才不健康
+	// liveness: degraded still counts as alive; only NotServing is unhealthy
 	liveness := healthpb.HealthCheckResponse_SERVING
 	if state == iddomain.HealthNotServing {
 		liveness = healthpb.HealthCheckResponse_NOT_SERVING
@@ -85,12 +85,12 @@ func (b *HealthBridge) apply(state iddomain.HealthState) {
 	hc.SetServingStatus("idgen.IdGen.live", liveness)
 }
 
-// fanoutObserver 组合多个 Observer 为一个。
+// fanoutObserver combines multiple Observers into one.
 type fanoutObserver struct {
 	observers []iddomain.Observer
 }
 
-// newFanoutObserver 创建组合观察器。
+// newFanoutObserver creates a combined observer.
 func newFanoutObserver(observers ...iddomain.Observer) iddomain.Observer {
 	return &fanoutObserver{observers: observers}
 }

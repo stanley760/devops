@@ -11,14 +11,14 @@ import (
 	"github.com/stanley760/devops/devops-infra/config"
 )
 
-// TestRollingBySize 验证单文件超过 max_size 后会自动切分并压缩历史文件。
+// TestRollingBySize verifies a single file rolls automatically once it exceeds max_size, and historical files are compressed.
 func TestRollingBySize(t *testing.T) {
 	dir := t.TempDir()
 
 	cfg := config.LogConfig{
 		Level:      "info",
 		Dir:        dir,
-		Console:    false, // 关掉控制台输出，避免干扰测试输出
+		Console:    false, // disable console output to avoid interfering with test output
 		Format:     "text",
 		Buffer:     16384,
 		MaxSize:    1, // 1MB
@@ -27,10 +27,10 @@ func TestRollingBySize(t *testing.T) {
 	}
 
 	if err := Init(cfg); err != nil {
-		t.Fatalf("初始化失败: %v", err)
+		t.Fatalf("init failed: %v", err)
 	}
 
-	// 写入约 3MB，应触发 3 次按大小切分
+	// write about 3MB, which should trigger 3 size-based rolls
 	line := strings.Repeat("x", 512)
 	const total = 3 * 1024 * 1024
 	for written := 0; written < total; written += len(line) {
@@ -38,29 +38,29 @@ func TestRollingBySize(t *testing.T) {
 	}
 
 	if err := Close(); err != nil {
-		t.Fatalf("关闭失败: %v", err)
+		t.Fatalf("close failed: %v", err)
 	}
 
 	gz, _ := filepath.Glob(filepath.Join(dir, "*.gz"))
 	if len(gz) < 2 {
 		all, _ := filepath.Glob(filepath.Join(dir, "*"))
-		t.Fatalf("应至少产生 2 个压缩的历史文件，实际 %d 个；目录内容: %v", len(gz), all)
+		t.Fatalf("expected at least 2 compressed historical files, got %d; directory contents: %v", len(gz), all)
 	}
 
-	// 当前写入的文件不应超过 max_size
+	// the currently written file must not exceed max_size
 	if info, err := os.Stat(filepath.Join(dir, "devops.log")); err == nil {
 		if info.Size() > int64(1024*1024) {
-			t.Errorf("当前文件 %d 字节，超过了 1MB 上限", info.Size())
+			t.Errorf("current file is %d bytes, exceeding the 1MB limit", info.Size())
 		}
 	}
 
-	t.Logf("切分结果: %d 个 .gz 历史文件", len(gz))
+	t.Logf("roll result: %d .gz historical files", len(gz))
 	for _, f := range gz {
 		t.Logf("  %s", filepath.Base(f))
 	}
 }
 
-// TestRollingKeepsMaxBackups 验证历史文件数量受 max_backups 约束。
+// TestRollingKeepsMaxBackups verifies the number of historical files is bounded by max_backups.
 func TestRollingKeepsMaxBackups(t *testing.T) {
 	dir := t.TempDir()
 
@@ -71,12 +71,12 @@ func TestRollingKeepsMaxBackups(t *testing.T) {
 		Format:     "text",
 		Buffer:     16384,
 		MaxSize:    1, // 1MB
-		MaxBackups: 2, // 只保留 2 个历史文件
+		MaxBackups: 2, // keep only 2 historical files
 		Compress:   "none",
 	}
 
 	if err := Init(cfg); err != nil {
-		t.Fatalf("初始化失败: %v", err)
+		t.Fatalf("init failed: %v", err)
 	}
 
 	line := strings.Repeat("y", 512)
@@ -86,24 +86,24 @@ func TestRollingKeepsMaxBackups(t *testing.T) {
 	}
 
 	if err := Close(); err != nil {
-		t.Fatalf("关闭失败: %v", err)
+		t.Fatalf("close failed: %v", err)
 	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("读取目录失败: %v", err)
+		t.Fatalf("failed to read directory: %v", err)
 	}
 
-	// 当前文件 + 最多 2 个历史文件
+	// current file + at most 2 historical files
 	if len(entries) > 3 {
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Errorf("文件数 %d 超过了 max_backups(2)+当前文件 的限制: %v", len(entries), names)
+		t.Errorf("file count %d exceeds the max_backups(2)+current file limit: %v", len(entries), names)
 	}
 
-	t.Logf("保留文件数: %d（max_backups=2）", len(entries))
+	t.Logf("retained file count: %d (max_backups=2)", len(entries))
 }
 
 func TestParseInterval(t *testing.T) {
@@ -121,14 +121,14 @@ func TestParseInterval(t *testing.T) {
 	for _, c := range cases {
 		got, err := parseInterval(c.in)
 		if err != nil {
-			t.Fatalf("parseInterval(%q) 报错: %v", c.in, err)
+			t.Fatalf("parseInterval(%q) error: %v", c.in, err)
 		}
 		if got != c.want {
-			t.Errorf("parseInterval(%q) = %v, 期望 %v", c.in, got, c.want)
+			t.Errorf("parseInterval(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 
 	if _, err := parseInterval("abc"); err == nil {
-		t.Error("非法间隔应返回错误")
+		t.Error("an invalid interval should return an error")
 	}
 }

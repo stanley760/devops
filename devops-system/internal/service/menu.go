@@ -1,4 +1,4 @@
-// 菜单管理服务：CRUD + permission 变更联动重建引用角色的 p 行。
+// Menu management service: CRUD + rebuilding the p rows of referencing roles when a permission changes.
 package service
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// Menu 菜单管理服务。
+// Menu is the menu management service.
 type Menu struct{}
 
-// NewMenu 创建服务。
+// NewMenu creates the service.
 func NewMenu() *Menu { return &Menu{} }
 
-// List 菜单树（status 筛选可选）。
+// List returns the menu tree (status filter optional).
 func (s *Menu) List(ctx context.Context, status *int8) ([]types.MenuTreeResp, error) {
 	menus, err := dao.ListMenus(ctx, status)
 	if err != nil {
@@ -28,7 +28,7 @@ func (s *Menu) List(ctx context.Context, status *int8) ([]types.MenuTreeResp, er
 	return buildMenuTree(menus), nil
 }
 
-// Get 菜单详情。
+// Get returns the menu details.
 func (s *Menu) Get(ctx context.Context, id types.ID) (*types.MenuDTO, error) {
 	m, err := dao.GetMenuByID(ctx, id.Int64())
 	if err != nil {
@@ -38,7 +38,8 @@ func (s *Menu) Get(ctx context.Context, id types.ID) (*types.MenuDTO, error) {
 	return &dto, nil
 }
 
-// Create 创建菜单：校验类型/父节点（目录挂 permission 无意义，按钮必须挂）。
+// Create creates a menu: validates the type/parent (a permission on a directory
+// is meaningless; a button must have one).
 func (s *Menu) Create(ctx context.Context, claims *auth.AccessClaims, req types.MenuSaveReq) error {
 	if err := validateMenu(req.Type, req.ParentID.Int64(), req.Permission); err != nil {
 		return err
@@ -63,7 +64,8 @@ func (s *Menu) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 	return nil
 }
 
-// Update 更新菜单：permission 变更时联动重建引用角色的 p 行（仅自定义角色）。
+// Update updates a menu: when the permission changes, rebuild the p rows of
+// referencing roles accordingly (custom roles only).
 func (s *Menu) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.MenuSaveReq) error {
 	old, err := dao.GetMenuByID(ctx, id.Int64())
 	if err != nil {
@@ -73,7 +75,7 @@ func (s *Menu) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 		return err
 	}
 	if req.ParentID.Int64() == old.ID {
-		return errs.New(errs.CodeParam, "父菜单不能是自身")
+		return errs.New(errs.CodeParam, "parent menu cannot be itself")
 	}
 	if req.ParentID.Int64() > 0 {
 		if _, err := dao.GetMenuByID(ctx, req.ParentID.Int64()); err != nil {
@@ -87,7 +89,8 @@ func (s *Menu) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 		"component": req.Component, "component_name": req.ComponentName, "status": req.Status,
 		"updater": claims.Username,
 	}
-	// bool 指针缺省时保留原值（map 更新无法区分零值，显式处理）
+	// When a bool pointer is omitted, keep the original value (a map update
+	// cannot distinguish a zero value, so handle it explicitly)
 	if req.Visible != nil {
 		updates["visible"] = *req.Visible
 	}
@@ -107,7 +110,7 @@ func (s *Menu) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	return nil
 }
 
-// Delete 删除菜单：有子菜单/被角色引用不可删。
+// Delete deletes a menu: menus with children or referenced by roles cannot be deleted.
 func (s *Menu) Delete(ctx context.Context, id types.ID) error {
 	menuID := id.Int64()
 	if _, err := dao.GetMenuByID(ctx, menuID); err != nil {
@@ -118,19 +121,20 @@ func (s *Menu) Delete(ctx context.Context, id types.ID) error {
 		return err
 	}
 	if has {
-		return errs.New(errs.CodeParam, "存在子菜单，无法删除")
+		return errs.New(errs.CodeParam, "child menus exist, cannot delete")
 	}
 	has, err = dao.MenuReferencedByRoles(ctx, menuID)
 	if err != nil {
 		return err
 	}
 	if has {
-		return errs.New(errs.CodeParam, "菜单已被角色引用，请先取消分配")
+		return errs.New(errs.CodeParam, "menu is referenced by roles; unassign it first")
 	}
 	return dao.DeleteMenu(ctx, menuID)
 }
 
-// rebuildReferencingRoles permission 变更后：按本租户引用该菜单的角色重建 p 行。
+// rebuildReferencingRoles after a permission change: rebuild the p rows of the
+// roles in this tenant that reference the menu.
 func (s *Menu) rebuildReferencingRoles(ctx context.Context, menuID int64) error {
 	roleIDs, err := dao.RoleIDsByMenuIDs(ctx, []int64{menuID})
 	if err != nil {
@@ -142,12 +146,12 @@ func (s *Menu) rebuildReferencingRoles(ctx context.Context, menuID int64) error 
 	}
 	tid, ok := tenantOfCtx(ctx)
 	if !ok {
-		return errs.New(errs.CodeInternal, "缺少租户上下文")
+		return errs.New(errs.CodeInternal, "missing tenant context")
 	}
 	for i := range roles {
 		r := &roles[i]
 		if r.Type == 1 {
-			continue // 内置角色保持通配
+			continue // builtin roles keep their wildcard
 		}
 		menuIDs, err := dao.GetRoleMenuIDs(ctx, r.ID)
 		if err != nil {
@@ -164,43 +168,45 @@ func (s *Menu) rebuildReferencingRoles(ctx context.Context, menuID int64) error 
 			}
 		}
 		if err := authz.RebuildRolePolicies(r.Code, tid, perms); err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "重建角色权限策略失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to rebuild role permission policies")
 		}
 	}
 	return nil
 }
 
-// tenantOfCtx 从 ctx 取租户（service 层便捷封装）。
+// tenantOfCtx reads the tenant from the ctx (a convenience wrapper at the service layer).
 func tenantOfCtx(ctx context.Context) (int64, bool) {
 	tc, ok := infratenant.From(ctx)
 	return tc.ID, ok
 }
 
-// validateMenu 菜单约束：类型合法；按钮必须挂权限标识；目录不挂（留空）。
+// validateMenu menu constraints: a valid type; buttons must carry a permission
+// identifier; directories must not (leave it empty).
 func validateMenu(typ int8, parentID int64, permission string) error {
 	switch typ {
-	case 1: // 目录
+	case 1: // directory
 		if permission != "" {
-			return errs.New(errs.CodeParam, "目录不挂权限标识")
+			return errs.New(errs.CodeParam, "directories do not carry permission identifiers")
 		}
-	case 2: // 菜单
+	case 2: // menu
 		if parentID == 0 {
-			return errs.New(errs.CodeParam, "菜单必须挂在目录下")
+			return errs.New(errs.CodeParam, "a menu must be placed under a directory")
 		}
-	case 3: // 按钮
+	case 3: // button
 		if permission == "" {
-			return errs.New(errs.CodeParam, "按钮必须配置权限标识")
+			return errs.New(errs.CodeParam, "buttons must have a permission identifier configured")
 		}
 		if parentID == 0 {
-			return errs.New(errs.CodeParam, "按钮必须挂在菜单下")
+			return errs.New(errs.CodeParam, "a button must be placed under a menu")
 		}
 	default:
-		return errs.New(errs.CodeParam, "菜单类型非法（1目录 2菜单 3按钮）")
+		return errs.New(errs.CodeParam, "invalid menu type (1 directory 2 menu 3 button)")
 	}
 	return nil
 }
 
-// buildMenuTree 列表 → 树（parent 不在集合或为 0 即根；按 sort 排序已由查询保证）。
+// buildMenuTree converts a list into a tree (a parent outside the set, or 0, is
+// a root; sort ordering is already guaranteed by the query).
 func buildMenuTree(menus []model.Menu) []types.MenuTreeResp {
 	byID := make(map[int64]*types.MenuTreeResp, len(menus))
 	roots := make([]*types.MenuTreeResp, 0)
@@ -224,7 +230,7 @@ func buildMenuTree(menus []model.Menu) []types.MenuTreeResp {
 	return out
 }
 
-// toMenuDTO model.Menu → DTO。
+// toMenuDTO maps model.Menu → DTO.
 func toMenuDTO(m *model.Menu) types.MenuDTO {
 	return types.MenuDTO{
 		ID: types.ID(m.ID), Name: m.Name, Permission: m.Permission, Type: m.Type,
@@ -235,7 +241,7 @@ func toMenuDTO(m *model.Menu) types.MenuDTO {
 	}
 }
 
-// derefBool 指针缺省取 def。
+// derefBool returns def when the pointer is nil.
 func derefBool(p *bool, def bool) bool {
 	if p == nil {
 		return def

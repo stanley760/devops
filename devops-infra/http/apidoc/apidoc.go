@@ -1,21 +1,22 @@
-// Package apidoc 基于 huma/v2 提供统一的 OpenAPI 接口文档装配。
+// Package apidoc provides unified OpenAPI documentation assembly on top of huma/v2.
 //
-// 设计目标：
-//   - 文档即代码：OpenAPI 3.1 schema 由 Go 结构体标签直接推导，
-//     无 swag 注解、无 `swag init` 生成步骤、无 docs 目录同步维护
-//   - 复用现有 Gin 路由：humagin 适配器直接跑在传入的 gin.IRouter 上，
-//     业务路由、响应信封、租户/JWT 链路零改动
-//   - 渐进迁移：新接口一律 huma.Register；旧 handler 可经 humagin.Wrap
-//     包装补文档，按迭代节奏迁移
+// Design goals:
+//   - Docs as code: the OpenAPI 3.1 schema is derived directly from Go struct tags,
+//     with no swag annotations, no `swag init` generation step, and no docs directory to keep in sync
+//   - Reuse the existing Gin router: the humagin adapter runs directly on the passed
+//     gin.IRouter, so business routes, response envelopes, and the tenant/JWT chain stay untouched
+//   - Progressive migration: new endpoints always use huma.Register; legacy handlers can
+//     be wrapped via humagin.Wrap to add documentation and migrated at each iteration's pace
 //
-// 一次 New 提供三样东西：
+// One New call provides three things:
 //
-//	-huma.API：业务侧 huma.Register 注册接口（路由+校验+文档三合一）
-//	- OpenAPI JSON：GET {DocsPath}/openapi.json（默认 /apidoc/openapi.json）
-//	- 文档 UI：GET {DocsPath}（huma 内置 Stoplight Elements 风格交互文档，
+//	-huma.API: business-side huma.Register for endpoints (routes + validation + docs in one)
+//	- OpenAPI JSON: GET {DocsPath}/openapi.json (default /apidoc/openapi.json)
+//	- Docs UI: GET {DocsPath} (huma's built-in Stoplight Elements interactive docs,
 //
-// 必须挂在认证组之前（公开路由）；是否启用由调用方按环境门控
-// （dev/test 开、prod 关，见各服务 apidoc.enabled 配置）。
+// It must be mounted before the auth group (public routes); whether it is enabled is
+// gated by the caller per environment (on in dev/test, off in prod; see each
+// service's apidoc.enabled config).
 package apidoc
 
 import (
@@ -26,38 +27,42 @@ import (
 	"net/http"
 )
 
-// Options 文档装配配置。
+// Options configures docs assembly.
 type Options struct {
-	// Title 文档标题，如 "devops-system API"；默认 "API"。
+	// Title is the docs title, e.g. "devops-system API"; defaults to "API".
 	Title string
-	// Version 文档版本；默认 "v1"。
+	// Version is the docs version; defaults to "v1".
 	Version string
-	// BasePath 业务 API 的公开前缀，用于 OpenAPI servers 地址推导
-	// （如网关域名），仅影响文档中展示的请求地址；默认留空（相对路径）。
-	// ServerURL OpenAPI servers[0] 地址（如 https://ops.example.com）。
+	// BasePath is the public prefix of the business API, used to derive the OpenAPI
+	// servers address (e.g. the gateway domain). It only affects the request URL shown
+	// in the docs; defaults to empty (relative path).
+	// ServerURL is the OpenAPI servers[0] address (e.g. https://ops.example.com).
 	ServerURL string
-	// BasePath 已废弃的 ServerURL 兼容别名；新代码请使用 ServerURL。
+	// BasePath is a deprecated compatibility alias for ServerURL; new code should use ServerURL.
 	BasePath string
-	// DocsPath 文档挂载前缀；默认 /apidoc。
-	// OpenAPI JSON 在 {DocsPath}/openapi.json，UI 在 {DocsPath}。
+	// DocsPath is the docs mount prefix; defaults to /apidoc.
+	// OpenAPI JSON lives at {DocsPath}/openapi.json, the UI at {DocsPath}.
 	DocsPath string
-	// BearerAuth 是否在 OpenAPI Components 中声明 JWT Bearer 鉴权方案，
-	// 声明后文档页可直接用 token 试运行；默认 false。
+	// BearerAuth declares a JWT Bearer auth scheme in the OpenAPI Components.
+	// Once declared, the docs page can run requests with a token directly; defaults to false.
 	BearerAuth bool
-	// TenantHeader 租户头名称（如 X-Tenant-ID）。非空时在 OpenAPI
-	// Components 中声明可复用的 apiKey 安全方案，文档页可携带租户上下文调试。
+	// TenantHeader is the tenant header name (e.g. X-Tenant-ID). When non-empty, a
+	// reusable apiKey security scheme is declared in the OpenAPI Components so the
+	// docs page can debug with tenant context attached.
 	TenantHeader string
-	// Security 全局安全要求（OpenAPI security 字段），如
-	// []map[string][]string{{"bearerAuth": {}}}；设置后所有操作默认要求鉴权，
-	// 公开接口（login/refresh 等）在各自 Operation 里覆盖为空列表。
+	// Security is the global security requirement (OpenAPI security field), e.g.
+	// []map[string][]string{{"bearerAuth": {}}}. Once set, all operations require
+	// authentication by default; public endpoints (login/refresh etc.) override it
+	// with an empty list in their own Operation.
 	Security []map[string][]string
-	// Enabled 是否挂载文档端点（/apidoc UI、openapi.json、/schemas）。
-	// false 时仍返回可程序化导出的 huma.API（路由恒可注册），
-	// 仅不注册任何文档 HTTP 端点——D5：门控只影响文档，不再影响路由注册。
+	// Enabled mounts the docs endpoints (/apidoc UI, openapi.json, /schemas).
+	// When false, a programmatically exportable huma.API is still returned (routes
+	// can always be registered); only the docs HTTP endpoints are not registered —
+	// D5: gating affects docs only, no longer route registration.
 	Enabled bool
 }
 
-// Defaults 填充缺省值并返回规范化后的副本。
+// Defaults fills in missing values and returns a normalized copy.
 func (o Options) Defaults() Options {
 	if o.Title == "" {
 		o.Title = "API"
@@ -71,26 +76,28 @@ func (o Options) Defaults() Options {
 	return o
 }
 
-// New 在现有 Gin 路由上创建 huma API 并挂载文档端点，返回 huma.API
-// 供业务侧 huma.Register 注册接口。
+// New creates a huma API on the existing Gin router, mounts the docs endpoints,
+// and returns the huma.API for business-side huma.Register.
 //
-// 用法（router.Register 回调内，认证组之前）：
+// Usage (inside the router.Register callback, before the auth group):
 //
 //	api := apidoc.New(r, apidoc.Options{Title: "devops-system API", BearerAuth: true})
-//	v1.RegisterUsers(api, userH) // 新接口huma.Register
+//	v1.RegisterUsers(api, userH) // new endpoints use huma.Register
 func New(r gin.IRouter, opts Options) huma.API {
 	opts = opts.Defaults()
 
 	cfg := huma.DefaultConfig(opts.Title, opts.Version)
-	// 禁用 DefaultConfig 默认挂载的 SchemaLinkTransformer（CreateHooks 内联装配，
-	// api.go:513 执行）：它向结构体响应注入 $schema 字段与 Link 头，破坏与
-	// gin 版字节一致的信封契约。文档由 openapi.json 独立承载，无需 schema 链接。
+	// Disable the SchemaLinkTransformer mounted by DefaultConfig (assembled inline in
+	// CreateHooks, executed at api.go:513): it injects a $schema field and a Link header
+	// into struct responses, breaking the envelope contract that must stay byte-identical
+	// with the Gin version. Docs are carried by openapi.json alone; schema links are unnecessary.
 	cfg.CreateHooks = nil
-	// huma 默认 DocsPath=/docs、OpenAPIPath=/openapi（不带扩展名，huma 自动
-	// 追加 .json/.yaml 按内容协商）。统一平移到业务约定的 DocsPath 下。
-	// Enabled=false 时三个路径全部置空：huma 仅跳过端点注册（api.go 按此
-	// 字段独立门控），OpenAPI 仍可经 api.OpenAPI() 程序化导出；SchemasPath
-	// 必须一并置空，否则 /schemas/{schema} 路由仍会被注册。
+	// huma defaults to DocsPath=/docs and OpenAPIPath=/openapi (no extension; huma appends
+	// .json/.yaml via content negotiation). Move both under the DocsPath the business agrees on.
+	// When Enabled=false, all three paths are blanked: huma only skips endpoint registration
+	// (api.go gates on this field independently), the OpenAPI can still be exported
+	// programmatically via api.OpenAPI(); SchemasPath must be blanked too, otherwise the
+	// /schemas/{schema} routes would still be registered.
 	if !opts.Enabled {
 		cfg.DocsPath = ""
 		cfg.OpenAPIPath = ""
@@ -129,7 +136,7 @@ func New(r gin.IRouter, opts Options) huma.API {
 			Type:        "apiKey",
 			Name:        opts.TenantHeader,
 			In:          "header",
-			Description: "多租户上下文标识",
+			Description: "multi-tenant context identifier",
 		}
 	}
 	if len(opts.Security) > 0 {
@@ -138,16 +145,18 @@ func New(r gin.IRouter, opts Options) huma.API {
 
 	api := humagin.New(mustEngine(r), cfg)
 
-	// OpenAPI JSON 导出端点：供前端代码生成、网关路由发现、CI 契约测试消费。
-	// huma 自身已挂 openapi.json；此处显式注册一个语义化别名，保持与旧版
-	// /apidoc/doc.json 相近的对外约定（迁移期前端只改一处后缀）。
-	// 与文档端点同门控（Enabled=false 不注册）。
+	// OpenAPI JSON export endpoint: consumed by frontend code generation, gateway route
+	// discovery, and CI contract tests.
+	// huma already mounts openapi.json; an explicit semantic alias is registered here to
+	// keep the external convention close to the legacy /apidoc/doc.json (frontend changes
+	// only the suffix during migration).
+	// Gated by the same flag as the docs endpoint (not registered when Enabled=false).
 	if opts.Enabled {
 		huma.Register(api, huma.Operation{
 			OperationID: "export-openapi",
 			Method:      http.MethodGet,
 			Path:        opts.DocsPath + "/doc.json",
-			Summary:     "导出 OpenAPI 3.1 文档",
+			Summary:     "Export the OpenAPI 3.1 document",
 			Tags:        []string{"apidoc"},
 		}, func(ctx context.Context, _ *docInput) (*openapiDocOutput, error) {
 			return &openapiDocOutput{Body: api.OpenAPI()}, nil
@@ -157,25 +166,26 @@ func New(r gin.IRouter, opts Options) huma.API {
 	return api
 }
 
-// mustEngine 将 gin.IRouter 收敛为 humagin 需要的 *gin.Engine。
-// 允许传入 *gin.Engine 或 gin.RouterGroup（取其底层 Engine）。
+// mustEngine narrows gin.IRouter down to the *gin.Engine humagin needs.
+// A *gin.Engine or a gin.RouterGroup (taking its underlying Engine) may be passed.
 func mustEngine(r gin.IRouter) *gin.Engine {
 	if e, ok := r.(*gin.Engine); ok {
 		return e
 	}
 	if g, ok := r.(*gin.RouterGroup); ok {
-		// gin 的 RouterGroup 持有只读的 base path，无法直接取出 Engine；
-		// 但业务侧约定在 Engine 根上挂文档（公开路由组），此分支仅防御。
-		// RouterGroup 通过 group Engines 字段不可导出，改为要求传入 Engine。
+		// gin's RouterGroup holds a read-only base path that cannot be used to get the
+		// Engine directly; however the business side mounts docs on the Engine root
+		// (public route group) by convention, so this branch is purely defensive.
+		// The RouterGroup's group Engines field is not exported, so an Engine is required.
 		_ = g
 	}
-	panic("apidoc: humagin 适配器要求传入 *gin.Engine（请在 gin.Engine 根路由上挂载文档）")
+	panic("apidoc: the humagin adapter requires a *gin.Engine (mount docs on the gin.Engine root router)")
 }
 
-// docInput 文档导出端点输入（无参数）。
+// docInput is the docs export endpoint input (no parameters).
 type docInput struct{}
 
-// openapiDocOutput OpenAPI 文档导出响应体。
+// openapiDocOutput is the OpenAPI docs export response body.
 type openapiDocOutput struct {
 	Body any
 }

@@ -1,5 +1,6 @@
-// 认证接口（huma）。Input/Output 结构体即文档 schema，
-// 错误经 errs.ToHumaError 收口为统一信封（humaerr.Install 已在 main 装配）。
+// Authentication endpoints (huma). The Input/Output structs double as the
+// documentation schema; errors are funneled through errs.ToHumaError into
+// the unified envelope (humaerr.Install is wired up in main).
 package api
 
 import (
@@ -14,76 +15,76 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// AuthHandler 认证接口。
+// AuthHandler serves the authentication endpoints.
 type AuthHandler struct {
 	svc *service.Auth
 }
 
-// NewAuthHandler 创建 handler。
+// NewAuthHandler creates the handler.
 func NewAuthHandler(svc *service.Auth) *AuthHandler {
 	return &AuthHandler{svc: svc}
 }
 
-// ---- Input / Output（结构体即 OpenAPI schema）----
+// ---- Input / Output (the structs are the OpenAPI schema) ----
 
-// LoginInput POST /system/api/v1/auth/login。
+// LoginInput is POST /system/api/v1/auth/login.
 type LoginInput struct {
 	Body types.LoginReq
 }
 
-// LoginOutput 登录响应信封。
+// LoginOutput is the login response envelope.
 type LoginOutput struct {
 	Body commonResp.BaseResponse[types.LoginResp]
 }
 
-// RefreshInput POST /system/api/v1/auth/refresh。
+// RefreshInput is POST /system/api/v1/auth/refresh.
 type RefreshInput struct {
 	Body types.RefreshReq
 }
 
-// RefreshOutput 刷新响应信封。
+// RefreshOutput is the refresh response envelope.
 type RefreshOutput struct {
 	Body commonResp.BaseResponse[types.TokenResp]
 }
 
-// LogoutOutput 登出响应信封（无数据）。
+// LogoutOutput is the logout response envelope (no data).
 type LogoutOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// InfoOutput GET /auth/info 响应信封。
+// InfoOutput is the GET /auth/info response envelope.
 type InfoOutput struct {
 	Body commonResp.BaseResponse[types.UserInfoResp]
 }
 
-// RoutersOutput GET /auth/routers 响应信封。
+// RoutersOutput is the GET /auth/routers response envelope.
 type RoutersOutput struct {
 	Body commonResp.BaseResponse[[]types.RouterNode]
 }
 
-// UpdateProfileInput PUT /auth/profile。
+// UpdateProfileInput is PUT /auth/profile.
 type UpdateProfileInput struct {
 	Body types.UpdateProfileReq
 }
 
-// UpdateProfileOutput 更新个人信息响应信封（无数据）。
+// UpdateProfileOutput is the update-profile response envelope (no data).
 type UpdateProfileOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// UpdatePasswordInput PUT /auth/profile/password。
+// UpdatePasswordInput is PUT /auth/profile/password.
 type UpdatePasswordInput struct {
 	Body types.UpdatePasswordReq
 }
 
-// UpdatePasswordOutput 修改密码响应信封（无数据，改密踢下线）。
+// UpdatePasswordOutput is the change-password response envelope (no data; changing the password kicks the user offline).
 type UpdatePasswordOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
 // ---- Handlers ----
 
-// Login POST /system/api/v1/auth/login（客户端元数据经 withClientMeta 中间件注入）。
+// Login handles POST /system/api/v1/auth/login (client metadata is injected by the withClientMeta middleware).
 func (h *AuthHandler) Login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
 	resp, err := h.svc.Login(ctx, in.Body, ClientMetaFrom(ctx))
 	if err != nil {
@@ -92,7 +93,7 @@ func (h *AuthHandler) Login(ctx context.Context, in *LoginInput) (*LoginOutput, 
 	return &LoginOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Refresh POST /system/api/v1/auth/refresh（轮换 refresh 会话）。
+// Refresh handles POST /system/api/v1/auth/refresh (rotates the refresh session).
 func (h *AuthHandler) Refresh(ctx context.Context, in *RefreshInput) (*RefreshOutput, error) {
 	resp, err := h.svc.Refresh(ctx, in.Body)
 	if err != nil {
@@ -101,13 +102,13 @@ func (h *AuthHandler) Refresh(ctx context.Context, in *RefreshInput) (*RefreshOu
 	return &RefreshOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Logout POST /system/api/v1/auth/logout（需 JWT）。
+// Logout handles POST /system/api/v1/auth/logout (requires JWT).
 func (h *AuthHandler) Logout(ctx context.Context, _ *struct{}) (*LogoutOutput, error) {
 	h.svc.Logout(ctx, auth.ClaimsFrom(ctx))
 	return &LogoutOutput{Body: response.EmptyBody()}, nil
 }
 
-// Info GET /system/api/v1/auth/info（需 JWT + Tenant）。
+// Info handles GET /system/api/v1/auth/info (requires JWT + Tenant).
 func (h *AuthHandler) Info(ctx context.Context, _ *struct{}) (*InfoOutput, error) {
 	resp, err := h.svc.Info(ctx, auth.ClaimsFrom(ctx))
 	if err != nil {
@@ -116,7 +117,7 @@ func (h *AuthHandler) Info(ctx context.Context, _ *struct{}) (*InfoOutput, error
 	return &InfoOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Routers GET /system/api/v1/auth/routers（需 JWT + Tenant）。
+// Routers handles GET /system/api/v1/auth/routers (requires JWT + Tenant).
 func (h *AuthHandler) Routers(ctx context.Context, _ *struct{}) (*RoutersOutput, error) {
 	routers, err := h.svc.Routers(ctx, auth.ClaimsFrom(ctx))
 	if err != nil {
@@ -125,7 +126,7 @@ func (h *AuthHandler) Routers(ctx context.Context, _ *struct{}) (*RoutersOutput,
 	return &RoutersOutput{Body: response.OKBody(routers)}, nil
 }
 
-// UpdateProfile PUT /system/api/v1/auth/profile（需 JWT + Tenant）。
+// UpdateProfile handles PUT /system/api/v1/auth/profile (requires JWT + Tenant).
 func (h *AuthHandler) UpdateProfile(ctx context.Context, in *UpdateProfileInput) (*UpdateProfileOutput, error) {
 	if err := h.svc.UpdateProfile(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -133,7 +134,7 @@ func (h *AuthHandler) UpdateProfile(ctx context.Context, in *UpdateProfileInput)
 	return &UpdateProfileOutput{Body: response.EmptyBody()}, nil
 }
 
-// UpdatePassword PUT /system/api/v1/auth/profile/password（需 JWT + Tenant，改密踢下线）。
+// UpdatePassword handles PUT /system/api/v1/auth/profile/password (requires JWT + Tenant; changing the password kicks the user offline).
 func (h *AuthHandler) UpdatePassword(ctx context.Context, in *UpdatePasswordInput) (*UpdatePasswordOutput, error) {
 	if err := h.svc.UpdatePassword(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -141,11 +142,12 @@ func (h *AuthHandler) UpdatePassword(ctx context.Context, in *UpdatePasswordInpu
 	return &UpdatePasswordOutput{Body: response.EmptyBody()}, nil
 }
 
-// ClientMetaContextKey 登录客户端元数据在 context 中的键（withClientMeta 中间件注入）。
+// ClientMetaContextKey is the context key for login client metadata (injected by the withClientMeta middleware).
 type ClientMetaContextKey struct{}
 
-// ClientMetaFrom 取登录请求的客户端元数据（IP/UA/Geo，withClientMeta 之后可用），
-// 落 t_system_login_log 审计表。
+// ClientMetaFrom reads the client metadata of the login request
+// (IP/UA/Geo; available after withClientMeta) for the t_system_login_log
+// audit table.
 func ClientMetaFrom(ctx context.Context) service.LoginMeta {
 	if v, ok := ctx.Value(ClientMetaContextKey{}).(service.LoginMeta); ok {
 		return v

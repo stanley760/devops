@@ -14,19 +14,19 @@ import (
 
 const (
 	defaultPrefix = "devops"
-	// 备份文件名中的时间格式，形如 devops-2026-09-10-16-44-05.123-size.log。
-	// 必须包含时分秒和毫秒，避免高吞吐下多次切分产生同名文件。
+	// Time format in backup file names, e.g. devops-2026-09-10-16-44-05.123-size.log.
+	// It must include hours, minutes, seconds, and milliseconds to avoid multiple rolls producing same-named files under high throughput.
 	defaultTimeFormat = "2006-01-02-15-04-05.000"
 )
 
-// newRollingLogger 按配置创建文件滚动 writer。
+// newRollingLogger creates a file rolling writer from configuration.
 func newRollingLogger(cfg config.LogConfig) (*timberjack.Logger, error) {
 	dir := strings.TrimSpace(cfg.Dir)
 	if dir == "" {
 		dir = "logs"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建日志目录失败: %w", err)
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	interval, err := parseInterval(cfg.RotationInterval)
@@ -45,12 +45,12 @@ func newRollingLogger(cfg config.LogConfig) (*timberjack.Logger, error) {
 		BackupTimeFormat: defaultTimeFormat,
 	}
 	if err := rolling.ValidateBackupTimeFormat(); err != nil {
-		return nil, fmt.Errorf("日志备份时间格式非法: %w", err)
+		return nil, fmt.Errorf("invalid log backup time format: %w", err)
 	}
 	return rolling, nil
 }
 
-// parseInterval 解析时间滚动间隔，空值或 0 表示仅按大小滚动。
+// parseInterval parses the time rotation interval; an empty value or 0 means rolling by size only.
 func parseInterval(value string) (time.Duration, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "0" {
@@ -58,7 +58,7 @@ func parseInterval(value string) (time.Duration, error) {
 	}
 	interval, err := time.ParseDuration(value)
 	if err != nil {
-		return 0, fmt.Errorf("rotation_interval 格式非法: %q（示例 24h、12h30m）: %w", value, err)
+		return 0, fmt.Errorf("invalid rotation_interval format: %q (examples: 24h, 12h30m): %w", value, err)
 	}
 	return interval, nil
 }

@@ -1,4 +1,4 @@
-// withClientMeta 回归：geo-ip 插件注入头的 URL 反转义、脏头兜底与 XFF 真实 IP 解析。
+// withClientMeta regression: URL unescaping of geo-ip plugin injected headers, dirty-header fallback, and XFF real IP resolution.
 package router
 
 import (
@@ -16,9 +16,11 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/service"
 )
 
-// TestWithClientMeta 经真实 gin+humagin 适配层跑通 withClientMeta：
-// IP 取 XFF 链（gin 默认信任全部代理，测试态直接生效）、UA 直读、
-// geo 四头 URL 反转义（中文归属地主场景）、非法转义序列原值兜底。
+// TestWithClientMeta exercises withClientMeta through the real gin+humagin
+// adapter layer: the IP comes from the XFF chain (gin trusts all proxies by
+// default, which applies directly in test mode), the UA is read as-is, the
+// four geo headers are URL-unescaped (Chinese locale strings being the main
+// case), and invalid escape sequences fall back to the raw value.
 func TestWithClientMeta(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -37,11 +39,11 @@ func TestWithClientMeta(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/meta", nil)
 	req.Header.Set("User-Agent", "meta-echo-test/1.0")
 	req.Header.Set("X-Forwarded-For", "203.0.113.7")
-	// geo-ip 插件按 URL 转义写入（中文归属地是主场景）
-	req.Header.Set("X-Higress-Geo-Country", "%E4%B8%AD%E5%9B%BD")                    // 中国
-	req.Header.Set("X-Higress-Geo-Province", "%E9%BB%91%E9%BE%99%E6%B1%9F%E7%9C%81") // 黑龙江省
-	req.Header.Set("X-Higress-Geo-City", "Hangzhou")                                 // 纯 ASCII 不转义也合法
-	req.Header.Set("X-Higress-Geo-Isp", "%zz-bad-escape")                            // 非法转义序列：原值兜底
+	// The geo-ip plugin writes URL-escaped values (Chinese locale strings being the main case)
+	req.Header.Set("X-Higress-Geo-Country", "%E4%B8%AD%E5%9B%BD")                    // China
+	req.Header.Set("X-Higress-Geo-Province", "%E9%BB%91%E9%BE%99%E6%B1%9F%E7%9C%81") // Heilongjiang Province
+	req.Header.Set("X-Higress-Geo-City", "Hangzhou")                                 // pure ASCII, valid even without escaping
+	req.Header.Set("X-Higress-Geo-Isp", "%zz-bad-escape")                            // invalid escape sequence: fall back to the raw value
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -50,24 +52,24 @@ func TestWithClientMeta(t *testing.T) {
 	}
 	var got service.LoginMeta
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("body 不是合法 JSON: %v\n%s", err, rec.Body.String())
+		t.Fatalf("body is not valid JSON: %v\n%s", err, rec.Body.String())
 	}
 	if got.IP != "203.0.113.7" {
-		t.Errorf("IP = %q, want 203.0.113.7（XFF 链解析）", got.IP)
+		t.Errorf("IP = %q, want 203.0.113.7 (XFF chain resolution)", got.IP)
 	}
 	if got.UserAgent != "meta-echo-test/1.0" {
 		t.Errorf("UserAgent = %q", got.UserAgent)
 	}
 	if got.GeoCountry != "中国" {
-		t.Errorf("GeoCountry = %q, want 中国（URL 反转义）", got.GeoCountry)
+		t.Errorf("GeoCountry = %q, want %q (URL unescaping)", got.GeoCountry, "中国")
 	}
 	if got.GeoProvince != "黑龙江省" {
-		t.Errorf("GeoProvince = %q, want 黑龙江省", got.GeoProvince)
+		t.Errorf("GeoProvince = %q, want %q", got.GeoProvince, "黑龙江省")
 	}
 	if got.GeoCity != "Hangzhou" {
 		t.Errorf("GeoCity = %q, want Hangzhou", got.GeoCity)
 	}
 	if got.GeoIsp != "%zz-bad-escape" {
-		t.Errorf("GeoIsp = %q, want 原值兜底（非法转义序列）", got.GeoIsp)
+		t.Errorf("GeoIsp = %q, want the raw value (invalid escape sequence)", got.GeoIsp)
 	}
 }

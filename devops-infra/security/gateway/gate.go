@@ -1,4 +1,4 @@
-// Package gateway 提供「流量必须经由网关进入」的应用层强制守卫。
+// Package gateway provides the application-layer guard that forces traffic to enter through the gateway.
 package gateway
 
 import (
@@ -11,48 +11,52 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// HeaderTenant 网关 jwt-auth 的 claims_to_headers 注入的租户头（override 语义）。
-// 本守卫只做「必须携带有效 JWT」的收口，不信任该头——租户身份一律以 token claims 为准。
+// HeaderTenant is the tenant header injected by the gateway's jwt-auth claims_to_headers
+// (override semantics). This guard only enforces "a valid JWT must be present" and does
+// not trust the header — tenant identity is always taken from the token claims.
 const HeaderTenant = "X-Tenant-ID"
 
-// Options 守卫配置。
+// Options configures the guard.
 type Options struct {
-	// RequireJWT 为 true 时启用守卫；false 时直通。
+	// RequireJWT enables the guard when true; passes through when false.
 	RequireJWT bool
-	// Authenticator 提供 Bearer JWT 的独立校验（签名 + 会话态）。
-	// 为 nil 且 RequireJWT 为 true 时 fail-closed。
+	// Authenticator provides independent verification of Bearer JWTs (signature + session state).
+	// When nil and RequireJWT is true, it fails closed.
 	Authenticator securitymw.BearerAuthenticator
-	// ExemptPaths 为免校验路径（精确匹配），如健康检查与指标端点。
+	// ExemptPaths are paths exempt from verification (exact match), such as health check and metrics endpoints.
 	ExemptPaths []string
-	// ExemptPrefixes 为免校验路径前缀（精确匹配），如 /apidoc。
+	// ExemptPrefixes are path prefixes exempt from verification (exact match), such as /apidoc.
 	ExemptPrefixes []string
 }
 
-// Config 由业务配置段映射而来，便于按环境开关。
+// Config is mapped from a business config section, making it easy to switch per environment.
 type Config struct {
-	// RequireJWT 为 true 时启用守卫；false 时直通。
+	// RequireJWT enables the guard when true; passes through when false.
 	RequireJWT bool `mapstructure:"require_jwt"`
-	// ExemptPaths 追加免校验的精确路径。
+	// ExemptPaths appends exact paths exempt from verification.
 	ExemptPaths []string `mapstructure:"exempt_paths"`
 }
 
-// Enforce 返回流量入口守卫中间件：要求请求携带可独立校验通过的 Bearer JWT。
+// Enforce returns the traffic entrypoint guard middleware: requests must carry a Bearer
+// JWT that passes independent verification.
 //
-// requireJWT 为 false 时返回直通中间件，使未启用守卫的环境（本地 go run、单测）
-// 无需任何额外配置，且不会因为漏配导致全站 401。
+// When requireJWT is false it returns a pass-through middleware, so environments where the
+// guard is not enabled (local go run, unit tests) need no extra configuration and will not
+// end up returning 401 site-wide because of a missing setting.
 func Enforce(requireJWT bool, authn securitymw.BearerAuthenticator, exemptPaths, exemptPrefixes []string) gin.HandlerFunc {
 	if !requireJWT {
-		slog.Info("网关守卫未启用（gateway.require_jwt=false），流量入口不做强制校验")
+		slog.Info("gateway guard not enabled (gateway.require_jwt=false), no mandatory verification at the traffic entrypoint")
 		return func(c *gin.Context) { c.Next() }
 	}
 	if authn == nil {
-		// fail-closed：守卫已声明启用却没装配校验器时必须拒绝，
-		// 否则等于全站放行，收口形同虚设且无任何告警。
-		slog.Error("网关守卫已启用但未装配 JWT 校验器，将拒绝全部非放行请求")
+		// fail-closed: when the guard is declared enabled but no verifier is assembled,
+		// it must reject; otherwise it amounts to letting everything through site-wide,
+		// making the guard useless with no alert at all.
+		slog.Error("gateway guard is enabled but no JWT verifier is assembled; all non-exempt requests will be rejected")
 		return func(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, commonResp.BaseResponse[any]{
 				Code: http.StatusUnauthorized,
-				Msg:  "请求必须经由网关访问",
+				Msg:  "requests must be made through the gateway",
 			})
 		}
 	}
@@ -70,7 +74,7 @@ func Enforce(requireJWT bool, authn securitymw.BearerAuthenticator, exemptPaths,
 		}
 	}
 
-	// 预编译放行判定，避免每个请求重复遍历前缀。
+	// Precompile the exemption check to avoid re-scanning prefixes on every request.
 	isExempt := func(path string) bool {
 		if _, ok := exact[path]; ok {
 			return true
@@ -89,13 +93,15 @@ func Enforce(requireJWT bool, authn securitymw.BearerAuthenticator, exemptPaths,
 			return
 		}
 
-		// 不信任网关注入的租户头：租户身份一律以 token claims 为准，
-		// 避免网关配置失误或被绕过时出现越权。此处仅记录，便于排查注入是否生效。
+		// Do not trust the tenant header injected by the gateway: tenant identity is always
+		// taken from the token claims, to avoid privilege escalation when the gateway is
+		// misconfigured or bypassed. Only record it here, to help diagnose whether injection works.
 		_, err := authn.Authenticate(c.Request.Context(), c.GetHeader("Authorization"))
 		if err != nil {
-			// WARN 而非 ERROR：多半是绕过网关的直连流量（内部探活未配网关、
-			// 运维误操作），可疑但未必是攻击。记录足以定位的字段，不记录凭据本身。
-			slog.Warn("拒绝未经有效身份凭据的请求",
+			// WARN rather than ERROR: it is usually direct traffic that bypassed the gateway
+			// (internal liveness probe without a gateway, an ops mistake), suspicious but not
+			// necessarily an attack. Log enough fields to locate it, but not the credential itself.
+			slog.Warn("rejected a request without valid credentials",
 				"method", c.Request.Method,
 				"path", c.Request.URL.Path,
 				"client_ip", c.ClientIP(),
@@ -103,7 +109,7 @@ func Enforce(requireJWT bool, authn securitymw.BearerAuthenticator, exemptPaths,
 			)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, commonResp.BaseResponse[any]{
 				Code: http.StatusUnauthorized,
-				Msg:  "请求必须经由网关访问",
+				Msg:  "requests must be made through the gateway",
 			})
 			return
 		}
@@ -111,7 +117,7 @@ func Enforce(requireJWT bool, authn securitymw.BearerAuthenticator, exemptPaths,
 	}
 }
 
-// EnforceFromConfig 由业务配置装配守卫。RequireJWT 为 false 时直通。
+// EnforceFromConfig assembles the guard from business config. Passes through when RequireJWT is false.
 func EnforceFromConfig(cfg Config, authn securitymw.BearerAuthenticator, exemptPaths, exemptPrefixes []string) gin.HandlerFunc {
 	return Enforce(cfg.RequireJWT, authn, append(append([]string{}, exemptPaths...), cfg.ExemptPaths...), exemptPrefixes)
 }

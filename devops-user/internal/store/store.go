@@ -1,9 +1,11 @@
-// Package store 提供 devops-user 的 Redis 装配入口。
+// Package store provides devops-user's Redis wiring entrypoint.
 //
-// 与 devops-system 的差异：不提供 Cache()（C 端无租户缓存等通用缓存需求），
-// 只保留 JWT 会话态所需的 go-redis 客户端。
+// Difference from devops-system: no Cache() (the C side has no general caching
+// needs such as tenant caches), only the go-redis client needed for JWT
+// session state.
 //
-// 装配直接委托 devops-infra/cache/redis，不重复实现连接逻辑。
+// Wiring delegates directly to devops-infra/cache/redis, without reimplementing
+// connection logic.
 package store
 
 import (
@@ -15,23 +17,24 @@ import (
 	"github.com/stanley760/devops/devops-infra/config"
 )
 
-// Init 建立 Redis 连接。
+// Init establishes the Redis connection.
 func Init(cfg config.RedisConfig) error {
 	return rediscache.Init(cfg)
 }
 
-// Get 返回当前 go-redis 客户端；未 Init 时为 nil。
+// Get returns the current go-redis client; nil before Init.
 func Get() *goredis.Client {
 	return rediscache.Get()
 }
 
-// Close 关闭连接池。
+// Close closes the connection pool.
 func Close() error {
 	return rediscache.Close()
 }
 
-// Ping 检查当前 Redis 连接。签名对齐 httpinfra.ReadinessCheck（ctx 在此不参与，
-// go-redis 的 Ping 自身使用内部重试与超时配置）。
+// Ping checks the current Redis connection. The signature aligns with
+// httpinfra.ReadinessCheck (ctx is not used here; go-redis's Ping uses its own
+// internal retry and timeout configuration).
 func Ping(_ context.Context) error {
 	return rediscache.Default().Ping(context.Background())
 }

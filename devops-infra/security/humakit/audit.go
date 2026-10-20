@@ -16,32 +16,34 @@ import (
 	infratenant "github.com/stanley760/devops/devops-infra/tenant"
 )
 
-// ModuleResolver 把路由的 OperationID 解析为审计模块。
+// ModuleResolver resolves a route's OperationID into an audit module.
 //
-// 返回 ok=false 表示该路由不纳入审计（如健康检查、只读列表）。
-// 业务侧持有这张映射表，从而无需在每个 handler 里手动埋点。
+// Returning ok=false means the route is not audited (e.g. health checks, read-only lists).
+// The business side holds this mapping table, so no manual instrumentation is needed in every handler.
 type ModuleResolver func(operationID string) (module, subModule string, ok bool)
 
-// AuditDeps 审计采集的业务注入点。
+// AuditDeps holds the business injection points for audit collection.
 type AuditDeps struct {
-	// Sink 审计写入端；nil → commonaudit.Noop（记录被安全丢弃，不影响业务）。
+	// Sink is the audit write end; nil → commonaudit.Noop (records are safely dropped, without affecting business).
 	Sink commonaudit.Sink
-	// Resolve 模块解析器；nil → 不采集任何路由（默认关闭）。
+	// Resolve is the module resolver; nil → no routes are collected (off by default).
 	Resolve ModuleResolver
 }
 
-// NewAuditMiddleware 构造操作审计采集中间件。
+// NewAuditMiddleware constructs the operation audit collection middleware.
 //
-// 设计要点：
-//   - 采集范围由业务侧的 ModuleResolver 白名单决定，默认不采集任何路由；
-//     业务侧通常只标注写操作，避免 GET 列表造成审计风暴。
-//   - 认证信息从 ctx 取（由 Deps.WithClaims 注入的 auditctx.Actor），
-//     租户从 ctx 取（由 securityTenant 注入），故本中间件须挂在
-//     认证与租户中间件之后。
-//   - 审计写入是旁路：Sink.Emit 不返回错误，失败不影响业务响应。
+// Design points:
+//   - The collection scope is decided by the business side's ModuleResolver whitelist,
+//     with no routes collected by default; the business side usually only marks write
+//     operations, to avoid an audit storm from GET lists.
+//   - Authentication info is taken from ctx (the auditctx.Actor injected by Deps.WithClaims),
+//     the tenant is taken from ctx (injected by securityTenant), so this middleware must
+//     be mounted after the authentication and tenant middleware.
+//   - Audit writes are a side channel: Sink.Emit returns no error, so failures never affect business responses.
 //
-// 调用方须把返回值赋给 Kit（见 kit.enableAudit）；未启用审计的业务服务
-// 使用内置的 noopAudit，不会因 nil 中间件崩溃（huma 的链组合不跳过 nil）。
+// Callers must assign the return value to the Kit (see kit.enableAudit); business services
+// that do not enable audit use the built-in noopAudit and will not crash on a nil
+// middleware (huma's chain composition does not skip nil).
 func (k *Kit) NewAuditMiddleware(deps AuditDeps) Middleware {
 	sink := deps.Sink
 	if sink == nil {
@@ -92,16 +94,18 @@ func (k *Kit) NewAuditMiddleware(deps AuditDeps) Middleware {
 	}
 }
 
-// noopAudit 是未启用审计时的占位中间件：原样放行。
+// noopAudit is the placeholder middleware when audit is not enabled: pass through as-is.
 //
-// huma 的 Middlewares.chain 不跳过 nil 元素，故各业务链必须挂一个非 nil
-// 中间件，用本占位实现表达"本服务不采集审计"这一显式决策。
+// huma's Middlewares.chain does not skip nil elements, so every business chain must
+// carry a non-nil middleware; this placeholder expresses the explicit decision
+// "this service does not collect audit".
 func noopAudit(hctx huma.Context, next func(huma.Context)) { next(hctx) }
 
-// applyIdentity 从 ctx 补齐操作者与租户信息。
+// applyIdentity fills in the actor and tenant information from ctx.
 //
-// 两处来源都是可选的：未认证路由（如公开接口）没有 actor，
-// 全局表操作没有租户——缺失时保留零值，不阻断采集。
+// Both sources are optional: unauthenticated routes (e.g. public endpoints) have no
+// actor, and global table operations have no tenant — missing values are kept as
+// zero values, without blocking collection.
 func applyIdentity(rec *commonaudit.Record, ctx context.Context) {
 	if actor, ok := auditctx.From(ctx); ok {
 		rec.UserID = actor.UserID
@@ -113,13 +117,13 @@ func applyIdentity(rec *commonaudit.Record, ctx context.Context) {
 	}
 }
 
-// clientMetaOf 提取客户端元数据并按契约列宽截断。
+// clientMetaOf extracts client metadata and truncates it to the contract column widths.
 func clientMetaOf(hctx huma.Context) commonaudit.ClientMeta {
 	meta := commonaudit.ClientMeta{
 		UserAgent: hctx.Header("User-Agent"),
 	}
-	// 复用 gin 适配器的 ClientIP（按可信代理配置解析 X-Forwarded-For）；
-	// 非 gin 适配器回退为直接读 XFF 首段。
+	// Reuse the gin adapter's ClientIP (resolves X-Forwarded-For per the trusted proxy config);
+	// fall back to reading the first segment of XFF for non-gin adapters.
 	if g := humagin.Unwrap(hctx); g != nil {
 		meta.IP = g.ClientIP()
 	} else {
@@ -129,8 +133,8 @@ func clientMetaOf(hctx huma.Context) commonaudit.ClientMeta {
 		}
 		meta.IP = strings.TrimSpace(xff)
 	}
-	// 网关 geo-ip 插件注入的头按 URL 转义写入，此处还原；
-	// 非法转义序列用原值兜底——审计不因脏头失败。
+	// Headers injected by the gateway geo-ip plugin are URL-escaped; unescape them here.
+	// Invalid escape sequences fall back to the raw value — audit must not fail on a dirty header.
 	unescape := func(name string) string {
 		raw := hctx.Header(name)
 		if raw == "" {
@@ -150,7 +154,7 @@ func clientMetaOf(hctx huma.Context) commonaudit.ClientMeta {
 	return commonaudit.ClipClientMeta(meta)
 }
 
-// durationExtra 渲染耗时扩展字段。
+// durationExtra renders the duration extension field.
 func durationExtra(d time.Duration) string {
 	return `{"duration_ms":` + strconv.FormatInt(d.Milliseconds(), 10) + `}`
 }

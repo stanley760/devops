@@ -1,15 +1,16 @@
-// Package app 是应用装配层（Composition Root）。
+// Package app is the application assembly layer (composition root).
 //
-// 依赖方向总览（DDD 的依赖倒置在此落地）：
+// Dependency direction overview (where DDD's dependency inversion lands):
 //
 //	cmd ──→ app ──→ application ──→ domain ←── infrastructure
-//	              │         （端口接口）      （GORM/Casbin/Redis 实现）
-//	              └──→ api/v1、router、middleware
+//	              │         (port interfaces)  (GORM/Casbin/Redis impls)
+//	              └──→ api/v1, router, middleware
 //
-// 本包是**唯一**允许同时认识「接口」与「实现」的地方：
-// 它把 infrastructure 里的 GORM 仓储实现注入 application 声明的端口。
-// domain 与 application 包内不存在任何对 infrastructure 的 import，
-// 故领域规则可脱离数据库与 HTTP 独立测试。
+// This package is the **only** place allowed to know both the interfaces
+// and their implementations: it injects the GORM repository implementations
+// from infrastructure into the ports declared by application. Neither the
+// domain nor the application package imports infrastructure, so domain
+// rules can be tested independently of the database and HTTP.
 package app
 
 import (
@@ -23,7 +24,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/infrastructure/persistence"
 )
 
-// Repositories 汇总全部仓储实现（由本包注入各端口）。
+// Repositories aggregates all repository implementations (injected into the ports by this package).
 type Repositories struct {
 	Users   iam.UserRepository
 	Roles   iam.RoleRepository
@@ -37,7 +38,7 @@ type Repositories struct {
 	OperationLogs auditlog.OperationLogReader
 }
 
-// NewRepositories 构造全部仓储实现（GORM）。
+// NewRepositories constructs all repository implementations (GORM).
 func NewRepositories() Repositories {
 	return Repositories{
 		Users:         persistence.NewUserRepository(),
@@ -52,7 +53,7 @@ func NewRepositories() Repositories {
 	}
 }
 
-// Commands 汇总全部写侧命令处理器。
+// Commands aggregates all write-side command handlers.
 type Commands struct {
 	User   *command.UserCommand
 	Role   *command.RoleCommand
@@ -60,7 +61,7 @@ type Commands struct {
 	Tenant *command.TenantCommand
 }
 
-// Queries 汇总全部读侧查询处理器。
+// Queries aggregates all read-side query handlers.
 type Queries struct {
 	User         *query.UserQuery
 	Role         *query.RoleQuery
@@ -72,7 +73,7 @@ type Queries struct {
 	OperationLog *query.OperationLogQuery
 }
 
-// NewCommands 构造写侧处理器（注入仓储端口 + 事务管理器）。
+// NewCommands constructs the write-side handlers (injects repository ports + the transaction manager).
 func NewCommands(repos Repositories, txs shared.TxManager) Commands {
 	return Commands{
 		User:   command.NewUserCommand(repos.Users, txs),
@@ -82,7 +83,7 @@ func NewCommands(repos Repositories, txs shared.TxManager) Commands {
 	}
 }
 
-// NewQueries 构造读侧处理器（注入仓储端口）。
+// NewQueries constructs the read-side handlers (injects repository ports).
 func NewQueries(repos Repositories) Queries {
 	return Queries{
 		User:         query.NewUserQuery(repos.Users),
@@ -96,24 +97,26 @@ func NewQueries(repos Repositories) Queries {
 	}
 }
 
-// NewTxManager 构造事务管理器（GORM 实现）。
+// NewTxManager constructs the transaction manager (GORM implementation).
 func NewTxManager() shared.TxManager { return persistence.NewTxManager() }
 
-// EventDispatch 事件分发所需组件。
+// EventDispatch holds the components needed for event dispatch.
 type EventDispatch struct {
 	Publisher shared.EventPublisher
 	Store     shared.EventStore
 }
 
-// NewEventDispatch 构造事件分发器与投影器。
+// NewEventDispatch constructs the event dispatcher and projectors.
 //
-// invalidateScope 为数据权限缓存失效回调：由 middleware.Kit 提供，
-// 但注入方向是 app → 投影器，而非改造前 service → kit.InvalidateDataScope
-// （后者是「应用层反向依赖中间件层」）。
+// invalidateScope is the data-scope cache invalidation callback: it is
+// provided by middleware.Kit, but the injection direction is app → projector,
+// not the pre-refactor service → kit.InvalidateDataScope (the latter made
+// the application layer depend on the middleware layer).
 //
-// 改造前 app/service_providers.go 有两个手写 provider，专门把
-// kit.InvalidateDataScope 包成 service 能吃的形态；现在这条反向依赖消失，
-// wire provider 集合也随之简化。
+// Before the refactor, app/service_providers.go had two hand-written
+// providers whose only job was to wrap kit.InvalidateDataScope into a form
+// the service could consume; now that reverse dependency is gone, and the
+// wire provider set is simpler as a result.
 func NewEventDispatch(authM *auth.Manager, invalidateScope func()) EventDispatch {
 	return EventDispatch{
 		Publisher: persistence.NewDispatcher(

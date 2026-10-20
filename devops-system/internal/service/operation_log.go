@@ -1,6 +1,7 @@
-// 操作审计管理服务：查询侧（写入侧由 humakit 审计采集中间件自动落库）。
-// 删除/清空为运维留存量管控入口，独立权限门控
-// （system:operationlog:delete / :clean）。
+// Operation audit management service: query side (the write side is persisted
+// automatically by the humakit audit collection middleware). Delete/clean are
+// ops entry points for retention control, gated by dedicated permissions
+// (system:operationlog:delete / :clean).
 package service
 
 import (
@@ -14,13 +15,13 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// OperationLog 操作审计服务。
+// OperationLog is the operation audit service.
 type OperationLog struct{}
 
-// NewOperationLog 创建服务（无状态，仅读 dao）。
+// NewOperationLog creates the service (stateless, read-only dao access).
 func NewOperationLog() *OperationLog { return &OperationLog{} }
 
-// List 分页查询操作审计。
+// List returns a paginated query of operation audit records.
 func (s *OperationLog) List(ctx context.Context, q types.OperationLogPageQuery) (domain.PageResult[types.OperationLogDTO], error) {
 	page, err := dao.ListOperationLogs(ctx, q)
 	if err != nil {
@@ -54,20 +55,20 @@ func (s *OperationLog) List(ctx context.Context, q types.OperationLogPageQuery) 
 	}), nil
 }
 
-// Delete 批量删除审计行（ids 逗号分隔，如 "12,34,56"）。
+// Delete batch-deletes audit rows (ids comma-separated, e.g. "12,34,56").
 func (s *OperationLog) Delete(ctx context.Context, idsCSV string) error {
 	ids, err := parseIDsCSV(idsCSV)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		return errs.New(errs.CodeParam, "ids 不能为空")
+		return errs.New(errs.CodeParam, "ids cannot be empty")
 	}
 	_, err = dao.DeleteOperationLogs(ctx, ids)
 	return err
 }
 
-// Clean 清空本租户全部审计行。
+// Clean clears all audit rows of the current tenant.
 func (s *OperationLog) Clean(ctx context.Context) error {
 	_, err := dao.CleanOperationLogs(ctx)
 	return err

@@ -1,19 +1,21 @@
-// 定位与边界（与既有两层的分工）：
-//   - Casbin 管「能不能调这个接口」（功能权限），TenantPlugin 管「租户内还是租户外」
-//     （租户隔离）；本包管租户之内「能看到/操作哪些行」（数据权限），三层叠加不冲突。
-//   - 本包为纯计算，不访问 DB：角色/用户/部门由调用方（middleware 解析层）查询注入，
-//     dao 层经 Apply/Visible 消费，避免 dao ↔ 解析层循环依赖。
+// Positioning and boundaries (division of labor with the existing two layers):
+//   - Casbin governs "may this interface be called" (functional permission); TenantPlugin governs
+//     "inside or outside the tenant" (tenant isolation); this package governs "which rows can be
+//     seen/operated" within a tenant (data permission). The three layers stack without conflict.
+//   - This package is pure computation with no DB access: roles/users/departments are queried and
+//     injected by the caller (the middleware resolver layer); the dao layer consumes them via
+//     Apply/Visible, avoiding a dao ↔ resolver circular dependency.
 //
-// 口径（对齐 yudao，t_system_role.data_scope 已预留）：
+// Semantics (aligned with yudao; t_system_role.data_scope already reserved):
 //
-//	1 全部  2 自定义部门  3 本部门  4 本部门及以下  5 仅本人
+//	1 All  2 Custom departments  3 Own department  4 Own department and below  5 Self only
 //
-// 多角色合并规则：最宽松的单角色生效（对齐 yudao 优先级语义，确定性可解释）；
-// 同为「自定义部门」的多个角色取并集。宽容度序：全部 > 本部门及以下 > 本部门 > 自定义 > 仅本人。
+// Multi-role merge rule: the single most permissive role wins (aligned with yudao priority semantics — deterministic and explainable);
+// multiple roles that are both "custom departments" take their union. Permissiveness order: All > Own and below > Own department > Custom > Self only.
 //
-// 注入策略——显式优于隐式：tenant_id 所有租户表都有、语义统一，适合 TenantPlugin
-// 全局自动注入；数据权限的载体列（dept_id）与受控查询集合是业务语义，故只提供
-// Apply/Visible 两个收口，由 dao/service 显式调用，漏配在评审与测试中可见。
+// Injection strategy — explicit beats implicit: tenant_id exists on every tenant table with uniform semantics, fitting TenantPlugin's
+// global automatic injection; the carrier column for data permission (dept_id) and the controlled query set are business semantics, so only two
+// entry points, Apply/Visible, are provided, called explicitly by dao/service; a missing wiring shows up in review and tests.
 package datascope
 
 import (
@@ -26,45 +28,45 @@ import (
 	"strings"
 )
 
-// 数据权限口径常量（t_system_role.data_scope 取值）。
+// Data permission scope constants (values of t_system_role.data_scope).
 const (
-	ScopeAll       int8 = 1 // 全部数据
-	ScopeCustom    int8 = 2 // 自定义部门集合（data_scope_dept_ids，JSON 数组字符串）
-	ScopeDept      int8 = 3 // 仅本部门
-	ScopeDeptBelow int8 = 4 // 本部门及以下
-	ScopeSelf      int8 = 5 // 仅本人
+	ScopeAll       int8 = 1 // all data
+	ScopeCustom    int8 = 2 // custom department set (data_scope_dept_ids, JSON array string)
+	ScopeDept      int8 = 3 // own department only
+	ScopeDeptBelow int8 = 4 // own department and below
+	ScopeSelf      int8 = 5 // self only
 )
 
-// Scope 解析后的行级可见范围（值对象，ctx 注入后请求内复用）。
-// All 直通过滤；SelfOnly 命中 Owner 列；DeptIDs 命中 Dept 列；三者互斥（合并规则保证）。
+// Scope is the resolved row-level visibility range (a value object, reused within a request after ctx injection).
+// All bypasses filtering; SelfOnly matches the Owner column; DeptIDs matches the Dept column; the three are mutually exclusive (guaranteed by the merge rule).
 type Scope struct {
 	All      bool
 	SelfOnly bool
-	SelfID   int64   // SelfOnly 时的命中行主键
-	DeptIDs  []int64 // 允许的部门集合；All/SelfOnly 时为空
+	SelfID   int64   // primary key of the matching row when SelfOnly
+	DeptIDs  []int64 // allowed department set; empty when All/SelfOnly
 }
 
-// DeptNode 部门树最小视图（解析层由 model.Dept 转换，本包不依赖 model）。
+// DeptNode is the minimal view of the department tree (converted from model.Dept by the resolver layer; this package does not depend on model).
 type DeptNode struct {
 	ID       int64
 	ParentID int64
 }
 
-// RoleScope 角色的数据权限声明（解析层由 model.Role 转换）。
+// RoleScope is a role's data permission declaration (converted from model.Role by the resolver layer).
 type RoleScope struct {
 	Code             string
 	DataScope        int8
 	DataScopeDeptIDs string
 }
 
-// UserRef 解析数据权限所需的用户最小视图（解析层由 model.User 转换，本包不依赖 model）。
+// UserRef is the minimal user view needed to resolve data permission (converted from model.User by the resolver layer; this package does not depend on model).
 type UserRef struct {
 	ID     int64
 	DeptID int64
 }
 
-// ParseDeptIDs 解析 data_scope_dept_ids（JSON 数组字符串，形如 "[1,2,3]"，
-// 与 post_ids 存储格式一致）。非法/空输入返回空集，不报错——校验归属 Role 保存路径。
+// ParseDeptIDs parses data_scope_dept_ids (a JSON array string such as "[1,2,3]",
+// consistent with the post_ids storage format). Invalid/empty input returns an empty set without error — validation belongs to the Role save path.
 func ParseDeptIDs(s string) []int64 {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -83,9 +85,10 @@ func ParseDeptIDs(s string) []int64 {
 	return out
 }
 
-// NormalizeDeptIDs 归一化部门 ID 集合的存储形态：解析后以数字数组重新 marshal
-// （空集返回 ""，调用方写 NULL）。客户端入参可能带空串/空白，直接透传会让
-// 同一语义在库里出现多种写法；落库前统一，读侧 ParseDeptIDs 不受影响。
+// NormalizeDeptIDs normalizes the stored form of a department ID set: after parsing, re-marshal
+// as a numeric array (empty set returns "", and the caller writes NULL). Client input may carry
+// empty strings/whitespace; passing them through would let one semantics appear in multiple
+// forms in the database. Unify before writing; the read side via ParseDeptIDs is unaffected.
 func NormalizeDeptIDs(s string) string {
 	ids := ParseDeptIDs(s)
 	if len(ids) == 0 {
@@ -98,7 +101,7 @@ func NormalizeDeptIDs(s string) string {
 	return string(b)
 }
 
-// ChildrenMap 部门列表 → 父 ID 到子 ID 集合的邻接表（子树展开用）。
+// ChildrenMap maps a department list to an adjacency table from parent ID to child ID set (for subtree expansion).
 func ChildrenMap(depts []DeptNode) map[int64][]int64 {
 	children := make(map[int64][]int64, len(depts))
 	for _, d := range depts {
@@ -107,7 +110,7 @@ func ChildrenMap(depts []DeptNode) map[int64][]int64 {
 	return children
 }
 
-// ExpandSubtree 自根集合出发 BFS 展开子树（含根自身）。
+// ExpandSubtree BFS-expands subtrees from a root set (including the roots themselves).
 func ExpandSubtree(children map[int64][]int64, roots []int64) []int64 {
 	if len(roots) == 0 {
 		return nil
@@ -133,11 +136,11 @@ func ExpandSubtree(children map[int64][]int64, roots []int64) []int64 {
 	return out
 }
 
-// Merge 多角色合并（最宽松单角色生效；同宽容度的自定义角色取并集）。
-// ownDeptID 为当前用户部门（0 = 无部门：本部门/及以下口径退化为不可见任何部门），
-// selfID 为当前用户主键（仅本人口径的命中行），children 为租户部门树邻接表。
+// Merge merges multiple roles (the single most permissive role wins; custom roles of equal permissiveness take their union).
+// ownDeptID is the current user's department (0 = no department: the own-department/below semantics degrade to seeing no departments),
+// selfID is the current user's primary key (the matching row under the self-only semantics), and children is the tenant department tree adjacency table.
 func Merge(roles []RoleScope, ownDeptID, selfID int64, children map[int64][]int64) Scope {
-	bestRank := -1 // 已遇最大宽容度；-1 = 尚无角色
+	bestRank := -1 // greatest permissiveness seen so far; -1 = no roles yet
 	var best int8
 	var customUnion []int64
 	customSeen := make(map[int64]struct{})
@@ -174,7 +177,7 @@ func Merge(roles []RoleScope, ownDeptID, selfID int64, children map[int64][]int6
 	switch best {
 	case ScopeDeptBelow:
 		if ownDeptID <= 0 {
-			return Scope{} // 无部门：不可见任何行（fail-closed，不含本人兜底）
+			return Scope{} // no department: no rows visible (fail-closed, with no self fallback)
 		}
 		return Scope{DeptIDs: ExpandSubtree(children, []int64{ownDeptID})}
 	case ScopeDept:
@@ -188,42 +191,42 @@ func Merge(roles []RoleScope, ownDeptID, selfID int64, children map[int64][]int6
 		}
 		sort.Slice(customUnion, func(i, j int) bool { return customUnion[i] < customUnion[j] })
 		return Scope{DeptIDs: customUnion}
-	default: // 无角色或全部为仅本人
+	default: // no roles, or all self-only
 		return Scope{SelfOnly: true, SelfID: selfID}
 	}
 }
 
-// ---- ctx 注入/读取 ----
+// ---- ctx injection/retrieval ----
 
-// CtxKey 数据权限在 ctx 中的键（导出：huma 解析中间件经 huma.WithValue 注入
-// 时必须与 From/WithScope 使用同一键实例，跨包故导出类型本身）。
+// CtxKey is the key for data permission in ctx (exported: the huma resolver middleware injects via huma.WithValue
+// and must use the same key instance as From/WithScope; the type itself is exported because it crosses packages).
 type CtxKey struct{}
 
-// WithScope 把解析结果注入 ctx（解析中间件调用；dao/service 读取）。
+// WithScope injects the resolution result into ctx (called by the resolver middleware; read by dao/service).
 func WithScope(ctx context.Context, s Scope) context.Context {
 	return context.WithValue(ctx, CtxKey{}, s)
 }
 
-// From 取 ctx 中的数据权限（未注入时 ok=false，调用方 fail-closed）。
+// From retrieves the data permission from ctx (ok=false when not injected; callers fail closed).
 func From(ctx context.Context) (Scope, bool) {
 	s, ok := ctx.Value(CtxKey{}).(Scope)
 	return s, ok
 }
 
-// Columns 受控查询的载体列（dept_id 与行主键在不同表/JOIN 别名下不同，显式声明）。
+// Columns are the carrier columns for controlled queries (dept_id and the row primary key differ under different table/JOIN aliases, so declare them explicitly).
 type Columns struct {
-	Dept  string // 部门列（如 "dept_id"，JOIN 下可为 "u.dept_id"）
-	Owner string // 行主键列（仅本人口径用，如 "id"）
+	Dept  string // department column (e.g. "dept_id", or "u.dept_id" under a JOIN)
+	Owner string // row primary key column (used by the self-only semantics, e.g. "id")
 }
 
-// Apply 把 ctx 中的数据权限注入查询（列表类查询的收口）。
+// Apply injects the data permission from ctx into a query (the entry point for list-style queries).
 //
-// fail-closed：ctx 未注入数据权限时直接给查询挂错（对齐 TenantPlugin 对缺失租户的
-// fail-fast 语义），防止受控查询在漏挂解析中间件时退化为全量可见。
+// fail-closed: when ctx carries no data permission, attach an error to the query directly (aligned with TenantPlugin's
+// fail-fast semantics for a missing tenant), preventing a controlled query from degrading to fully visible when the resolver middleware is not attached.
 func Apply(ctx context.Context, db *gorm.DB, cols Columns) *gorm.DB {
 	s, ok := From(ctx)
 	if !ok {
-		_ = db.AddError(errs.New(errs.CodeInternal, "查询缺少数据权限上下文（受控接口未挂解析中间件）"))
+		_ = db.AddError(errs.New(errs.CodeInternal, "query lacks data scope context (controlled endpoint has no resolver middleware attached)"))
 		return db
 	}
 	switch {
@@ -234,13 +237,13 @@ func Apply(ctx context.Context, db *gorm.DB, cols Columns) *gorm.DB {
 	case len(s.DeptIDs) > 0:
 		return db.Where(cols.Dept+" IN ?", s.DeptIDs)
 	default:
-		return db.Where("1 = 0") // 空集：不可见任何行
+		return db.Where("1 = 0") // empty set: no rows visible
 	}
 }
 
-// Visible 单点可见性判定（按 ID 直查/改/删的收口，越权一律不可见）。
-// deptID 为目标行部门、rowID 为目标行主键；调用方在取到行后判定，
-// 不可见时按 404 处理（避免存在性探测，与「资源不存在」同一呈现）。
+// Visible decides single-point visibility (the entry point for direct read/update/delete by ID; anything out of scope is invisible).
+// deptID is the target row's department and rowID is the target row's primary key; the caller decides after fetching the row,
+// treating invisibility as 404 (avoiding existence probing, presented the same as "resource not found").
 func (s Scope) Visible(deptID, rowID int64) bool {
 	switch {
 	case s.All:

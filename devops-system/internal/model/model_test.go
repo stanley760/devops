@@ -1,5 +1,5 @@
-// P3 验收集成测试：BaseModel 发号 hook + idclient 预取缓冲端到端。
-// 依赖本地 MySQL（devops 库）与 devops-id 服务（:9090），不可达时跳过。
+// P3 verification integration test: BaseModel ID assignment hook + idclient prefetch buffer, end to end.
+// Depends on local MySQL (devops database) and the devops-id service (:9090); skipped when unreachable.
 package model_test
 
 import (
@@ -15,26 +15,26 @@ import (
 	"time"
 )
 
-// setup 加载配置 → 连接 MySQL → 装配发号客户端；任一依赖不可达则 Skip。
+// setup loads config → connects to MySQL → assembles the ID generator client; Skips if any dependency is unreachable.
 func setup(t *testing.T) {
 	t.Helper()
 
 	if err := infracfg.Init("../../config/config.yaml"); err != nil {
-		t.Skipf("加载配置失败，跳过集成测试: %v", err)
+		t.Skipf("failed to load config, skipping integration test: %v", err)
 	}
 	var cfg config.Config
 	if err := infracfg.LoadInto(&cfg); err != nil {
-		t.Skipf("解析配置失败，跳过集成测试: %v", err)
+		t.Skipf("failed to parse config, skipping integration test: %v", err)
 	}
 	if err := client.Init(cfg.Mysql); err != nil {
-		t.Skipf("MySQL 不可达，跳过集成测试: %v", err)
+		t.Skipf("MySQL unreachable, skipping integration test: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	conn, err := grpcinfra.Dial(ctx, cfg.IDClient.Endpoint, 2*time.Second)
 	if err != nil {
-		t.Skipf("devops-id 拨号失败，跳过集成测试: %v", err)
+		t.Skipf("devops-id dial failed, skipping integration test: %v", err)
 	}
 	idc := idclient.New(conn, idclient.BufferConfig{
 		Batch:       100,
@@ -42,13 +42,13 @@ func setup(t *testing.T) {
 		CallTimeout: 3 * time.Second,
 	})
 	if err := idc.Ping(ctx); err != nil {
-		t.Skipf("devops-id 健康检查失败，跳过集成测试: %v", err)
+		t.Skipf("devops-id health check failed, skipping integration test: %v", err)
 	}
 	model.SetIDGenerator(idc)
 	t.Cleanup(func() { _ = conn.Close() })
 }
 
-// TestBeforeCreateGeneratesID 创建用户 → 主键由 devops-id 发号（ID 批次递增）。
+// TestBeforeCreateGeneratesID: creating a user → the primary key is assigned by devops-id (IDs increase by batch).
 func TestBeforeCreateGeneratesID(t *testing.T) {
 	setup(t)
 	gdb := client.Get()
@@ -73,23 +73,23 @@ func TestBeforeCreateGeneratesID(t *testing.T) {
 	})
 
 	if err := gdb.Create(u1).Error; err != nil {
-		t.Fatalf("创建用户A失败: %v", err)
+		t.Fatalf("failed to create user A: %v", err)
 	}
 	if err := gdb.Create(u2).Error; err != nil {
-		t.Fatalf("创建用户B失败: %v", err)
+		t.Fatalf("failed to create user B: %v", err)
 	}
 
 	if u1.ID <= 0 {
-		t.Fatalf("用户A 未获得发号: %d", u1.ID)
+		t.Fatalf("user A did not get an assigned ID: %d", u1.ID)
 	}
-	// 同一批预取缓冲内：批次递增（1001、1002 型连续或跨批递增）
+	// within the same prefetch buffer: batch-incrementing (consecutive like 1001, 1002 or increasing across batches)
 	if u2.ID <= u1.ID {
-		t.Fatalf("ID 未递增: u1=%d u2=%d", u1.ID, u2.ID)
+		t.Fatalf("IDs not increasing: u1=%d u2=%d", u1.ID, u2.ID)
 	}
-	t.Logf("发号成功: u1=%d u2=%d", u1.ID, u2.ID)
+	t.Logf("ID assignment succeeded: u1=%d u2=%d", u1.ID, u2.ID)
 }
 
-// TestBizTagOf 模型类型 → biz_tag 推导。
+// TestBizTagOf: model type → biz_tag derivation.
 func TestBizTagOf(t *testing.T) {
 	cases := []struct {
 		model any

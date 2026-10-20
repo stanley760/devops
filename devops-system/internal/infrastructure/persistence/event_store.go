@@ -13,50 +13,50 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/model"
 )
 
-// 领域事件表名。
+// Domain event table name.
 const eventTable = "t_system_domain_event"
 
-// DomainEventPO 领域事件持久化对象。
+// DomainEventPO is the domain event persistence object.
 //
-// 新增表，不影响既有业务表与存量数据。表结构由 dbinit 的 SQL 迁移创建
-// （幂等：表存在即跳过）。
+// A new table; it does not affect existing business tables or existing data. The table
+// structure is created by dbinit's SQL migration (idempotent: skipped if the table exists).
 //
-// 复用 model.BaseModel 而非 domain.BaseModel：后者不存在于
-// devops-common/domain 包（该包只有分页值对象）。
-// 直接复用既有 model.BaseModel 可让事件表与业务表共享同一套
-// 主键发号（BeforeCreate hook）与审计字段填充逻辑。
+// Reuses model.BaseModel rather than domain.BaseModel: the latter does not exist in the
+// devops-common/domain package (that package only has pagination value objects).
+// Reusing the existing model.BaseModel directly lets the event table share the same
+// primary key assignment (BeforeCreate hook) and audit field filling logic as business tables.
 type DomainEventPO struct {
 	model.BaseModel
-	// EventName 事件名（投影路由键）。
+	// EventName is the event name (projection routing key).
 	EventName string `gorm:"size:64;not null;index"`
-	// AggregateType 聚合类型（如 iam.user）。
+	// AggregateType is the aggregate type (e.g. iam.user).
 	AggregateType string `gorm:"size:32;not null;index"`
-	// AggregateID 聚合 ID。
+	// AggregateID is the aggregate ID.
 	AggregateID int64 `gorm:"not null;index"`
-	// TenantID 租户 ID（投影时按租户定位 casbin 域）。
+	// TenantID is the tenant ID (locates the casbin domain by tenant at projection time).
 	TenantID int64 `gorm:"index;not null"`
-	// Payload 事件载荷 JSON。
+	// Payload is the event payload JSON.
 	Payload string `gorm:"type:json"`
-	// OccurredAt 事件发生时间。
+	// OccurredAt is the event occurrence time.
 	OccurredAt time.Time `gorm:"not null"`
-	// ProjectedAt 投影完成时间；NULL 表示待投影。
+	// ProjectedAt is the projection completion time; NULL means pending projection.
 	ProjectedAt *time.Time `gorm:"index"`
-	// Attempts 投影尝试次数（失败重试计数）。
+	// Attempts is the projection attempt count (failure retry count).
 	Attempts int `gorm:"not null;default:0"`
-	// LastError 最近一次投影错误。
+	// LastError is the most recent projection error.
 	LastError string `gorm:"size:500"`
 }
 
-// TableName 表名。
+// TableName is the table name.
 func (DomainEventPO) TableName() string { return eventTable }
 
-// eventStore 是 shared.EventStore 的 GORM 实现。
+// eventStore is the GORM implementation of shared.EventStore.
 type eventStore struct{}
 
-// NewEventStore 构造事件存储。
+// NewEventStore constructs the event store.
 func NewEventStore() shared.EventStore { return eventStore{} }
 
-// Append 在当前事务上下文中追加领域事件。
+// Append appends domain events in the current transaction context.
 func (eventStore) Append(ctx context.Context, events ...shared.Event) error {
 	if len(events) == 0 {
 		return nil
@@ -83,7 +83,7 @@ func (eventStore) Append(ctx context.Context, events ...shared.Event) error {
 	return nil
 }
 
-// appendEvents 仓储内部的便捷调用。
+// appendEvents is a convenience call inside the repository.
 func appendEvents(ctx context.Context, events ...shared.Event) error {
 	if len(events) == 0 {
 		return nil
@@ -91,7 +91,7 @@ func appendEvents(ctx context.Context, events ...shared.Event) error {
 	return eventStore{}.Append(ctx, events...)
 }
 
-// eventMeta 从事件提取聚合标识与发生时间。
+// eventMeta extracts the aggregate identifier and occurrence time from the event.
 func eventMeta(e shared.Event) (time.Time, string, int64) {
 	type aggInfo interface {
 		aggregateInfo() (string, int64)
@@ -103,7 +103,7 @@ func eventMeta(e shared.Event) (time.Time, string, int64) {
 	return e.OccurredAt(), "", 0
 }
 
-// eventTenant 从事件提取租户 ID（投影时需要 casbin 域）。
+// eventTenant extracts the tenant ID from the event (needed for the casbin domain at projection time).
 func eventTenant(e shared.Event) int64 {
 	type tenantInfo interface{ eventTenantID() int64 }
 	if t, ok := e.(tenantInfo); ok {
@@ -112,18 +112,18 @@ func eventTenant(e shared.Event) int64 {
 	return 0
 }
 
-// dispatcher 是领域事件分发器：按事件名路由到对应投影器。
+// dispatcher is the domain event dispatcher: routes events to the corresponding projectors by event name.
 //
-// 语义要点（这是替代手工补偿的关键）：
-//   - 投影失败**不返回错误给主流程**，业务写已提交，不应因授权投影失败而让用户困惑
-//   - 失败时事件保持 projected_at = NULL 并累加 attempts，由后台任务重试
-//   - 每个投影器实现必须幂等（casbin 的 RebuildXxx 系列先清后建，天然幂等）
+// Key semantics points (this is what replaces manual compensation):
+//   - projection failures do not return an error to the main flow; the business write is already committed and should not confuse the user because an authorization projection failed
+//   - on failure the event keeps projected_at = NULL and accumulates attempts, retried by a background task
+//   - every projector implementation must be idempotent (casbin's RebuildXxx family clears first then rebuilds, naturally idempotent)
 type dispatcher struct {
 	mu         sync.RWMutex
 	projectors map[string][]shared.EventProjector
 }
 
-// NewDispatcher 构造分发器并注册投影器。
+// NewDispatcher constructs the dispatcher and registers projectors.
 func NewDispatcher(projectors ...shared.EventProjector) shared.EventPublisher {
 	d := &dispatcher{projectors: make(map[string][]shared.EventProjector)}
 	for _, p := range projectors {
@@ -137,7 +137,7 @@ func NewDispatcher(projectors ...shared.EventProjector) shared.EventPublisher {
 	return d
 }
 
-// Publish 分发事件。投影失败仅记录，不向上返回。
+// Publish dispatches events. Projection failures are only recorded, not returned upward.
 func (d *dispatcher) Publish(ctx context.Context, events ...shared.Event) error {
 	for _, e := range events {
 		d.mu.RLock()
@@ -146,8 +146,8 @@ func (d *dispatcher) Publish(ctx context.Context, events ...shared.Event) error 
 
 		for _, p := range targets {
 			if err := p.Handle(ctx, e); err != nil {
-				// 投影失败不回传主流程：事件已持久化，可由重试任务补偿。
-				slog.Error("领域事件投影失败",
+				// projection failures are not propagated to the main flow: the event is already persisted and can be compensated by retry tasks.
+				slog.Error("domain event projection failed",
 					"event", e.EventName(),
 					"projector", projectorName(p),
 					"at", e.OccurredAt(),
@@ -165,7 +165,7 @@ func projectorName(p shared.EventProjector) string {
 	return "unknown"
 }
 
-// PendingEvents 取出待投影事件（供后台重试任务调用）。
+// PendingEvents takes the pending-projection events (for the background retry task).
 func PendingEvents(ctx context.Context, limit int) ([]DomainEventPO, error) {
 	var rows []DomainEventPO
 	err := db(ctx).Where("projected_at IS NULL").
@@ -176,7 +176,7 @@ func PendingEvents(ctx context.Context, limit int) ([]DomainEventPO, error) {
 	return rows, nil
 }
 
-// MarkProjected 标记事件投影完成。
+// MarkProjected marks the event's projection as complete.
 func MarkProjected(ctx context.Context, id int64) error {
 	now := time.Now()
 	return db(ctx).Model(&DomainEventPO{}).
@@ -186,7 +186,7 @@ func MarkProjected(ctx context.Context, id int64) error {
 	}).Error
 }
 
-// MarkProjectFailed 记录投影失败并累加重试次数。
+// MarkProjectFailed records the projection failure and accumulates the retry count.
 func MarkProjectFailed(ctx context.Context, id int64, cause error) error {
 	msg := ""
 	if cause != nil {

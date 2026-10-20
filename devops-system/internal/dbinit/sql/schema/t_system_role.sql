@@ -1,6 +1,6 @@
--- t_system_role 角色表（租户表）。
--- 复合唯一索引 uk_tenant_code(tenant_id,code) 内联声明。
--- data_scope/data_scope_dept_ids 仅存储，行级数据权限列 Roadmap。
+-- t_system_role role table (tenant table).
+-- The composite unique index uk_tenant_code(tenant_id,code) is declared inline.
+-- data_scope/data_scope_dept_ids are stored only; row-level data permission columns are on the Roadmap.
 CREATE TABLE IF NOT EXISTS t_system_role (
     id                   BIGINT       NOT NULL,
     creator              VARCHAR(64)  NULL,

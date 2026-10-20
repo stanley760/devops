@@ -1,8 +1,10 @@
-// Package audit 提供 devops-system 的操作审计装配。
+// Package audit provides the operation-audit wiring for devops-system.
 //
-// 分层：契约（记录什么、列宽多宽、用户类型枚举）在 devops-common/audit；
-// 通用 GORM 写入实现在 devops-infra/audit；本包只做本服务的落位接线——
-// 把租户感知连接（tenantdb.DB）与业务表模型（model.OperationLog）接到一起。
+// Layering: the contract (what is recorded, column widths, user-type enums)
+// lives in devops-common/audit; the generic GORM write implementation lives
+// in devops-infra/audit; this package only wires up this service's seat —
+// connecting the tenant-aware connection (tenantdb.DB) with the business
+// table model (model.OperationLog).
 package audit
 
 import (
@@ -16,19 +18,21 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/tenantdb"
 )
 
-// Executor 按请求上下文解析数据库连接。
+// Executor resolves the database connection from the request context.
 //
-// 走 tenantdb.DB(ctx) 而非裸连接：既复用 ctx 中已开启的事务（业务写与审计写
-// 同事务提交），又让 TenantPlugin 依据 ctx 注入 tenant_id——
-// 审计行天然落在正确租户下，无需在转换函数里手工填 TenantID。
+// It goes through tenantdb.DB(ctx) rather than a bare connection: this both
+// reuses the transaction already open in ctx (business write and audit write
+// commit in the same transaction) and lets TenantPlugin inject tenant_id
+// from ctx — audit rows naturally land under the correct tenant, with no
+// need to fill in TenantID manually inside the conversion function.
 type Executor struct{}
 
-// Create 实现 infraaudit.Executor。
+// Create implements infraaudit.Executor.
 func (Executor) Create(ctx context.Context, value any) *gorm.DB {
 	return tenantdb.DB(ctx).Create(value)
 }
 
-// NewSink 装配本服务的操作审计 Sink。
+// NewSink wires up this service's operation-audit Sink.
 func NewSink() *infraaudit.GORSink[*model.OperationLog] {
 	return infraaudit.NewGORSink(infraaudit.GORSinkConfig[*model.OperationLog]{
 		Executor: Executor{},

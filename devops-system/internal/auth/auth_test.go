@@ -24,7 +24,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/config"
 )
 
-// testManager 构建 miniredis + RS256 共享实现的门面。
+// testManager builds the facade over miniredis + the RS256 shared implementation.
 func testManager(t *testing.T) (*Manager, *miniredis.Miniredis) {
 	t.Helper()
 
@@ -76,7 +76,7 @@ func TestIssueParseSessionRoundTrip(t *testing.T) {
 		t.Fatalf("issue = %q %q %d", access, refresh, expiresIn)
 	}
 
-	// 令牌为 RS256 + kid + 现网 claim 名（手工解码断言，系统模块不直接依赖 jwt 库）
+	// The token is RS256 + kid with production claim names (decoded manually for assertions; the system module does not depend on the jwt library directly)
 	parts := strings.Split(access, ".")
 	if len(parts) != 3 {
 		t.Fatalf("token segments = %d", len(parts))
@@ -117,7 +117,7 @@ func TestIssueParseSessionRoundTrip(t *testing.T) {
 		t.Fatalf("claims mismatch: %+v", claims)
 	}
 
-	// 会话键形与旧实现一致：t{tid}:auth:refresh:{sid} / sids / sid2uid
+	// Session key shapes match the old implementation: t{tid}:auth:refresh:{sid} / sids / sid2uid
 	sid := claims.SID
 	if !mr.Exists("t7:auth:refresh:"+sid) || !mr.Exists("auth:sid2uid:"+sid) {
 		t.Fatal("session keys missing")
@@ -207,8 +207,9 @@ func TestParseRejectsGarbage(t *testing.T) {
 	}
 }
 
-// TestParseRejectsLegacyHS256 迁移决策回归：存量 HS256 token（同 issuer、未过期、
-// 旧 claims 形制）在 RS256 升级后整体失效——共享解析只接受 RS256。
+// TestParseRejectsLegacyHS256 is a migration-decision regression: existing
+// HS256 tokens (same issuer, unexpired, old claims shape) all become invalid
+// after the RS256 rollout — the shared parser accepts RS256 only.
 func TestParseRejectsLegacyHS256(t *testing.T) {
 	m, _ := testManager(t)
 

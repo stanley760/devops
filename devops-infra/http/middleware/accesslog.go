@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AccessLog 记录每个 HTTP 请求完成后的访问信息。
+// AccessLog records access information after each HTTP request completes.
 func AccessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		startedAt := time.Now()
@@ -18,7 +18,7 @@ func AccessLog() gin.HandlerFunc {
 			path = c.Request.URL.Path
 		}
 
-		slog.Info("HTTP 请求",
+		slog.Info("HTTP request",
 			"method", c.Request.Method,
 			"path", path,
 			"status", c.Writer.Status(),

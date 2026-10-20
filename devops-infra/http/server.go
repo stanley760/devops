@@ -31,20 +31,26 @@ func Run(cfg config.ServerConfig, register Register, readiness ...ReadinessCheck
 	return RunWithOptions(cfg, register, nil, nil, readiness...)
 }
 
-// GuardHooks 业务侧注入的全局中间件，在运维端点挂载之后、业务路由之前生效。
+// GuardHooks holds business-side global middleware injected after the ops
+// endpoints are mounted and before business routes are registered.
 //
-// 之所以做成扩展点而非把流量入口守卫写死在 infra：守卫（拒绝未经网关的直连请求）
-// 是对外暴露 HTTP 的业务才需要的策略，且 Secret 由业务配置持有；infra 不应
-// 感知具体业务的安全开关。
+// This is an extension point rather than a hard-coded traffic guard in infra:
+// the guard (rejecting direct requests that bypass the gateway) is a policy
+// only required by services exposing HTTP externally, and the Secret is owned
+// by business configuration; infra should not know about concrete business
+// security switches.
 type GuardHooks struct {
-	// Guards 在运维端点（/healthz /readyz /metrics）挂载后按序注册。
-	// 这些端点不经网关，必须在守卫之前挂载，否则健康检查与 Prometheus 抓取会被拦。
+	// Guards are registered in order after the ops endpoints
+	// (/healthz /readyz /metrics) are mounted.
+	// These endpoints do not go through the gateway, so they must be mounted
+	// before the guards; otherwise health checks and Prometheus scraping would be blocked.
 	Guards []gin.HandlerFunc
 }
 
-// RunWithOptions 在现有 HTTP 装配上接入 OTel trace/RED 中间件与 /metrics。
-// observability 运行时可为 nil，保持既有调用方零改动；
-// guard 为 nil 时不注册任何业务守卫，同样保持既有调用方零改动。
+// RunWithOptions wires the OTel trace/RED middleware and /metrics into the
+// existing HTTP assembly.
+// The observability Runtime may be nil, keeping existing callers unchanged;
+// a nil guard registers no business guards, likewise keeping existing callers unchanged.
 func RunWithOptions(cfg config.ServerConfig, register Register, obs *observability.Runtime, guard *GuardHooks, readiness ...ReadinessCheck) error {
 	gin.SetMode(ginMode())
 	r, err := newRouter(cfg, register, readiness, obs, guard)
@@ -61,30 +67,30 @@ func RunWithOptions(cfg config.ServerConfig, register Register, obs *observabili
 	defer stop()
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("HTTP 服务启动", "addr", srv.Addr, "mode", gin.Mode())
+		slog.Info("HTTP server started", "addr", srv.Addr, "mode", gin.Mode())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
 	select {
 	case err := <-errCh:
-		return fmt.Errorf("HTTP 服务异常: %w", err)
+		return fmt.Errorf("HTTP server error: %w", err)
 	case <-ctx.Done():
 	}
-	slog.Info("收到退出信号，开始优雅关闭")
+	slog.Info("shutdown signal received, starting graceful shutdown")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("优雅关闭失败: %w", err)
+		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
-	slog.Info("HTTP 服务已停止")
+	slog.Info("HTTP server stopped")
 	return nil
 }
 
 func newRouter(cfg config.ServerConfig, register Register, readiness []ReadinessCheck, obs *observability.Runtime, guard ...*GuardHooks) (*gin.Engine, error) {
 	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
-		return nil, fmt.Errorf("配置可信代理失败: %w", err)
+		return nil, fmt.Errorf("failed to configure trusted proxies: %w", err)
 	}
 	if obs != nil {
 		r.Use(obs.Middleware())
@@ -93,7 +99,7 @@ func newRouter(cfg config.ServerConfig, register Register, readiness []Readiness
 	r.Use(middleware.Recovery())
 	r.Use(middleware.AccessLog())
 	r.HandleMethodNotAllowed = true
-	r.NoRoute(func(c *gin.Context) { response.Fail(c, errs.CodeNotFound, "接口不存在") })
+	r.NoRoute(func(c *gin.Context) { response.Fail(c, errs.CodeNotFound, "endpoint does not exist") })
 	r.NoMethod(func(c *gin.Context) { response.Fail(c, errs.CodeMethodNotAllowed, errs.ErrMethodNotAllowed.Msg) })
 	r.GET("/healthz", func(c *gin.Context) { response.OK(c, gin.H{"status": "ok"}) })
 	if obs != nil && obs.MetricsHandler != nil {
@@ -121,11 +127,12 @@ func newRouter(cfg config.ServerConfig, register Register, readiness []Readiness
 		}
 		c.JSON(http.StatusServiceUnavailable, commonResp.BaseResponse[any]{
 			Code: http.StatusServiceUnavailable,
-			Msg:  "服务未就绪",
+			Msg:  "service not ready",
 			Data: gin.H{"status": "unready", "ready": ready, "unready": unready},
 		})
 	})
-	// 业务守卫必须在运维端点之后、业务路由之前：前者供直连探活，后者强制收口。
+	// Business guards must run after the ops endpoints but before business routes:
+	// the former serve direct liveness probes, the latter force traffic through the gateway.
 	if len(guard) > 0 && guard[0] != nil {
 		for _, g := range guard[0].Guards {
 			if g != nil {

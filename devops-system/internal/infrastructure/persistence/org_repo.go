@@ -15,19 +15,19 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/model"
 )
 
-// menuRepo 是 iam.MenuRepository 的 GORM 实现。
+// menuRepo is the GORM implementation of iam.MenuRepository.
 //
-// t_system_menu 是全局表（无 tenant_id），租户插件对其不做注入，
-// 菜单本身由全平台统一维护。
+// t_system_menu is a global table (no tenant_id), the tenant plugin does not inject for it,
+// and menus are maintained uniformly by the whole platform.
 type menuRepo struct{}
 
-// NewMenuRepository 构造菜单仓储。
+// NewMenuRepository constructs the menu repository.
 func NewMenuRepository() iam.MenuRepository { return menuRepo{} }
 
 func (menuRepo) Save(ctx context.Context, m *iam.Menu) error {
 	if m.ID == 0 {
 		if err := db(ctx).Create(toMenuPO(m)).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建菜单失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create menu")
 		}
 		return nil
 	}
@@ -47,10 +47,10 @@ func (menuRepo) Save(ctx context.Context, m *iam.Menu) error {
 		"status":         m.Status,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新菜单失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update menu")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "菜单不存在")
+		return errs.New(errs.CodeNotFound, "menu not found")
 	}
 	return nil
 }
@@ -59,9 +59,9 @@ func (menuRepo) Get(ctx context.Context, id int64) (*iam.Menu, error) {
 	var po model.Menu
 	if err := db(ctx).Where("id = ?", id).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "菜单不存在")
+			return nil, errs.New(errs.CodeNotFound, "menu not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询菜单失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query menu")
 	}
 	return toMenuDomain(&po), nil
 }
@@ -79,16 +79,17 @@ func (menuRepo) ListAll(ctx context.Context, f iam.MenuFilter) ([]*iam.Menu, err
 	}
 	var pos []model.Menu
 	if err := conn.Order("sort ASC, id ASC").Find(&pos).Error; err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询菜单失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query menus")
 	}
 	return toMenuDomains(pos), nil
 }
 
-// ListByUserRoles 取用户在租户内可见的菜单（登录后前端路由树）。
+// ListByUserRoles returns the menus visible to the user within the tenant (frontend route tree after login).
 //
-// 经 user_role → role_menu 两级关联取菜单，是既有实现的双 JOIN 口径。
-// 因涉及 JOIN，租户插件不做注入（见 devops-infra/tenant 插件的 JOIN 放行规则），
-// 故必须显式带 tenant_id——这是防跨租户泄漏的关键点，勿删。
+// Takes menus via the two-level association user_role → role_menu, matching the existing
+// implementation's double-JOIN semantics. Because JOINs are involved, the tenant plugin does
+// not inject (see the JOIN pass-through rules of the devops-infra/tenant plugin), so tenant_id
+// must be specified explicitly — this is the key point preventing cross-tenant leakage; do not remove.
 func (r menuRepo) ListByUserRoles(ctx context.Context, userID int64, menuTypes []int8) ([]*iam.Menu, error) {
 	tid, err := tenantOf(ctx)
 	if err != nil {
@@ -104,7 +105,7 @@ func (r menuRepo) ListByUserRoles(ctx context.Context, userID int64, menuTypes [
 
 	var pos []model.Menu
 	if err := conn.Order("m.sort ASC, m.id ASC").Find(&pos).Error; err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询用户菜单失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query user menus")
 	}
 	return toMenuDomains(pos), nil
 }
@@ -115,19 +116,19 @@ func (menuRepo) ListByIDs(ctx context.Context, ids []int64) ([]*iam.Menu, error)
 	}
 	var pos []model.Menu
 	if err := db(ctx).Where("id IN ?", ids).Find(&pos).Error; err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询菜单失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query menus")
 	}
 	return toMenuDomains(pos), nil
 }
 
-// Delete 删除菜单并清理角色关联。
+// Delete deletes the menu and cleans up role associations.
 func (menuRepo) Delete(ctx context.Context, id int64) error {
 	conn := db(ctx)
 	if err := conn.Where("menu_id = ?", id).Delete(&model.RoleMenu{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "删除菜单失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to delete menu")
 	}
 	if err := conn.Where("id = ?", id).Delete(&model.Menu{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "删除菜单失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to delete menu")
 	}
 	return nil
 }
@@ -180,16 +181,16 @@ func toMenuDomains(pos []model.Menu) []*iam.Menu {
 	return out
 }
 
-// deptRepo 是 iam.DeptRepository 的 GORM 实现。
+// deptRepo is the GORM implementation of iam.DeptRepository.
 type deptRepo struct{}
 
-// NewDeptRepository 构造部门仓储。
+// NewDeptRepository constructs the dept repository.
 func NewDeptRepository() iam.DeptRepository { return deptRepo{} }
 
 func (deptRepo) Save(ctx context.Context, d *iam.Dept) error {
 	if d.ID == 0 {
 		if err := db(ctx).Create(toDeptPO(d)).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建部门失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create dept")
 		}
 		return nil
 	}
@@ -203,10 +204,10 @@ func (deptRepo) Save(ctx context.Context, d *iam.Dept) error {
 		"status":         d.Status,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新部门失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update dept")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "部门不存在")
+		return errs.New(errs.CodeNotFound, "dept not found")
 	}
 	return nil
 }
@@ -215,9 +216,9 @@ func (deptRepo) Get(ctx context.Context, id int64) (*iam.Dept, error) {
 	var po model.Dept
 	if err := db(ctx).Where("id = ?", id).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "部门不存在")
+			return nil, errs.New(errs.CodeNotFound, "dept not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询部门失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query dept")
 	}
 	return toDeptDomain(&po), nil
 }
@@ -232,7 +233,7 @@ func (deptRepo) List(ctx context.Context, f iam.DeptFilter) ([]*iam.Dept, error)
 	}
 	var pos []model.Dept
 	if err := conn.Order("sort ASC, id ASC").Find(&pos).Error; err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询部门失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query depts")
 	}
 	out := make([]*iam.Dept, 0, len(pos))
 	for i := range pos {
@@ -241,10 +242,10 @@ func (deptRepo) List(ctx context.Context, f iam.DeptFilter) ([]*iam.Dept, error)
 	return out, nil
 }
 
-// Delete 软删部门。
+// Delete soft-deletes the dept.
 func (deptRepo) Delete(ctx context.Context, d *iam.Dept, operator string) error {
 	if err := db(ctx).Where("id = ?", d.ID).Delete(&model.Dept{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "删除部门失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to delete dept")
 	}
 	return nil
 }
@@ -253,7 +254,7 @@ func (deptRepo) HasChildren(ctx context.Context, id int64) (bool, error) {
 	var cnt int64
 	if err := db(ctx).Model(&model.Dept{}).
 		Where("parent_id = ?", id).Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "查询下级部门失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to query sub-departments")
 	}
 	return cnt > 0, nil
 }
@@ -262,12 +263,12 @@ func (deptRepo) HasMembers(ctx context.Context, id int64) (bool, error) {
 	var cnt int64
 	if err := db(ctx).Model(&model.User{}).
 		Where("dept_id = ?", id).Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "查询部门成员失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to query dept members")
 	}
 	return cnt > 0, nil
 }
 
-// LeaderNames 批量取部门负责人姓名。
+// LeaderNames batch-fetches dept leader names.
 func (deptRepo) LeaderNames(ctx context.Context, deptIDs []int64) (map[int64]string, error) {
 	if len(deptIDs) == 0 {
 		return nil, nil
@@ -277,11 +278,11 @@ func (deptRepo) LeaderNames(ctx context.Context, deptIDs []int64) (map[int64]str
 		Nickname string
 	}
 	var rows []row
-	// 一次查询取回所有负责人姓名，避免逐部门 N+1。
+	// one query fetches all leader names, avoiding per-dept N+1.
 	err := db(ctx).Model(&model.User{}).
 		Where("id IN ?", deptIDs).Select("id, nickname").Find(&rows).Error
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询部门负责人失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query dept leaders")
 	}
 	out := make(map[int64]string, len(rows))
 	for _, r := range rows {
@@ -322,16 +323,16 @@ func toDeptDomain(po *model.Dept) *iam.Dept {
 	}
 }
 
-// postRepo 是 iam.PostRepository 的 GORM 实现。
+// postRepo is the GORM implementation of iam.PostRepository.
 type postRepo struct{}
 
-// NewPostRepository 构造岗位仓储。
+// NewPostRepository constructs the post repository.
 func NewPostRepository() iam.PostRepository { return postRepo{} }
 
 func (postRepo) Save(ctx context.Context, p *iam.Post) error {
 	if p.ID == 0 {
 		if err := db(ctx).Create(toPostPO(p)).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建岗位失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create post")
 		}
 		return nil
 	}
@@ -343,10 +344,10 @@ func (postRepo) Save(ctx context.Context, p *iam.Post) error {
 		"remark": p.Remark,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新岗位失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update post")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "岗位不存在")
+		return errs.New(errs.CodeNotFound, "post not found")
 	}
 	return nil
 }
@@ -355,9 +356,9 @@ func (postRepo) Get(ctx context.Context, id int64) (*iam.Post, error) {
 	var po model.Post
 	if err := db(ctx).Where("id = ?", id).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "岗位不存在")
+			return nil, errs.New(errs.CodeNotFound, "post not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询岗位失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query post")
 	}
 	return toPostDomain(&po), nil
 }
@@ -375,12 +376,12 @@ func (postRepo) List(ctx context.Context, f iam.PostFilter) (domain.PageResult[*
 	}
 	page, err := gormx.FindPage[model.Post](conn.Order("sort ASC, id ASC"), f.PageParam)
 	if err != nil {
-		return domain.PageResult[*iam.Post]{}, errs.Wrap(err, errs.CodeInternal, "查询岗位列表失败")
+		return domain.PageResult[*iam.Post]{}, errs.Wrap(err, errs.CodeInternal, "failed to query post list")
 	}
 	return domain.MapPage(page, func(po model.Post) *iam.Post { return toPostDomain(&po) }), nil
 }
 
-// Delete 软删岗位并改写 code 绕开唯一索引。
+// Delete soft-deletes the post and rewrites the code to bypass the unique index.
 func (postRepo) Delete(ctx context.Context, p *iam.Post, operator string) error {
 	return db(ctx).Model(&model.Post{}).Where("id = ?", p.ID).Updates(map[string]any{
 		"code":       iam.SoftDeletedCode(p.Code, p.ID),
@@ -390,7 +391,7 @@ func (postRepo) Delete(ctx context.Context, p *iam.Post, operator string) error 
 }
 
 func (postRepo) CodeExists(ctx context.Context, code string, excludeID int64) (bool, error) {
-	return existsBy(ctx, &model.Post{}, "code", code, excludeID, "检查岗位编码唯一性失败")
+	return existsBy(ctx, &model.Post{}, "code", code, excludeID, "failed to check post code uniqueness")
 }
 
 func toPostPO(p *iam.Post) *model.Post {

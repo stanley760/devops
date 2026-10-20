@@ -8,19 +8,21 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// RedisStateStore state 的 Redis 实现。
+// RedisStateStore is the Redis implementation of state storage.
 //
-// 键形：t1:auth:oauth2state:{state} = JSON(StateValue)，TTL = stateTTL。
-// 一次性由 Redis GETDEL 保证（Redis 6.2+）；低版本回退到 Lua 脚本，
-// 避免「GET 校验通过但 DEL 失败」导致同一 state 被用两次。
+// Key shape: t1:auth:oauth2state:{state} = JSON(StateValue), TTL = stateTTL.
+// One-time use is guaranteed by Redis GETDEL (Redis 6.2+); older versions fall
+// back to a Lua script, avoiding "GET passes verification but DEL fails",
+// which would let the same state be used twice.
 type RedisStateStore struct {
 	rdb      *goredis.Client
 	prefix   string
 	stateTTL time.Duration
 }
 
-// NewRedisStateStore 创建 store。stateTTL 建议 5-10 分钟：
-// 超过 10 分钟的授权请求基本是用户放着不管，再放开反而增大重放窗口。
+// NewRedisStateStore creates a store. stateTTL is recommended to be 5-10
+// minutes: authorization requests older than 10 minutes are basically the user
+// walking away, and allowing more only widens the replay window.
 func NewRedisStateStore(rdb *goredis.Client, prefix string, stateTTL time.Duration) *RedisStateStore {
 	if stateTTL <= 0 {
 		stateTTL = 10 * time.Minute
@@ -32,7 +34,7 @@ func (s *RedisStateStore) key(state string) string {
 	return s.prefix + ":auth:oauth2state:" + state
 }
 
-// Save 存入 state。
+// Save stores the state.
 func (s *RedisStateStore) Save(ctx context.Context, state string, val StateValue, ttl time.Duration) error {
 	if s == nil || s.rdb == nil {
 		return errNoRedis
@@ -47,10 +49,11 @@ func (s *RedisStateStore) Save(ctx context.Context, state string, val StateValue
 	return s.rdb.Set(ctx, s.key(state), payload, ttl).Err()
 }
 
-// Verify 校验并一次性取出 state。
+// Verify verifies and one-time retrieves the state.
 //
-// 用 Lua 保证「读到即删」的原子性：若先 GET 再 DEL，两个并发请求可能都读到
-// 同一个 state 并各自完成登录——state 一次性失效形同虚设。
+// Lua guarantees the atomicity of "read and delete": if GET and DEL were
+// separate, two concurrent requests could both read the same state and each
+// complete login — the one-time nature of state would be moot.
 func (s *RedisStateStore) Verify(ctx context.Context, state string) (StateValue, error) {
 	var empty StateValue
 	if s == nil || s.rdb == nil {
@@ -83,7 +86,7 @@ return v`
 	return val, nil
 }
 
-// errNoRedis 未装配 Redis。
+// errNoRedis means Redis is not wired up.
 var errNoRedis = errNoRedisType("oauth2: redis client is nil")
 
 type errNoRedisType string

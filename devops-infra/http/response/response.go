@@ -1,15 +1,16 @@
-// Package response 统一 HTTP 响应格式与错误出口。
+// Package response provides a unified HTTP response format and error output.
 //
-// 所有业务接口返回 BaseResponse 信封：
+// All business endpoints return a BaseResponse envelope:
 //
 //	{"code": 200, "msg": "ok", "data": {...}}
 //
-// code 与 HTTP 状态码一致。业务 handler 以返回 error 的方式报告失败，
-// 经 Wrap 适配后由 FailErr 统一转换，避免各处手写错误响应：
+// code is identical to the HTTP status code. Business handlers report failures by
+// returning an error; after being adapted by Wrap, FailErr converts them uniformly,
+// so every call site avoids hand-writing error responses:
 //
 //	r.GET("/api/v1/users", response.Wrap(h.ListUsers))
 //
-// handler 内部成功路径自行调用 OK / OKPage 写出响应。
+// Inside a handler, the success path calls OK / OKPage directly to write the response.
 package response
 
 import (
@@ -30,11 +31,11 @@ import (
 
 type BaseResponse[T any] = commonResp.BaseResponse[T]
 
-// Handler 业务 handler 签名：以返回 error 报告失败，
-// 成功时自行调用 OK / OKPage 写响应。
+// Handler is the business handler signature: report failures by returning an error,
+// and call OK / OKPage directly on success to write the response.
 type Handler func(c *gin.Context) error
 
-// OK 成功响应。data 传 nil 表示无数据（删除、修改类操作）。
+// OK is the success response. Passing nil for data means no data (delete, update, etc.).
 func OK(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, BaseResponse[any]{
 		Code: errs.CodeOK,
@@ -43,7 +44,7 @@ func OK(c *gin.Context, data any) {
 	})
 }
 
-// OKPage 分页成功响应。
+// OKPage is the paginated success response.
 func OKPage[T any](c *gin.Context, page domain.PageResult[T]) {
 	c.JSON(http.StatusOK, BaseResponse[domain.PageResult[T]]{
 		Code: errs.CodeOK,
@@ -52,8 +53,8 @@ func OKPage[T any](c *gin.Context, page domain.PageResult[T]) {
 	})
 }
 
-// Fail 失败响应，code 同时作为 HTTP 状态码。
-// 仅放行 4xx/5xx，避免误传 2xx 造成语义混乱。
+// Fail is the failure response; code also serves as the HTTP status code.
+// Only 4xx/5xx are allowed through, to avoid mistakenly passing a 2xx and creating semantic confusion.
 func Fail(c *gin.Context, code int, msg string) {
 	if code < 400 || code > 599 {
 		code = errs.CodeInternal
@@ -64,9 +65,10 @@ func Fail(c *gin.Context, code int, msg string) {
 	c.AbortWithStatusJSON(code, BaseResponse[any]{Code: code, Msg: msg})
 }
 
-// FailErr 错误统一出口：识别 *errs.BizError 使用其 code/msg，
-// 其余未知错误记日志并按 500 处理，不向客户端泄露内部细节。
-// BizError 属预期内的业务失败（如参数错误），不再记日志。
+// FailErr is the unified error output: a *errs.BizError is recognized and its
+// code/msg used, while other unknown errors are logged and treated as 500, without
+// leaking internal details to the client.
+// A BizError is an expected business failure (e.g. a bad parameter), so it is not logged.
 func FailErr(c *gin.Context, err error) {
 	var be *errs.BizError
 	if errors.As(err, &be) {
@@ -74,18 +76,18 @@ func FailErr(c *gin.Context, err error) {
 		return
 	}
 
-	// handler 习惯直接 return c.ShouldBindJSON 的错误，
-	// 绑定/校验类错误属客户端问题，归类 400 而非 500 兜底
+	// Handlers habitually return the error from c.ShouldBindJSON directly;
+	// binding/validation errors are client problems, so classify them as 400 rather than a 500 fallback.
 	if msg, ok := asParamError(err); ok {
 		Fail(c, errs.CodeParam, msg)
 		return
 	}
 
-	slog.Error("未分类错误", "err", err, "method", c.Request.Method, "path", c.FullPath())
+	slog.Error("unclassified error", "err", err, "method", c.Request.Method, "path", c.FullPath())
 	Fail(c, errs.CodeInternal, errs.ErrInternal.Msg)
 }
 
-// asParamError 识别请求绑定/校验类错误，返回面向用户的提示。
+// asParamError recognizes request binding/validation errors and returns a user-facing message.
 func asParamError(err error) (string, bool) {
 	var valErrs validator.ValidationErrors
 	if errors.As(err, &valErrs) {
@@ -94,45 +96,45 @@ func asParamError(err error) (string, bool) {
 			if i > 0 {
 				b.WriteString("; ")
 			}
-			fmt.Fprintf(&b, "字段 %s 未通过 %s 校验", fe.Field(), fe.Tag())
+			fmt.Fprintf(&b, "field %s failed %s validation", fe.Field(), fe.Tag())
 		}
-		return "参数校验失败: " + b.String(), true
+		return "parameter validation failed: " + b.String(), true
 	}
 	var synErr *json.SyntaxError
 	if errors.As(err, &synErr) {
-		return "请求体不是合法 JSON", true
+		return "request body is not valid JSON", true
 	}
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
-		return "请求体字段类型错误", true
+		return "request body field type error", true
 	}
 	var parseErr *time.ParseError
 	if errors.As(err, &parseErr) {
-		return "请求体时间格式错误", true
+		return "request body time format error", true
 	}
 	if errors.Is(err, io.EOF) {
-		return "请求体不能为空", true
+		return "request body must not be empty", true
 	}
 	return "", false
 }
 
-// Wrap 把 Handler 适配为 gin.HandlerFunc，并统一处理错误：
-//   - 返回 BizError（含被 fmt.Errorf("%w") 包装的）→ 按其 code/msg 响应
-//   - 返回绑定/校验类错误（ShouldBindJSON 直返）→ 400 带字段级提示
-//   - 返回其他错误 → 500，细节只进日志
-//   - 返回 nil 但未写响应（漏写 bug）→ 兜底 500，避免请求挂起
-//   - 已写响应又返回错误 → 无法覆盖输出，记日志后中断
+// Wrap adapts a Handler into a gin.HandlerFunc and handles errors uniformly:
+//   - returns a BizError (including one wrapped by fmt.Errorf("%w")) → respond with its code/msg
+//   - returns a binding/validation error (returned directly from ShouldBindJSON) → 400 with a field-level message
+//   - returns any other error → 500, with details only going to the log
+//   - returns nil without writing a response (a missed-write bug) → fall back to 500 to avoid hanging the request
+//   - writes a response and then returns an error → output cannot be overwritten, so log it and abort
 func Wrap(h Handler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		err := h(c)
 		switch {
 		case err == nil:
 			if !c.Writer.Written() {
-				slog.Error("handler 未写响应", "method", c.Request.Method, "path", c.FullPath())
+				slog.Error("handler did not write a response", "method", c.Request.Method, "path", c.FullPath())
 				Fail(c, errs.CodeInternal, errs.ErrInternal.Msg)
 			}
 		case c.Writer.Written():
-			slog.Error("handler 已写响应仍返回错误", "err", err, "method", c.Request.Method, "path", c.FullPath())
+			slog.Error("handler already wrote a response but still returned an error", "err", err, "method", c.Request.Method, "path", c.FullPath())
 			c.Abort()
 		default:
 			FailErr(c, err)

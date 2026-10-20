@@ -1,27 +1,33 @@
-// apibench 走完整业务链路的 HTTP 压测工具，验证系统是否满足性能指标。
+// apibench is an HTTP load-testing tool that drives the full business
+// pipeline to verify the system meets its performance targets.
 //
-// 与 idbench 的分工：
-//   - idbench：直连 devops-id gRPC，测发号服务自身的吞吐上限；
-//   - apibench：打 devops-system 业务写路径（登录 → JWT → Casbin → idclient 预取 →
-//     devops-id 发号 → MySQL 落库），测端到端真实性能，并让 Grafana 的
-//     HTTP RED / 发号缓冲 / SQL 连接池 / 登录业务指标全部联动起来。
+// Division of labor with idbench:
+//   - idbench: talks directly to devops-id over gRPC and measures the
+//     issuance service's own throughput ceiling;
+//   - apibench: hits the devops-system business write path (login → JWT →
+//     Casbin → idclient prefetch → devops-id issuance → MySQL persistence),
+//     measuring true end-to-end performance while wiring together the
+//     Grafana HTTP RED / ID buffer / SQL connection pool / login business
+//     metrics.
 //
-// 使用示例（在仓库根目录运行）：
+// Usage examples (run from the repository root):
 //
-//	# 20 并发持续创建用户 30 秒（消耗 ID，驱动缓冲补充），直连后端
+//	# 20 concurrent workers creating users for 30s (consumes IDs, drives buffer refills), direct to the backend
 //	go run ./devops-system/cmd/apibench -c 20 -d 30s
 //
-//	# 经 Higress 网关压测（边缘 + 后端全链路）
+//	# Load test through the Higress gateway (edge + backend, full chain)
 //	go run ./devops-system/cmd/apibench -addr http://127.0.0.1:8080 -host api.devops.local -c 20 -d 30s
 //
-//	# 压测登录接口（bcrypt 校验为主要开销；注意每个成功登录都会创建一个会话）
+//	# Load test the login endpoint (bcrypt verification is the main cost;
+//	# note that every successful login creates a session)
 //	go run ./devops-system/cmd/apibench -mode login -c 20 -d 30s
 //
-// SLO 判定（与 deploy/prometheus/alerts.yml 告警阈值同源，可按需调整）：
-//   - 业务写路径 P99 延迟 ≤ 1s（DevOpsHTTPP99High）
-//   - 失败率（HTTP 非 200 或业务 code 非 200）≤ 1%（DevOpsHTTP5xxRateHigh 口径）
-//     压测期间另在 Grafana 交叉观察：idgen_buffer_remaining 不触零、
-//     idgen_refill_failures_total 为零、SQL 连接池无等待（DevOpsSQLPoolWaiting）。
+// SLO verdicts (aligned with the alert thresholds in deploy/prometheus/alerts.yml, adjustable as needed):
+//   - Business write path P99 latency ≤ 1s (DevOpsHTTPP99High)
+//   - Failure rate (HTTP non-200 or business code non-200) ≤ 1% (DevOpsHTTP5xxRateHigh definition);
+//     during the run, also cross-check in Grafana that idgen_buffer_remaining
+//     never hits zero, idgen_refill_failures_total stays at zero, and the SQL
+//     connection pool has no waiting (DevOpsSQLPoolWaiting).
 package main
 
 import (
@@ -39,45 +45,45 @@ import (
 	"time"
 )
 
-// envelope 统一响应信封（只取判定所需字段）。
+// envelope is the unified response envelope (only the fields needed for the verdict are extracted).
 type envelope struct {
 	Code int             `json:"code"`
 	Msg  string          `json:"msg"`
 	Data json.RawMessage `json:"data"`
 }
 
-// loginData data.access_token。
+// loginData holds data.access_token.
 type loginData struct {
 	AccessToken string `json:"access_token"`
 }
 
 func main() {
-	addr := flag.String("addr", "http://127.0.0.1:9999", "devops-system 基地址（经网关时填网关地址并配 -host）")
-	host := flag.String("host", "", "HTTP Host 头（经网关时为 api.devops.local；直连留空）")
-	mode := flag.String("mode", "create", "压测模式：create（创建用户，消耗 ID）| login（登录）| mixed（各半）")
-	username := flag.String("username", "admin", "登录账号（须有 system:user:create 权限）")
-	password := flag.String("password", "Admin@123", "登录密码")
-	tenant := flag.String("tenant", "default", "租户编码")
-	dept := flag.String("dept", "101", "创建用户的 deptId（须已存在）")
-	prefix := flag.String("prefix", "b_", "压测用户名前缀（自动拼接时间戳+序号保证唯一，总长 ≤30）")
-	conc := flag.Int("c", 20, "并发 goroutine 数")
-	dur := flag.Duration("d", 20*time.Second, "压测时长（0 表示只按 -n 总请求数跑）")
-	total := flag.Int64("n", 0, "总请求数上限（0 表示只按 -d 时长跑）")
-	p99SLO := flag.Duration("p99-slo", time.Second, "SLO：P99 延迟阈值")
-	errSLO := flag.Float64("err-slo", 0.01, "SLO：失败率阈值（0-1）")
-	timeout := flag.Duration("timeout", 10*time.Second, "单请求超时")
+	addr := flag.String("addr", "http://127.0.0.1:9999", "devops-system base address (when going through the gateway, set the gateway address and configure -host)")
+	host := flag.String("host", "", "HTTP Host header (api.devops.local when going through the gateway; leave empty for a direct connection)")
+	mode := flag.String("mode", "create", "benchmark mode: create (create users, consumes IDs) | login (log in) | mixed (half and half)")
+	username := flag.String("username", "admin", "login account (must have the system:user:create permission)")
+	password := flag.String("password", "Admin@123", "login password")
+	tenant := flag.String("tenant", "default", "tenant code")
+	dept := flag.String("dept", "101", "deptId for created users (must already exist)")
+	prefix := flag.String("prefix", "b_", "benchmark username prefix (a timestamp + sequence number is appended automatically to guarantee uniqueness; total length ≤ 30)")
+	conc := flag.Int("c", 20, "number of concurrent goroutines")
+	dur := flag.Duration("d", 20*time.Second, "benchmark duration (0 means run only until the -n total request count is reached)")
+	total := flag.Int64("n", 0, "upper bound on total requests (0 means run only for the -d duration)")
+	p99SLO := flag.Duration("p99-slo", time.Second, "SLO: P99 latency threshold")
+	errSLO := flag.Float64("err-slo", 0.01, "SLO: failure rate threshold (0-1)")
+	timeout := flag.Duration("timeout", 10*time.Second, "per-request timeout")
 	flag.Parse()
 
 	if *mode != "create" && *mode != "login" && *mode != "mixed" {
-		fmt.Fprintf(os.Stderr, "apibench: -mode 仅支持 create | login | mixed\n")
+		fmt.Fprintf(os.Stderr, "apibench: -mode only supports create | login | mixed\n")
 		os.Exit(2)
 	}
 	if *dur <= 0 && *total <= 0 {
-		fmt.Fprintf(os.Stderr, "apibench: -d 与 -n 至少给一个\n")
+		fmt.Fprintf(os.Stderr, "apibench: at least one of -d and -n must be given\n")
 		os.Exit(2)
 	}
 
-	// 连接池：默认 Transport 每主机仅 2 条空闲连接，压测必先放大
+	// Connection pool: the default Transport keeps only 2 idle connections per host, so it must be scaled up before benchmarking
 	transport := &http.Transport{
 		MaxIdleConns:        512,
 		MaxIdleConnsPerHost: 512,
@@ -85,7 +91,7 @@ func main() {
 	}
 	client := &http.Client{Transport: transport, Timeout: *timeout}
 
-	// 登录一次拿 Bearer token（同时充当连接预热；重试容忍启动抖动）
+	// Log in once to obtain a Bearer token (also serves as connection warm-up; retries tolerate startup jitter)
 	var token string
 	var lastErr error
 	for i := 0; i < 5; i++ {
@@ -96,15 +102,15 @@ func main() {
 		time.Sleep(time.Second)
 	}
 	if lastErr != nil {
-		fmt.Fprintf(os.Stderr, "apibench: 登录失败: %v\n", lastErr)
+		fmt.Fprintf(os.Stderr, "apibench: login failed: %v\n", lastErr)
 		os.Exit(1)
 	}
-	fmt.Printf("登录成功（%s），开始压测：mode=%s 并发=%d\n", *addr, *mode, *conc)
+	fmt.Printf("login succeeded (%s), starting benchmark: mode=%s concurrency=%d\n", *addr, *mode, *conc)
 	if *mode == "login" {
-		fmt.Println("注意: login 模式每个成功请求都会创建一个 Redis 会话")
+		fmt.Println("note: every successful request in login mode creates a Redis session")
 	}
 	if *mode == "create" {
-		fmt.Println("注意: create 模式会真实写入用户数据（bench 前缀可事后批量删除）")
+		fmt.Println("note: create mode really writes user data (the bench prefix can be bulk-deleted afterwards)")
 	}
 
 	var (
@@ -137,7 +143,7 @@ func main() {
 		last, lastAt := int64(0), startAt
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		fmt.Printf("时间 \t总请求 \t成功 \t失败 \t瞬时\n")
+		fmt.Printf("elapsed \ttotal \tok \tfailed \trate\n")
 		for range ticker.C {
 			now := time.Now()
 			cur := sent.Load()
@@ -175,7 +181,7 @@ func main() {
 					path, body, withToken = "/system/api/v1/users",
 						fmt.Sprintf(`{"username":"%s%d_%d","password":"Bench@123456","nickname":"bench","deptId":%q}`,
 							*prefix, tsBase, n, *dept), true
-				default: // mixed：单双交替
+				default: // mixed: alternate between the two modes
 					if n%2 == 0 {
 						path, body, withToken = "/system/api/v1/auth/login",
 							fmt.Sprintf(`{"tenant_code":%q,"username":%q,"password":%q}`, *tenant, *username, *password), false
@@ -208,14 +214,14 @@ func main() {
 	elapsed := time.Since(startAt)
 	close(progressDone)
 
-	// 汇总
+	// Summary
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	sentN := sent.Load()
 	fail := failN.Load()
 	fmt.Println()
-	fmt.Printf("======== 压测结果 ========\n")
-	fmt.Printf("目标 %s（mode=%s）并发 %d  时长 %.1fs\n", *addr, *mode, *conc, elapsed.Seconds())
-	fmt.Printf("总请求 %d  成功 %d  失败 %d (%.2f%%)\n", sentN, okN.Load(), fail, pct(fail, sentN))
+	fmt.Printf("======== Benchmark Results ========\n")
+	fmt.Printf("target %s (mode=%s) concurrency %d  duration %.1fs\n", *addr, *mode, *conc, elapsed.Seconds())
+	fmt.Printf("total requests %d  ok %d  failed %d (%.2f%%)\n", sentN, okN.Load(), fail, pct(fail, sentN))
 	if elapsed.Seconds() > 0 {
 		fmt.Printf("QPS %.1f\n", float64(sentN)/elapsed.Seconds())
 	}
@@ -225,41 +231,41 @@ func main() {
 			sum += d
 		}
 		p99 := pctile(latencies, 0.99)
-		fmt.Printf("延迟  avg %s  P50 %s  P90 %s  P95 %s  P99 %s  P99.9 %s  max %s\n",
+		fmt.Printf("latency  avg %s  P50 %s  P90 %s  P95 %s  P99 %s  P99.9 %s  max %s\n",
 			round(sum/time.Duration(n)),
 			round(pctile(latencies, 0.50)), round(pctile(latencies, 0.90)), round(pctile(latencies, 0.95)),
 			round(p99), round(pctile(latencies, 0.999)), round(latencies[n-1]))
 		if len(details) > 0 {
-			fmt.Printf("失败明细: ")
+			fmt.Printf("failure details: ")
 			for k, v := range details {
 				fmt.Printf("%s=%d ", k, v)
 			}
 			fmt.Println()
 		}
 
-		// ---- SLO 判定 ----
+		// ---- SLO verdicts ----
 		fmt.Println()
-		fmt.Printf("======== SLO 判定 ========\n")
+		fmt.Printf("======== SLO Verdicts ========\n")
 		passP99 := p99 <= *p99SLO
-		fmt.Printf("[%s] P99 延迟 %s ≤ %s\n", verdict(passP99), round(p99), round(*p99SLO))
+		fmt.Printf("[%s] P99 latency %s ≤ %s\n", verdict(passP99), round(p99), round(*p99SLO))
 		errRate := 1.0
 		if sentN > 0 {
 			errRate = float64(fail) / float64(sentN)
 		}
 		passErr := errRate <= *errSLO
-		fmt.Printf("[%s] 失败率 %.2f%% ≤ %.2f%%\n", verdict(passErr), errRate*100, *errSLO*100)
+		fmt.Printf("[%s] failure rate %.2f%% ≤ %.2f%%\n", verdict(passErr), errRate*100, *errSLO*100)
 		fmt.Println()
-		fmt.Println("另请在 Grafana 交叉确认（压测窗口内）：")
-		fmt.Println("  - idgen_buffer_remaining 未触 0（发号缓冲未耗尽）")
-		fmt.Println("  - idgen_refill_failures_total 无序列（零补充失败）")
-		fmt.Println("  - go_sql_wait_count_total 无增长（SQL 连接池无等待）")
+		fmt.Println("also cross-check in Grafana (within the benchmark window):")
+		fmt.Println("  - idgen_buffer_remaining never hit 0 (ID buffer not exhausted)")
+		fmt.Println("  - idgen_refill_failures_total shows no series (zero refill failures)")
+		fmt.Println("  - go_sql_wait_count_total shows no growth (no SQL connection pool waiting)")
 		if !passP99 || !passErr {
 			os.Exit(1)
 		}
 	}
 }
 
-// login 调用登录接口，返回 access_token。
+// login calls the login endpoint and returns the access_token.
 func login(client *http.Client, addr, host, tenant, username, password string) (string, error) {
 	body := fmt.Sprintf(`{"tenant_code":%q,"username":%q,"password":%q}`, tenant, username, password)
 	status, code, raw, err := doPostRaw(client, addr, host, "/system/api/v1/auth/login", body, "", false)
@@ -267,7 +273,7 @@ func login(client *http.Client, addr, host, tenant, username, password string) (
 		return "", err
 	}
 	if status != http.StatusOK || code != 200 {
-		return "", fmt.Errorf("登录响应异常: http=%d code=%d body=%.200s", status, code, raw)
+		return "", fmt.Errorf("unexpected login response: http=%d code=%d body=%.200s", status, code, raw)
 	}
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -278,18 +284,18 @@ func login(client *http.Client, addr, host, tenant, username, password string) (
 		return "", err
 	}
 	if data.AccessToken == "" {
-		return "", fmt.Errorf("响应缺少 access_token: %.200s", raw)
+		return "", fmt.Errorf("response is missing access_token: %.200s", raw)
 	}
 	return data.AccessToken, nil
 }
 
-// doPost 返回 (http状态, 业务code, error)。
+// doPost returns (http status, business code, error).
 func doPost(client *http.Client, addr, host, path, body, token string, withToken bool) (int, int, error) {
 	status, code, _, err := doPostRaw(client, addr, host, path, body, token, withToken)
 	return status, code, err
 }
 
-// doPostRaw 发送请求并解析信封 code（失败响应可能没有 JSON body，code 记 0）。
+// doPostRaw sends the request and parses the envelope code (a failed response may have no JSON body; the code is recorded as 0).
 func doPostRaw(client *http.Client, addr, host, path, body, token string, withToken bool) (int, int, []byte, error) {
 	req, err := http.NewRequest(http.MethodPost, addr+path, bytes.NewReader([]byte(body)))
 	if err != nil {
@@ -352,7 +358,7 @@ func verdict(pass bool) string {
 	return "FAIL"
 }
 
-// errClass 传输层错误归类（连接被拒/超时等）。
+// errClass classifies transport-layer errors (connection refused / timeout, etc.).
 func errClass(err error) string {
 	s := err.Error()
 	switch {

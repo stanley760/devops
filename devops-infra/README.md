@@ -1,75 +1,75 @@
-# devops-infra 增强中间件使用指南
+# devops-infra Enhanced Middleware Guide
 
-`devops-infra` 是 devops 平台的共享基础设施模块。本文面向**业务服务开发者**，详细说明如何调用本模块中已经增强的中间件能力，包括：
+`devops-infra` is the shared infrastructure module of the devops platform. This document targets **business service developers** and explains in detail how to use the already-enhanced middleware capabilities in this module, including:
 
-| 能力 | 包路径 | 说明 |
+| Capability | Package path | Description |
 | --- | --- | --- |
-| HTTP 通用中间件 | `devops-infra/http/middleware` | panic 恢复、访问日志，`http.Run` 开箱即用 |
-| gRPC 通用拦截器 | `devops-infra/grpc/interceptor` | panic 恢复、访问日志，`grpc.Run` 开箱即用 |
-| JWT 认证 | `devops-infra/security/jwt` | RS256 + kid 签发/验签、JWKS 输出 |
-| Redis 会话存储 | `devops-infra/security/session` | 刷新会话态（踢下线、轮换、批量撤销） |
-| 认证 / 鉴权中间件 | `devops-infra/security/middleware` | 框架无关认证器 + Gin 中间件三件套 |
-| Casbin 权限决策 | `devops-infra/security/authz` | 多租户域模型 RBAC，gorm-adapter 持久化 |
-| 多租户中间件 | `devops-infra/tenant` | 请求头注入租户上下文 + GORM 行级隔离 |
-| 统一响应与错误 | `devops-infra/http/response`、`devops-infra/errs` | 统一信封、统一错误码 |
+| HTTP common middleware | `devops-infra/http/middleware` | panic recovery, access logging; `http.Run` works out of the box |
+| gRPC common interceptors | `devops-infra/grpc/interceptor` | panic recovery, access logging; `grpc.Run` works out of the box |
+| JWT authentication | `devops-infra/security/jwt` | RS256 + kid signing/verification, JWKS output |
+| Redis session store | `devops-infra/security/session` | refresh session state (kick offline, rotation, batch revocation) |
+| Authentication / authorization middleware | `devops-infra/security/middleware` | framework-agnostic authenticator + Gin middleware trio |
+| Casbin authorization decisions | `devops-infra/security/authz` | multi-tenant domain-model RBAC, gorm-adapter persistence |
+| Multi-tenant middleware | `devops-infra/tenant` | request-header tenant context injection + GORM row-level isolation |
+| Unified response and errors | `devops-infra/http/response`, `devops-infra/errs` | unified envelope, unified error codes |
 
-> 本模块只做**决策**，不做**呈现**：中间件产出 claims / 租户上下文 / 允许与否的判定；HTTP 状态码文案、响应信封由各业务服务通过回调（`HumaOptions`）或 `response` 包自行定制。
-
----
-
-## 目录
-
-1. [整体架构：请求经过的中间件链](#1-整体架构请求经过的中间件链)
-2. [快速开始](#2-快速开始)
-3. [HTTP 通用中间件](#3-http-通用中间件)
-4. [gRPC 通用拦截器](#4-grpc-通用拦截器)
-5. [统一响应与错误处理](#5-统一响应与错误处理)
-6. [JWT 认证：签发、验签与会话](#6-jwt-认证签发验签与会话)
-7. [认证 / 鉴权 Gin 中间件](#7-认证--鉴权-gin-中间件)
-8. [Casbin 权限决策与策略管理](#8-casbin-权限决策与策略管理)
-9. [多租户中间件与数据隔离](#9-多租户中间件与数据隔离)
-10. [中间件编排最佳实践](#10-中间件编排最佳实践)
-11. [单元测试支持](#11-单元测试支持)
-12. [数据权限与中间件套件](#12-数据权限与中间件套件)
-13. [附录：API 速查表](#13-附录api-速查表)
+> This module only makes **decisions**, not **presentation**: middleware produces claims / tenant context / allow-or-deny verdicts; HTTP status-code text and response envelopes are customized by each business service via callbacks (`HumaOptions`) or the `response` package.
 
 ---
 
-## 1. 整体架构
+## Table of Contents
 
-一个受保护的 HTTP 请求按以下顺序穿过中间件链（gRPC 同理）：
+1. [Overall Architecture](#1-overall-architecture)
+2. [Quick Start](#2-quick-start)
+3. [HTTP Common Middleware](#3-http-common-middleware)
+4. [gRPC Common Interceptors](#4-grpc-common-interceptors)
+5. [Unified Response and Error Handling](#5-unified-response-and-error-handling)
+6. [JWT Authentication: Signing, Verification and Sessions](#6-jwt-authentication-signing-verification-and-sessions)
+7. [Authentication / Authorization Gin Middleware](#7-authentication--authorization-gin-middleware)
+8. [Casbin Authorization Decisions and Policy Management](#8-casbin-authorization-decisions-and-policy-management)
+9. [Multi-Tenant Middleware and Data Isolation](#9-multi-tenant-middleware-and-data-isolation)
+10. [Middleware Orchestration Best Practices](#10-middleware-orchestration-best-practices)
+11. [Unit Test Support](#11-unit-test-support)
+12. [Data Permissions and Middleware Suite](#12-data-permissions-and-middleware-suite)
+13. [Appendix: API Cheat Sheet](#13-appendix-api-cheat-sheet)
+
+---
+
+## 1. Overall Architecture
+
+A protected HTTP request passes through the middleware chain in the following order (the same for gRPC):
 
 ```
-客户端
+Client
   │  Authorization: Bearer <access_token>
   │  X-Tenant-ID: <tenant_id>
   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ http.Run 自动挂载：Recovery → AccessLog                      │
-│   404/405 统一信封、/healthz、/readyz                        │
+│ http.Run auto-mounts: Recovery → AccessLog                  │
+│   unified 404/405 envelope, /healthz, /readyz               │
 ├─────────────────────────────────────────────────────────────┤
-│ 业务路由组（huma 链，按序挂载）：                             │
-│   ① HumaAuthenticate            Bearer → RS256 验签 → 会话态 │
-│   ② HumaTenantContext           claims → 租户可用性 → ctx    │
-│   ③ HumaRequirePermission       Casbin 域内鉴权（可选）       │
-│   ④ HumaRequirePlatformPermission  平台管理员鉴权（可选）     │
-│   ⑤ response.WriteHumaEnvelope  统一错误出口                  │
+│ Business route groups (huma chain, mounted in order):       │
+│   ① HumaAuthenticate            Bearer → RS256 verify → session state │
+│   ② HumaTenantContext           claims → tenant usability → ctx    │
+│   ③ HumaRequirePermission       in-domain Casbin authz (optional)   │
+│   ④ HumaRequirePlatformPermission  platform admin authz (optional) │
+│   ⑤ response.WriteHumaEnvelope   unified error exit                  │
 ├─────────────────────────────────────────────────────────────┤
-│ 数据访问层：tenant.RegisterPlugin 自动追加 WHERE tenant_id    │
+│ Data access layer: tenant.RegisterPlugin auto-appends WHERE tenant_id │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-三条核心设计原则：
+Three core design principles:
 
-- **fail-closed**：认证器、会话存储、Casbin、租户插件任何一处内部错误都按"拒绝"处理（503 / 查询报错），绝不放行。
-- **决策与呈现分离**：安全决策在 `devops-infra/security/*`，如何响应（文案、信封）由业务侧回调决定。
-- **框架无关内核**：认证器 `Authenticator` 只依赖 `context` 与两个接口（`TokenParser`、`SessionStore`），Gin 只是薄适配层，可按同样方式扩展到其他框架。
+- **fail-closed**: any internal error in the authenticator, session store, Casbin or tenant plugin is treated as "deny" (503 / query error), never allowed through.
+- **Decision/presentation separation**: security decisions live in `devops-infra/security/*`; how to respond (text, envelope) is decided by business-side callbacks.
+- **Framework-agnostic core**: the authenticator `Authenticator` depends only on `context` and two interfaces (`TokenParser`, `SessionStore`); Gin is just a thin adapter layer, extensible to other frameworks the same way.
 
 ---
 
-## 2. 快速开始
+## 2. Quick Start
 
-以一个最小业务服务为例，5 步接入全部中间件能力：
+Taking a minimal business service as an example, wire up all middleware capabilities in 5 steps:
 
 ```go
 package main
@@ -88,7 +88,7 @@ import (
 )
 
 func main() {
-    // 配置经结构体映射加载（各服务自定义根 Config 组合 infracfg.ServerConfig 等）
+    // Config is loaded via struct mapping (each service composes infracfg.ServerConfig etc. into its own root Config)
     var cfg struct {
         Server infracfg.ServerConfig `mapstructure:"server"`
         JWT    struct {
@@ -103,7 +103,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // ① 构造 JWT 管理器（RS256 私钥 + 自验签 KeySet）
+    // ① Build the JWT manager (RS256 private key + self-verifying KeySet)
     privPEM := []byte(cfg.JWT.SigningKey)
     pub, err := securityjwt.PublicKeyFromPrivatePEM(privPEM)
     if err != nil {
@@ -125,48 +125,48 @@ func main() {
         log.Fatal(err)
     }
 
-    // ② 构造 Redis 会话存储与认证器
+    // ② Build the Redis session store and authenticator
     // sessions := securitysession.NewRedisClientStore(redisClient, cfg.JWT.RefreshExpire)
     // authn := securitymw.NewAuthenticator(tokenMgr, sessions)
 
-    // ③ 注册 GORM 租户隔离插件（可选）
+    // ③ Register the GORM tenant isolation plugin (optional)
     // tenant.RegisterPlugin(gormDB)
 
-    // ④ 组装 huma 中间件链：认证 → 租户 → 权限 → handler（详见第 7、9 节）
+    // ④ Assemble the huma middleware chain: authenticate → tenant → permission → handler (see sections 7 and 9 for details)
     _ = securitymw.HumaAuthenticate
     _ = tenant.HumaTenantContext
 
-    // ⑤ 一行启动：自动挂载 Recovery/AccessLog/healthz/readyz
-    // httpinfra.Run(cfg.Server, func(r *gin.Engine) { /* 注册路由 */ })
+    // ⑤ One line to start: auto-mounts Recovery/AccessLog/healthz/readyz
+    // httpinfra.Run(cfg.Server, func(r *gin.Engine) { /* register routes */ })
 }
 ```
 
-以下各节逐项展开。
+Each of the following sections expands on these one by one.
 
 ---
 
-## 3. HTTP 通用中间件
+## 3. HTTP Common Middleware
 
-### 3.1 `http.Run`：开箱即用的服务骨架
+### 3.1 `http.Run`: Out-of-the-Box Service Skeleton
 
 ```go
 func Run(cfg config.ServerConfig, register Register, readiness ...ReadinessCheck) error
 ```
 
-`http.Run` 内部已自动完成以下装配，**业务代码无需重复挂载**：
+`http.Run` already completes the following wiring internally, so **business code does not need to mount it again**:
 
-| 内置能力 | 行为 |
+| Built-in capability | Behavior |
 | --- | --- |
-| `gin.Logger()` | gin 标准请求日志 |
-| `middleware.Recovery()` | panic → 统一 500 信封（见下） |
-| `middleware.AccessLog()` | 请求完成后的结构化访问日志（Debug 级） |
-| `SetTrustedProxies` | 按 `server.trusted_proxies` 配置可信代理，保证 `ClientIP` 正确 |
-| `NoRoute / NoMethod` | 404 / 405 返回统一信封而非 gin 默认纯文本 |
-| `GET /healthz` | 存活探针，返回 `{"status":"ok"}` |
-| `GET /readyz` | 就绪探针，逐项执行 readiness 检查（单项 2s 超时），未就绪返回 503 并列出未就绪项 |
-| 优雅退出 | 监听 SIGINT/SIGTERM，10s 排空在途请求 |
+| `gin.Logger()` | gin standard request log |
+| `middleware.Recovery()` | panic → unified 500 envelope (see below) |
+| `middleware.AccessLog()` | structured access log after request completion (Debug level) |
+| `SetTrustedProxies` | trusted proxies per the `server.trusted_proxies` config, ensuring `ClientIP` is correct |
+| `NoRoute / NoMethod` | 404 / 405 return a unified envelope instead of gin's default plain text |
+| `GET /healthz` | liveness probe, returns `{"status":"ok"}` |
+| `GET /readyz` | readiness probe, runs readiness checks one by one (2s timeout each); returns 503 with the not-ready items listed |
+| Graceful shutdown | listens for SIGINT/SIGTERM, drains in-flight requests for 10s |
 
-业务服务只需提供路由注册回调与就绪检查：
+Business services only need to provide a route registration callback and readiness checks:
 
 ```go
 readiness := []httpinfra.ReadinessCheck{
@@ -176,170 +176,170 @@ readiness := []httpinfra.ReadinessCheck{
 err := httpinfra.Run(cfg.Server, router.Register(...), readiness...)
 ```
 
-`config.ServerConfig` 对应 YAML 配置：
+`config.ServerConfig` maps to YAML config:
 
 ```yaml
 server:
   port: 8080
   read_timeout: 10s
   write_timeout: 10s
-  trusted_proxies: ["10.0.0.0/8"]   # 网关/SLB 网段
+  trusted_proxies: ["10.0.0.0/8"]   # gateway/SLB CIDRs
 ```
 
-### 3.2 `Recovery()`：panic 统一处理
+### 3.2 `Recovery()`: Unified Panic Handling
 
 ```go
 middleware.Recovery()
 ```
 
-- 捕获 handler panic，记录 `slog.Error`（含 panic 值、方法、路径、完整堆栈）；
-- 响应未写出时返回统一信封 `{"code":500,"msg":"服务器内部错误"}`；
-- 响应已部分写出时仅置 500（此时无法再改写为信封）。
+- Catches handler panics, logging `slog.Error` (including the panic value, method, path and full stack);
+- Returns a unified envelope `{"code":500,"msg":"Internal server error"}` when the response has not been written yet;
+- Only sets 500 when the response has been partially written (the envelope can no longer be changed at that point).
 
-> 刻意不用 `gin.Recovery()`——其默认输出纯文本，与统一响应格式冲突。
+> Deliberately not using `gin.Recovery()` — its default output is plain text, which conflicts with the unified response format.
 
-### 3.3 `AccessLog()`：访问日志
+### 3.3 `AccessLog()`: Access Log
 
 ```go
 middleware.AccessLog()
 ```
 
-请求完成后以 `slog.Debug` 记录：method、path（优先路由模板 `FullPath()`）、status、latency、bytes、client_ip。生产环境将日志级别调到 `info` 及以上即自动静默，需要排查时调回 `debug`，无需改代码。
+After a request completes, logs via `slog.Debug`: method, path (route template `FullPath()` preferred), status, latency, bytes, client_ip. In production, raising the log level to `info` or above silences it automatically; switch back to `debug` when troubleshooting, with no code changes.
 
 ---
 
-## 4. gRPC 通用拦截器
+## 4. gRPC Common Interceptors
 
-### 4.1 `grpc.Run`：服务端骨架
+### 4.1 `grpc.Run`: Server Skeleton
 
 ```go
 grpcinfra.Run(grpcinfra.ServerConfig{
     Listen:     ":9090",
-    Reflection: cfg.Env == "dev", // dev 开启 reflection，便于 grpcurl 调试
+    Reflection: cfg.Env == "dev", // reflection enabled in dev for easier grpcurl debugging
 }, func(s *grpc.Server, hc *health.Server) {
     pb.RegisterXxxServer(s, svc)
     hc.SetServingStatus("xxx.Service", healthpb.HealthCheckResponse_SERVING)
 })
 ```
 
-自动挂载：
+Automatically mounts:
 
-- `interceptor.Recovery()`：panic → `codes.Internal`（"服务器内部错误"），堆栈只进日志，不向客户端泄露细节；
-- `interceptor.AccessLog()`：每个一元调用完成后以 `slog.Debug` 记录 method、status code、latency；
-- `grpc.health.v1` 标准健康检查服务；
-- SIGINT/SIGTERM 优雅退出：`GracefulStop` 最多等 10s，超时强停。
+- `interceptor.Recovery()`: panic → `codes.Internal` ("internal server error"), stack only goes to logs, no details leaked to the client;
+- `interceptor.AccessLog()`: logs method, status code and latency via `slog.Debug` after each unary call completes;
+- `grpc.health.v1` standard health check service;
+- SIGINT/SIGTERM graceful shutdown: `GracefulStop` waits up to 10s, force-stops on timeout.
 
-### 4.2 客户端拨号
+### 4.2 Client Dialing
 
 ```go
 conn, err := grpcinfra.Dial(ctx, "devops-id:9090", 5*time.Second)
 defer grpcinfra.Close(conn)
 
-// 判断连接类错误，供上层决定是否重试
+// Classify connection-class errors so upper layers can decide whether to retry
 if grpcinfra.IsUnavailable(err) { ... }
 ```
 
-`Dial` 返回非阻塞就绪连接，内置 `Unavailable` 指数退避重试——对发号类幂等调用安全（重试至多烧号，绝不重号）。
+`Dial` returns a non-blocking ready connection with built-in `Unavailable` exponential-backoff retries — safe for idempotent ID-generation calls (retries burn IDs at most, never duplicate them).
 
 ---
 
-## 5. 统一响应与错误处理
+## 5. Unified Response and Error Handling
 
-中间件与业务 handler 共用同一套响应约定。所有接口返回信封：
+Middleware and business handlers share the same response convention. All endpoints return an envelope:
 
 ```json
 {"code": 200, "msg": "ok", "data": {...}}
 ```
 
-`code` 与 HTTP 状态码同空间（200/400/401/403/404/405/500）。
+`code` shares the same space as HTTP status codes (200/400/401/403/404/405/500).
 
-### 5.1 handler 写法：`response.Wrap`
+### 5.1 Handler Style: `response.Wrap`
 
-业务 handler 以**返回 error** 的方式报告失败，成功路径自行写响应：
+Business handlers report failures by **returning an error**; the success path writes the response itself:
 
 ```go
 func (h *UserHandler) Get(c *gin.Context) error {
     id, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil {
-        return errs.New(errs.CodeParam, "用户 ID 非法")        // → 400
+        return errs.New(errs.CodeParam, "invalid user ID")        // → 400
     }
     user, err := h.svc.Get(c.Request.Context(), id)
     if err != nil {
-        return err                                            // → 按错误类型分流
+        return err                                            // → dispatched by error type
     }
-    response.OK(c, user)                                      // → 200 信封
+    response.OK(c, user)                                      // → 200 envelope
     return nil
 }
 
-// 注册：Wrap 负责把 error 转成响应
+// Registration: Wrap is responsible for turning an error into a response
 r.GET("/api/v1/users/:id", response.Wrap(userH.Get))
 ```
 
-`Wrap` 的分流规则：
+`Wrap`'s dispatch rules:
 
-| handler 返回 | 响应 |
+| Handler returns | Response |
 | --- | --- |
-| `nil` 且已写响应 | 原样输出 |
-| `nil` 但未写响应 | 500（兜底，记日志，防请求挂起） |
-| `*errs.BizError`（含 `%w` 包装） | 按其 `Code`/`Msg` 输出 |
-| JSON 绑定/校验错误（`ShouldBindJSON` 直返） | 400，带字段级中文提示 |
-| 其他未知错误 | 500，细节只进日志 |
+| `nil` and response already written | passed through as-is |
+| `nil` but response not written | 500 (fallback, logged, prevents request hang) |
+| `*errs.BizError` (incl. `%w` wrapping) | output by its `Code`/`Msg` |
+| JSON binding/validation error (`ShouldBindJSON` returned directly) | 400, with field-level messages |
+| other unknown errors | 500, details only in logs |
 
-### 5.2 错误定义：`errs`
+### 5.2 Error Definitions: `errs`
 
 ```go
-// 直接使用预定义错误
-return errs.ErrNotFound                       // 404 资源不存在
+// Use predefined errors directly
+return errs.ErrNotFound                       // 404 resource not found
 
-// 附加业务语义并保留底层原因（日志可见，客户端不可见）
-return errs.Wrap(err, errs.CodeInternal, "签发 token 失败")
+// Attach business semantics while retaining the underlying cause (visible in logs, invisible to clients)
+return errs.Wrap(err, errs.CodeInternal, "failed to sign token")
 ```
 
-错误码常量：`CodeOK(200)` `CodeParam(400)` `CodeUnauthorized(401)` `CodeForbidden(403)` `CodeNotFound(404)` `CodeMethodNotAllowed(405)` `CodeInternal(500)`。
+Error code constants: `CodeOK(200)` `CodeParam(400)` `CodeUnauthorized(401)` `CodeForbidden(403)` `CodeNotFound(404)` `CodeMethodNotAllowed(405)` `CodeInternal(500)`.
 
-### 5.3 常用响应出口
+### 5.3 Common Response Exits
 
-| 函数 | 用途 |
+| Function | Purpose |
 | --- | --- |
-| `response.OK(c, data)` | 200 成功，`data` 传 `nil` 表示无数据 |
-| `response.OKPage(c, list, total)` | 200 分页：`data: {list, total}` |
-| `response.Fail(c, code, msg)` | 失败出口，仅放行 4xx/5xx，`AbortWithStatusJSON` |
-| `response.FailErr(c, err)` | 错误统一出口（`Wrap` 内部使用，也可直接调用） |
+| `response.OK(c, data)` | 200 success; `data` of `nil` means no data |
+| `response.OKPage(c, list, total)` | 200 paginated: `data: {list, total}` |
+| `response.Fail(c, code, msg)` | failure exit, only 4xx/5xx allowed, via `AbortWithStatusJSON` |
+| `response.FailErr(c, err)` | unified error exit (used inside `Wrap`, also directly callable) |
 
 ---
 
-## 6. JWT 认证
+## 6. JWT Authentication
 
-包路径 `devops-infra/security/jwt`。采用 **RS256 非对称签名 + kid 密钥标识**：签发方持私钥，验签方只需公钥（甚至只需 JWKS 端点），天然支持网关验签与密钥轮换。
+Package path `devops-infra/security/jwt`. Uses **RS256 asymmetric signing + kid key identifiers**: the signer holds the private key, verifiers need only the public key (or even just the JWKS endpoint), naturally supporting gateway verification and key rotation.
 
-### 6.1 构造签名管理器
+### 6.1 Building the Signing Manager
 
 ```go
-// 私钥 PEM（PKCS#1 或 PKCS#8 均可），通常来自配置项 jwt.signing_key
+// Private key PEM (PKCS#1 or PKCS#8), usually from the config item jwt.signing_key
 privPEM := []byte(cfg.JWT.SigningKey)
 
-// 单签发方部署：用自身私钥导出公钥，组装自验签 KeySet
+// Single-signer deployment: export the public key from your own private key and assemble a self-verifying KeySet
 pub, err := securityjwt.PublicKeyFromPrivatePEM(privPEM)
 if err != nil { log.Fatal(err) }
 
 keySet, err := securityjwt.NewStaticKeySet(map[string]*rsa.PublicKey{
-    "devops-system-rs256-1": pub,   // kid → 公钥；轮换期可同时放新旧两把
+    "devops-system-rs256-1": pub,   // kid → public key; during rotation both old and new keys may be present
 })
 if err != nil { log.Fatal(err) }
 
 tokenMgr, err := securityjwt.NewManager(securityjwt.Config{
-    PrivateKeyPEM: privPEM,          // 签发用私钥
-    KeyID:         "devops-system-rs256-1",  // 写入 token header 的 kid
-    Issuer:        "devops-system",  // iss，验签时强制校验
-    AccessExpire:  30 * time.Minute, // access token 有效期
-    RefreshExpire: 7 * 24 * time.Hour, // 刷新会话有效期（session.TTL 默认值）
-    KeySet:        keySet,           // 验签用公钥集合
+    PrivateKeyPEM: privPEM,          // private key for signing
+    KeyID:         "devops-system-rs256-1",  // kid written into the token header
+    Issuer:        "devops-system",  // iss, strictly verified when verifying
+    AccessExpire:  30 * time.Minute, // access token validity period
+    RefreshExpire: 7 * 24 * time.Hour, // refresh session validity period (session.TTL default)
+    KeySet:        keySet,           // public key set for verification
 })
 ```
 
-`Config.Validate` 要求所有字段非空，缺失时返回 `ErrInvalidConfig`。仅需**验签**的服务可以不配 `PrivateKeyPEM`（不签发），但 `KeySet` 必须提供。
+`Config.Validate` requires all fields to be non-empty, returning `ErrInvalidConfig` when missing. Services that only need **verification** may omit `PrivateKeyPEM` (no signing), but `KeySet` must be provided.
 
-### 6.2 签发 access token
+### 6.2 Issuing an Access Token
 
 ```go
 pair, err := tokenMgr.Issue(ctx, securityjwt.Subject{
@@ -347,33 +347,33 @@ pair, err := tokenMgr.Issue(ctx, securityjwt.Subject{
     Username:   "alice",
     TenantID:   7,
     TenantCode: "tenant-7",
-}, sessionID)   // sessionID 由调用方生成（推荐 uuid），同时作为刷新会话的 sid
+}, sessionID)   // sessionID is generated by the caller (uuid recommended), also serving as the refresh session's sid
 ```
 
-返回 `TokenPair{AccessToken, SessionID, AccessExpiresIn}`。claims 载荷结构：
+Returns `TokenPair{AccessToken, SessionID, AccessExpiresIn}`. The claims payload structure:
 
-| 字段 | JSON 键 | 含义 |
+| Field | JSON key | Meaning |
 | --- | --- | --- |
-| `UID` | `uid` | 用户 ID |
-| `Username` | `username` | 用户名 |
-| `SessionID` | `sid` | 会话 ID（刷新凭据） |
-| `TenantID` | `tid` | 租户 ID |
-| `TenantCode` | `tcode` | 租户编码 |
-| 标准字段 | `iss/sub/iat/nbf/exp` | `sub` 为用户 ID 字符串 |
+| `UID` | `uid` | user ID |
+| `Username` | `username` | username |
+| `SessionID` | `sid` | session ID (refresh credential) |
+| `TenantID` | `tid` | tenant ID |
+| `TenantCode` | `tcode` | tenant code |
+| Standard fields | `iss/sub/iat/nbf/exp` | `sub` is the user ID as a string |
 
-### 6.3 解析验签
+### 6.3 Parsing and Verification
 
 ```go
 claims, err := tokenMgr.ParseAccess(tokenString)
-// 成功：*Claims；失败：ErrInvalidConfig（配置问题）或 ErrInvalidToken（伪造/过期/kid 未知/issuer 不符）
+// Success: *Claims; failure: ErrInvalidConfig (config problem) or ErrInvalidToken (forged/expired/unknown kid/issuer mismatch)
 ```
 
-强制校验：RS256 算法、header `kid` 存在且能在 `KeySet` 中找到、`iss` 匹配、`exp` 必须存在且未过期。
+Strictly verified: RS256 algorithm, header `kid` present and findable in `KeySet`, `iss` matches, `exp` must exist and be unexpired.
 
-### 6.4 JWKS 端点（网关验签对接）
+### 6.4 JWKS Endpoint (Gateway Verification Integration)
 
 ```go
-// 暴露 RFC 7517 JWKS 文档，供 Higress jwt-auth 插件（jwksFromUrl）或其他服务拉取公钥
+// Expose the RFC 7517 JWKS document for the Higress jwt-auth plugin (jwksFromUrl) or other services to fetch the public key
 r.GET("/.well-known/jwks.json", func(c *gin.Context) {
     doc, err := tokenMgr.JWKS()   // {"keys":[{"kty":"RSA","kid":"...","use":"sig","alg":"RS256","n":"...","e":"..."}]}
     if err != nil {
@@ -384,121 +384,121 @@ r.GET("/.well-known/jwks.json", func(c *gin.Context) {
 })
 ```
 
-仅输出公钥材料（n/e），私钥永不离开签发方。轮换密钥时：新 token 用新 `kid` 签发，`KeySet` 同时保留新旧公钥，旧 token 在 `exp` 内仍可验签，实现平滑过渡。
+Only public key material (n/e) is output; the private key never leaves the signer. When rotating keys: new tokens are signed with the new `kid`, `KeySet` retains both old and new public keys, and old tokens remain verifiable within `exp`, achieving a smooth transition.
 
-### 6.5 Redis 会话存储（`security/session`）
+### 6.5 Redis Session Store (`security/session`)
 
-JWT 一旦签发无法主动作废，因此每个 access token 绑定一个服务端会话（`sid`）。**每个请求都校验会话存在**——登出、改密、停用用户后，旧 token 立即失效。
+Once issued, a JWT cannot be actively invalidated, so each access token is bound to a server-side session (`sid`). **Every request verifies the session exists** — after logout, password change or user deactivation, old tokens take effect immediately.
 
 ```go
-// 两种构造方式：包装 cache/redis 的 Client，或直接传 go-redis 客户端
+// Two construction styles: wrap a cache/redis Client, or pass a go-redis client directly
 sessions := securitysession.NewRedisStore(cacheRedisClient, 7*24*time.Hour)
 sessions := securitysession.NewRedisClientStore(goRedisClient, 7*24*time.Hour)
 ```
 
-`Store` 接口全量方法：
+Full `Store` interface methods:
 
 ```go
 type Store interface {
-    Create(ctx, Session) error                    // 建会话（登录/刷新时）
-    Active(ctx, SessionRef) (bool, error)         // 会话是否有效（认证中间件每请求调用）
-    Lookup(ctx, sid) (tenantID, userID, ok)       // 由 sid 反查归属（refresh 端点用）
-    Matches(ctx, SessionRef, userID) (bool, error)// 校验 sid 确属该用户
-    Revoke(ctx, SessionRef) error                 // 撤销单个会话（登出/轮换）
-    RevokeUser(ctx, tenantID, userID) error       // 撤销用户全部会话（改密/停用 → 踢下线）
-    RevokeTenant(ctx, tenantID) error             // 撤销租户全部会话（停用租户 → 全员下线）
+    Create(ctx, Session) error                    // create session (on login/refresh)
+    Active(ctx, SessionRef) (bool, error)         // whether the session is valid (called every request by the auth middleware)
+    Lookup(ctx, sid) (tenantID, userID, ok)       // reverse lookup of ownership by sid (used by the refresh endpoint)
+    Matches(ctx, SessionRef, userID) (bool, error)// verify the sid really belongs to that user
+    Revoke(ctx, SessionRef) error                 // revoke a single session (logout/rotation)
+    RevokeUser(ctx, tenantID, userID) error       // revoke all of a user's sessions (password change/deactivation → kick offline)
+    RevokeTenant(ctx, tenantID) error             // revoke all of a tenant's sessions (tenant deactivation → everyone offline)
 }
 ```
 
-Redis 键空间（**按租户分段**，便于按租户清理与审计）：
+Redis keyspace (**segmented by tenant**, for per-tenant cleanup and auditing):
 
-| 键 | 值 | TTL |
+| Key | Value | TTL |
 | --- | --- | --- |
-| `t{tid}:auth:refresh:{sid}` | `user_id` | 会话 TTL |
-| `t{tid}:auth:sids:{uid}` | SET\<sid\> | 永久（供批量撤销索引） |
-| `auth:sid2uid:{sid}` | `"tid:uid"` | 会话 TTL |
+| `t{tid}:auth:refresh:{sid}` | `user_id` | session TTL |
+| `t{tid}:auth:sids:{uid}` | SET\<sid\> | permanent (for batch revocation indexing) |
+| `auth:sid2uid:{sid}` | `"tid:uid"` | session TTL |
 
-登录/刷新的标准用法（参考 devops-system 的 `auth.Manager`）：
+Standard usage for login/refresh (see devops-system's `auth.Manager`):
 
 ```go
-// 登录：签发 + 建会话
+// Login: sign + create session
 sid := uuid.NewString()
 pair, _ := tokenMgr.Issue(ctx, subject, sid)
 _ = sessions.Create(ctx, securitysession.Session{
     TenantID: 7, UserID: 42, SessionID: sid, TTL: cfg.RefreshExpire,
 })
 
-// 刷新轮换（对齐 rotation 最佳实践）：先建新会话，再撤销旧 sid
-// 登出：sessions.Revoke(ctx, SessionRef{TenantID: 7, UserID: 42, SessionID: sid})
+// Refresh rotation (aligned with rotation best practices): create the new session first, then revoke the old sid
+// Logout: sessions.Revoke(ctx, SessionRef{TenantID: 7, UserID: 42, SessionID: sid})
 ```
 
 ---
 
-## 7. 认证 / 鉴权 Gin 中间件
+## 7. Authentication / Authorization Gin Middleware
 
-包路径 `devops-infra/security/middleware`。三个 Gin 中间件 + 一个框架无关认证器。
+Package path `devops-infra/security/middleware`. Three Gin middleware + one framework-agnostic authenticator.
 
-### 7.1 `Authenticator`：框架无关认证决策
+### 7.1 `Authenticator`: Framework-Agnostic Authentication Decision
 
 ```go
 type TokenParser interface{ ParseAccess(token string) (*securityjwt.Claims, error) }
 type SessionStore interface{ Active(ctx, SessionRef) (bool, error) }
 
-authn := securitymw.NewAuthenticator(tokenMgr, sessions) // 两个依赖正好由第 6 节组件实现
+authn := securitymw.NewAuthenticator(tokenMgr, sessions) // the two dependencies are exactly implemented by the section 6 components
 ```
 
-`Authenticate(ctx, bearerHeader)` 执行三步：
+`Authenticate(ctx, bearerHeader)` performs three steps:
 
-1. **Bearer 解析**：要求 `Authorization: Bearer <token>` 前缀，否则 `ErrUnauthorized`；
-2. **token 验签**：`ParseAccess` 失败 → `ErrUnauthorized`；配置错误 → `ErrInfrastructure`；
-3. **会话态校验**：Redis `Active` 查询出错 → `ErrInfrastructure`；会话不存在 → `ErrSessionInactive`。
+1. **Bearer parsing**: requires the `Authorization: Bearer <token>` prefix, otherwise `ErrUnauthorized`;
+2. **Token verification**: `ParseAccess` failure → `ErrUnauthorized`; config error → `ErrInfrastructure`;
+3. **Session state check**: Redis `Active` query error → `ErrInfrastructure`; session does not exist → `ErrSessionInactive`.
 
-错误分类（用 `errors.Is` 判定）：
+Error classification (determined with `errors.Is`):
 
-| 错误 | 含义 | 建议映射 |
+| Error | Meaning | Suggested mapping |
 | --- | --- | --- |
-| `ErrUnauthorized` | 缺失头 / scheme 错 / token 非法或过期 | 401 |
-| `ErrSessionInactive` | token 有效但服务端会话已撤销（被踢下线） | 401（提示重新登录） |
-| `ErrInfrastructure` | Redis 故障、JWT 配置错误等内部问题 | 503（fail-closed） |
+| `ErrUnauthorized` | missing header / wrong scheme / invalid or expired token | 401 |
+| `ErrSessionInactive` | token valid but the server-side session has been revoked (kicked offline) | 401 (prompt re-login) |
+| `ErrInfrastructure` | internal issues such as Redis failure or JWT config error | 503 (fail-closed) |
 
-非 Gin 场景可直接调用 `authn.Authenticate`（定时任务间调用、其他框架适配）。
+Non-Gin scenarios can call `authn.Authenticate` directly (inter-scheduled-task calls, other framework adapters).
 
-### 7.2 `HumaAuthenticate`：认证中间件
+### 7.2 `HumaAuthenticate`: Authentication Middleware
 
 ```go
 var opts = securitymw.HumaOptions{
     OnUnauthorized: func(hctx huma.Context, err error) {
-        response.WriteHumaEnvelope(hctx, http.StatusUnauthorized, "未登录或会话已过期")
+        response.WriteHumaEnvelope(hctx, http.StatusUnauthorized, "Not logged in or session expired")
     },
     OnForbidden: func(hctx huma.Context, err error) {
-        response.WriteHumaEnvelope(hctx, http.StatusForbidden, "无操作权限")
+        response.WriteHumaEnvelope(hctx, http.StatusForbidden, "No operation permission")
     },
     OnInfrastructureError: func(hctx huma.Context, err error) {
-        slog.Error("认证基础设施错误", "err", err)
-        response.WriteHumaEnvelope(hctx, http.StatusServiceUnavailable, "服务暂不可用，请稍后重试")
+        slog.Error("authentication infrastructure error", "err", err)
+        response.WriteHumaEnvelope(hctx, http.StatusServiceUnavailable, "Service temporarily unavailable, please try again later")
     },
 }
 
-// 挂载在需要登录的 huma Operation 上
+// Mount on huma Operations that require login
 huma.Register(api, huma.Operation{
     Method: http.MethodGet, Path: "/api/v1/me",
     Middlewares: huma.Middlewares{securitymw.HumaAuthenticate(authn, opts)},
 }, meHandler)
 ```
 
-认证成功后把 `*securityjwt.Claims` 经 `huma.WithValue` 注入 context 并放行；失败按错误分类调用对应回调并中断。
+After successful authentication, `*securityjwt.Claims` is injected into the context via `huma.WithValue` and the request proceeds; on failure the corresponding callback is invoked by error classification and the chain is interrupted.
 
-`HumaOptions` 三个回调均可省略，默认回调以统一信封（code/msg/data）呈现 401/403/503。**生产建议**像上例一样注入业务文案，保持全站信封一致。
+All three `HumaOptions` callbacks may be omitted; the default callbacks present 401/403/503 with a unified envelope (code/msg/data). **Recommended for production**: inject business text like the example above, keeping the envelope consistent site-wide.
 
-在后续 handler / 中间件中取当前用户身份：
+To get the current user identity in downstream handlers / middleware:
 
 ```go
-claims := securitymw.HumaCurrentClaims(ctx)   // *securityjwt.Claims，未认证时为 nil
+claims := securitymw.HumaCurrentClaims(ctx)   // *securityjwt.Claims, nil when unauthenticated
 ```
 
-> 业务服务通常会在自己的 claims 类型与共享 `Claims` 之间做一次边界转换（`FromShared`），使业务代码不直接依赖基础设施包——参考 devops-system `internal/auth`。
+> Business services typically do one boundary conversion between their own claims type and the shared `Claims` (`FromShared`), so business code does not depend directly on infrastructure packages — see devops-system `internal/auth`.
 
-### 7.3 `HumaRequirePermission`：租户域内鉴权
+### 7.3 `HumaRequirePermission`: In-Tenant-Domain Authorization
 
 ```go
 huma.Register(api, huma.Operation{
@@ -507,221 +507,221 @@ huma.Register(api, huma.Operation{
 }, listHandler)
 ```
 
-内部逻辑：从 context 取 claims → 以 `claims.UID`（sub）、`claims.TenantID`（dom）调用 `authorizer.Enforce`：
+Internal logic: takes claims from the context → calls `authorizer.Enforce` with `claims.UID` (sub) and `claims.TenantID` (dom):
 
-- 放行 → `next(hctx)`；
-- Casbin 出错 → `OnInfrastructureError`（503，fail-closed）；
-- 无权限 → `OnForbidden`（403）；
-- claims 缺失（未先过 `HumaAuthenticate`）→ `OnUnauthorized`。
+- allow → `next(hctx)`;
+- Casbin error → `OnInfrastructureError` (503, fail-closed);
+- no permission → `OnForbidden` (403);
+- claims missing (`HumaAuthenticate` not run first) → `OnUnauthorized`.
 
-### 7.4 `HumaRequirePlatformPermission`：平台管理员鉴权
+### 7.4 `HumaRequirePlatformPermission`: Platform Admin Authorization
 
 ```go
-// 平台路由不挂租户中间件，操作全局表
+// Platform routes do not mount tenant middleware; they operate on global tables
 huma.Register(api, huma.Operation{
     Method: http.MethodGet, Path: "/api/v1/tenants",
     Middlewares: huma.Middlewares{securitymw.HumaRequirePlatformPermission(authz, "platform:tenant:list", opts)},
 }, listHandler)
 ```
 
-双重校验，比域内鉴权多一步身份门槛：
+Dual verification, one identity threshold more than in-domain authorization:
 
-1. `IsPlatformAdmin(uid)`：校验 `g2` 平台角色；
-2. `EnforcePlatform(uid, perm)`：以 `dom="*"` 执行策略。
+1. `IsPlatformAdmin(uid)`: verifies the `g2` platform role;
+2. `EnforcePlatform(uid, perm)`: executes the policy with `dom="*"`.
 
-**防越权要点**：`platform:tenant:*` 这类平台权限标识只应出现在平台路由，不要进入租户菜单/角色表——否则持有 `p, super_admin, {tid}, *` 的租户超管会因 `p.dom == "*"` 通配而触达平台接口。
+**Anti-privilege-escalation essentials**: platform permission identifiers like `platform:tenant:*` should only appear on platform routes and must not enter tenant menus/role tables — otherwise a tenant super admin holding `p, super_admin, {tid}, *` would reach platform endpoints via the `p.dom == "*"` wildcard.
 
-### 7.5 认证与鉴权的时序要求
+### 7.5 Ordering Requirements Between Authentication and Authorization
 
-`HumaRequirePermission` 依赖 `HumaCurrentClaims`，**必须注册在 `HumaAuthenticate` 之后**（huma 按链序执行，权限中间件必须先于 handler）：
+`HumaRequirePermission` depends on `HumaCurrentClaims` and **must be registered after `HumaAuthenticate`** (huma executes in chain order, and permission middleware must come before the handler):
 
 ```go
-// ✔ 正确
+// ✔ Correct
 huma.Middlewares{securitymw.HumaAuthenticate(authn, opts), securitymw.HumaRequirePermission(authz, "p", opts)}
-// ✘ 错误：权限中间件拿不到 claims，全部 401
+// ✘ Wrong: the permission middleware cannot get claims, everything returns 401
 ```
 
 ---
 
-## 8. Casbin 权限决策与策略管理
+## 8. Casbin Authorization Decisions and Policy Management
 
-包路径 `devops-infra/security/authz`。基于 Casbin + gorm-adapter（策略持久化在 `casbin_rule` 表），实现**多租户域模型 RBAC**。
+Package path `devops-infra/security/authz`. Based on Casbin + gorm-adapter (policies persisted in the `casbin_rule` table), implementing **multi-tenant domain-model RBAC**.
 
-### 8.1 初始化
+### 8.1 Initialization
 
 ```go
-authorizer, err := securityauthz.New(gormDB)   // 自动建表、加载存量策略
+authorizer, err := securityauthz.New(gormDB)   // auto-creates the table and loads existing policies
 if err != nil { log.Fatal(err) }
-// authorizer 同时满足 middleware 中用到的 Authorizer 接口，
-// 直接传给 HumaRequirePermission / HumaRequirePlatformPermission
+// authorizer also satisfies the Authorizer interface used by middleware;
+// pass it directly to HumaRequirePermission / HumaRequirePlatformPermission
 ```
 
-### 8.2 域模型
+### 8.2 Domain Model
 
 ```
-[request_definition]  r = sub, dom, obj        sub=用户ID  dom=租户ID  obj=权限标识
+[request_definition]  r = sub, dom, obj        sub=user ID  dom=tenant ID  obj=permission identifier
 [policy_definition]   p = sub, dom, obj
-[role_definition]     g = _, _, _              g(用户, 角色, 租户)：租户内角色三元组
-                      g2 = _, _                g2(用户, platform_admin)：平台角色（不绑域）
+[role_definition]     g = _, _, _              g(user, role, tenant): in-tenant role triple
+                      g2 = _, _                g2(user, platform_admin): platform role (not domain-bound)
 [matchers]            m = (g(r.sub, p.sub, r.dom) || g2(r.sub, p.sub))
                           && (r.dom == p.dom || p.dom == "*") && keyMatch(r.obj, p.obj)
 ```
 
-- **g 三元组**：同一 `user_id` 在不同租户是不同的 g 行，角色归属天然按租户隔离；
-- **g2 二元组**：平台管理员不绑域，配合 `p, platform_admin, *, *` 跨域全通；
-- `keyMatch`：权限标识支持 `*` 通配，如 `p, super_admin, 7, system:*` 匹配该租户全部 system 权限。
+- **g triple**: the same `user_id` is a different g row in different tenants, so role membership is naturally isolated by tenant;
+- **g2 pair**: platform admins are not domain-bound, and with `p, platform_admin, *, *` they pass across all domains;
+- `keyMatch`: permission identifiers support the `*` wildcard, e.g. `p, super_admin, 7, system:*` matches all system permissions of that tenant.
 
-### 8.3 决策 API
+### 8.3 Decision API
 
 ```go
-ok, err := authorizer.Enforce(ctx, "42", "7", "system:user:create")   // 域内
+ok, err := authorizer.Enforce(ctx, "42", "7", "system:user:create")   // in-domain
 ok, err := authorizer.EnforcePlatform(ctx, "42", "platform:tenant:list") // dom="*"
-ok, err := authorizer.IsPlatformAdmin(ctx, "42")                      // g2 判定
+ok, err := authorizer.IsPlatformAdmin(ctx, "42")                      // g2 verdict
 ```
 
-### 8.4 策略维护（角色/授权管理接口的后端）
+### 8.4 Policy Maintenance (Backend of the Role/Authorization Management APIs)
 
-策略采用**快照重建**语义——先删旧行再批量加新行，避免增量同步漂移：
+Policies use **snapshot rebuild** semantics — delete old rows first, then batch-add new rows, avoiding incremental sync drift:
 
 ```go
-// 保存角色权限：按 (role, tenant) 重建 p 行；perms 为空 = 清空该角色全部授权
+// Save role permissions: rebuild p rows by (role, tenant); empty perms = clear all of that role's authorizations
 _ = authorizer.RebuildRolePolicies("manager", "7", []string{"system:user:list", "system:user:query"})
 
-// 删除角色：清其 p 行
+// Delete role: clear its p rows
 _ = authorizer.RemoveRolePolicies("manager", "7")
 
-// 保存用户角色：按 (user, tenant) 重建 g 行
+// Save user roles: rebuild g rows by (user, tenant)
 _ = authorizer.RebuildUserGrouping("42", "7", []string{"manager", "auditor"})
 
-// 删除用户在某租户的角色 / 删除角色在某租户的用户绑定
+// Delete a user's role in a tenant / delete a role's user binding in a tenant
 _ = authorizer.RemoveUserGrouping("42", "7")
 _ = authorizer.RemoveRoleGrouping("manager", "7")
 
-// 幂等加单条策略（种子数据初始化用）
-_ = authorizer.AddPolicyIfAbsent("p", "super_admin", "7", "*")     // p 行
-_ = authorizer.AddPolicyIfAbsent("g2", "1", "platform_admin")      // g2 行
+// Idempotently add a single policy (for seed data initialization)
+_ = authorizer.AddPolicyIfAbsent("p", "super_admin", "7", "*")     // p row
+_ = authorizer.AddPolicyIfAbsent("g2", "1", "platform_admin")      // g2 row
 ```
 
-> 建议在业务包上再封一层门面（数字 ID ↔ 字符串转换 + fail-closed 包装），handler 只面向业务语义——参考 devops-system `internal/authz`。
+> It is recommended to wrap one more facade layer on the business package (numeric ID ↔ string conversion + fail-closed wrapping), with handlers facing only business semantics — see devops-system `internal/authz`.
 
 ---
 
-## 9. 多租户中间件与数据隔离
+## 9. Multi-Tenant Middleware and Data Isolation
 
-包路径 `devops-infra/tenant`。三层能力：请求头注入上下文 → GORM 自动行级隔离 → 受控豁免。
+Package path `devops-infra/tenant`. Three layers of capability: request-header context injection → GORM automatic row-level isolation → controlled exemptions.
 
-### 9.1 租户上下文
+### 9.1 Tenant Context
 
 ```go
-// 注入（中间件已做，业务代码在跨 goroutine 传递 ctx 时自动携带）
-ctx = tenant.WithTenant(ctx, 7)          // 仅租户 ID；ID ≤ 0 返回 ErrInvalidTenantID
-ctx = tenant.With(ctx, 7, "tenant-7")    // ID + 编码
+// Injection (already done by middleware; automatically carried when business code passes ctx across goroutines)
+ctx = tenant.WithTenant(ctx, 7)          // tenant ID only; ID ≤ 0 returns ErrInvalidTenantID
+ctx = tenant.With(ctx, 7, "tenant-7")    // ID + code
 
-// 读取
+// Reading
 tid, ok := tenant.TenantID(ctx)          // (7, true)
 tenant, ok := tenant.From(ctx)           // Context{ID:7, Code:"tenant-7"}
-tid, err := tenant.RequiredTenantID(ctx) // 未设置 → ErrTenantNotFound
-code, err := tenant.RequiredTenantCode(ctx) // 未设置或编码为空 → ErrTenantNotFound
+tid, err := tenant.RequiredTenantID(ctx) // not set → ErrTenantNotFound
+code, err := tenant.RequiredTenantCode(ctx) // not set or empty code → ErrTenantNotFound
 ```
 
-### 9.2 huma 租户中间件
+### 9.2 huma Tenant Middleware
 
 ```go
-// 租户来自 JWT claims（HumaAuthenticate 之后）：
-// check 回调注入租户可用性判定（如 DB 状态查询 + Redis 缓存），onUnauthorized/onForbidden
-// 为 nil 时以统一信封终止。
+// The tenant comes from JWT claims (after HumaAuthenticate):
+// the check callback injects tenant usability verdicts (e.g. DB status query + Redis cache); onUnauthorized/onForbidden
+// being nil terminates with a unified envelope.
 mw := tenant.HumaTenantContext(check, nil, nil)
 ```
 
-判定失败（租户停用/过期/不存在）时中间件不调 `next`，业务侧回调（或默认信封）呈现 403。
+On verdict failure (tenant deactivated/expired/nonexistent) the middleware does not call `next`, and the business-side callback (or default envelope) presents 403.
 
-> check 回调返回 false 后请求即被拒绝；下游所有受 GORM 插件保护的查询仍会因缺租户上下文而**报错**（fail-closed，见下）。
+> Once the check callback returns false the request is denied; all downstream queries protected by the GORM plugin still **error** for lack of tenant context (fail-closed, see below).
 
-合法租户经 `tenant.With` 注入 context 并以 `huma.WithContext` 整体替换，下游 handler / GORM 均可读取。
+A valid tenant is injected into the context via `tenant.With` and the whole context is replaced with `huma.WithContext`; downstream handlers / GORM can both read it.
 
-### 9.3 GORM 自动租户隔离插件
+### 9.3 GORM Automatic Tenant Isolation Plugin
 
 ```go
 import "devops-infra/tenant"
 
-if err := tenant.RegisterPlugin(gormDB); err != nil {   // 装配期调用一次
+if err := tenant.RegisterPlugin(gormDB); err != nil {   // called once at assembly time
     log.Fatal(err)
 }
 ```
 
-注册后，对**含 `tenant_id` 字段的模型**自动生效，业务代码零改动：
+After registration, it takes effect automatically for **models containing the `tenant_id` field**, with zero changes to business code:
 
-| 操作 | 注入行为 |
+| Operation | Injected behavior |
 | --- | --- |
-| `Create` | 自动填充 `tenant_id`（结构体该字段为零值时；显式赋值优先，批量创建同样支持） |
-| `Query` | 自动追加 `WHERE tenant_id = ?` |
-| `Update` | 自动追加 `WHERE tenant_id = ?` |
-| `Delete` | 自动追加 `WHERE tenant_id = ?` |
+| `Create` | auto-fills `tenant_id` (when the struct's field is zero; explicit assignment takes precedence, batch creation also supported) |
+| `Query` | auto-appends `WHERE tenant_id = ?` |
+| `Update` | auto-appends `WHERE tenant_id = ?` |
+| `Delete` | auto-appends `WHERE tenant_id = ?` |
 
-fail-closed 保障：
+fail-closed guarantees:
 
-- 查询/更新/删除时上下文没有租户 → 语句返回 `ErrContextMissing`，**查询根本不会执行**，杜绝裸查跨租户数据；
-- 模型没有 `tenant_id` 字段（如全局配置表）→ 不做任何注入，照常执行；
-- 带 `Joins` 的查询暂不自动过滤（join 语义复杂，需自行用 `Scope` 显式处理）。
+- On query/update/delete with no tenant in the context, the statement returns `ErrContextMissing` and **the query never executes**, eliminating bare cross-tenant queries;
+- For models without the `tenant_id` field (e.g. global config tables) → no injection, executes as usual;
+- Queries with `Joins` are not auto-filtered for now (join semantics are complex; handle explicitly with `Scope`).
 
 ```go
-// handler / service 层：直接透传 gin 请求的 ctx 即可
+// handler / service layer: just pass gin's ctx through
 func (s *UserSvc) List(ctx context.Context) ([]User, error) {
     var users []User
     err := s.db.WithContext(ctx).Where("status = ?", 1).Find(&users).Error
-    // 实际 SQL: SELECT * FROM users WHERE status = 1 AND tenant_id = 7
+    // Actual SQL: SELECT * FROM users WHERE status = 1 AND tenant_id = 7
     return users, err
 }
 ```
 
-### 9.4 手动过滤与受控豁免
+### 9.4 Manual Filtering and Controlled Exemptions
 
-不走 GORM 回调的场景（原生 SQL、跨表 join、测试）可用 `Scope` 手动追加租户条件：
+For scenarios not going through GORM callbacks (native SQL, cross-table joins, tests), use `Scope` to manually append tenant conditions:
 
 ```go
-db := tenant.Scope(gormDB, ctx, "")        // 列名缺省为 "tenant_id"
-db := tenant.Scope(gormDB, ctx, "org_id")  // 自定义列名
-// 上下文无租户时返回的 db 已注入 ErrTenantNotFound，后续执行必然报错 —— 同样 fail-closed
+db := tenant.Scope(gormDB, ctx, "")        // column name defaults to "tenant_id"
+db := tenant.Scope(gormDB, ctx, "org_id")  // custom column name
+// when the context has no tenant, the returned db already has ErrTenantNotFound injected; later execution always errors — likewise fail-closed
 ```
 
-确需跨租户的全局任务（租户管理、数据汇总、定时巡检）必须**显式豁免**：
+Global tasks that genuinely need cross-tenant access (tenant management, data aggregation, scheduled inspection) must **explicitly exempt**:
 
 ```go
-// 方式一：派生一个跳过过滤的 ctx（保留租户信息，仅供展示）
+// Option one: derive a ctx that skips filtering (tenant info retained, for display only)
 db.WithContext(tenant.WithSkip(ctx)).Find(&tenants)
 
-// 方式二：块级豁免，fn 执行期间关闭隔离
+// Option two: block-level exemption, disabling isolation during fn's execution
 err := tenant.ExecuteIgnore(ctx, func(ctx context.Context) error {
     return db.WithContext(ctx).Find(&allTenants).Error
 })
 ```
 
-豁免是**显式声明**的——代码评审时 `WithSkip`/`ExecuteIgnore` 出现的位置就是需要重点检查越权风险的位置。
+Exemptions are **explicit declarations** — the locations where `WithSkip`/`ExecuteIgnore` appear during code review are the locations needing focused privilege-escalation checks.
 
-### 9.5 租户隔离边界速查
+### 9.5 Tenant Isolation Boundary Cheat Sheet
 
-| 场景 | 行为 |
+| Scenario | Behavior |
 | --- | --- |
-| 无租户上下文查询带 `tenant_id` 的表 | 报错（`ErrContextMissing`），不执行 |
-| 创建时未赋值 `tenant_id` | 自动填充为上下文租户 |
-| 创建时显式赋了 `tenant_id` | 保留显式值（不覆盖） |
-| 全局表（无 `tenant_id` 字段） | 插件不介入 |
-| `Joins` 查询 | 插件跳过，需手动 `Scope` |
-| `WithSkip` / `ExecuteIgnore` | 跳过填充与过滤 |
+| Querying a table with `tenant_id` without tenant context | errors (`ErrContextMissing`), not executed |
+| `tenant_id` unassigned on create | auto-filled with the context tenant |
+| `tenant_id` explicitly assigned on create | explicit value retained (not overwritten) |
+| Global tables (no `tenant_id` field) | plugin does not intervene |
+| `Joins` queries | plugin skips; manual `Scope` needed |
+| `WithSkip` / `ExecuteIgnore` | skips filling and filtering |
 
 ---
 
-## 10. 中间件编排最佳实践
+## 10. Middleware Orchestration Best Practices
 
-### 10.1 推荐路由分层（对齐 devops-system 实践）
+### 10.1 Recommended Route Layering (Aligned with devops-system Practice)
 
 ```go
 func Register(...) httpinfra.Register {
     return func(r *gin.Engine) {
-        // 公开端点：JWKS、登录、刷新（放最前，避免被认证拦截）
+        // Public endpoints: JWKS, login, refresh (put first to avoid being intercepted by authentication)
         r.GET("/.well-known/jwks.json", jwksHandler)
 
-        // huma 链按序挂载（示例：JWT → 租户 → 域内权限 → handler）
+        // huma chain mounted in order (example: JWT → tenant → in-domain permission → handler)
         huma.Register(api, huma.Operation{
             Method: http.MethodGet, Path: "/api/v1/users",
             Middlewares: huma.Middlewares{
@@ -731,7 +731,7 @@ func Register(...) httpinfra.Register {
             },
         }, userH.List)
 
-        // 平台路由：JWT → PlatformPerm，不挂租户中间件（操作全局表）
+        // Platform routes: JWT → PlatformPerm, no tenant middleware (operate on global tables)
         huma.Register(api, huma.Operation{
             Method: http.MethodGet, Path: "/api/v1/tenants",
             Middlewares: huma.Middlewares{
@@ -743,22 +743,22 @@ func Register(...) httpinfra.Register {
 }
 ```
 
-### 10.2 检查清单
+### 10.2 Checklist
 
-- [ ] **顺序**：`HumaAuthenticate` → `HumaTenantContext` → `HumaRequirePermission` → handler，权限中间件永远先于 handler 注册；
-- [ ] **信封一致**：`HumaOptions` 回调统一走 `response.WriteHumaEnvelope`（未注入时默认回调同样写信封），与业务错误同一格式；
-- [ ] **503 不是 401**：Redis/Casbin 故障走 `OnInfrastructureError` 返回 503，别把基础设施故障伪装成未登录误导前端跳登录页；
-- [ ] **每个请求都过会话校验**：不要为了性能绕过 `SessionStore.Active`——这是踢下线即时生效的关键；
-- [ ] **平台权限标识隔离**：`platform:*` 权限只挂平台路由，不进租户菜单表；
-- [ ] **豁免显式化**：`WithSkip`/`ExecuteIgnore` 只允许出现在全局管理代码，业务查询禁止；
-- [ ] **刷新轮换**：refresh 端点先建新会话再撤销旧 sid，撤销失败仅记日志（旧会话自然过期）；
-- [ ] **跨服务传递**：把租户上下文放进 gRPC metadata / 消息头，消费端用 `tenant.With` 重建，不要依赖隐式传递。
+- [ ] **Order**: `HumaAuthenticate` → `HumaTenantContext` → `HumaRequirePermission` → handler; permission middleware always registers before the handler;
+- [ ] **Envelope consistency**: `HumaOptions` callbacks uniformly go through `response.WriteHumaEnvelope` (the default callbacks also write envelopes when not injected), same format as business errors;
+- [ ] **503 is not 401**: Redis/Casbin failures go through `OnInfrastructureError` returning 503; do not disguise infrastructure failures as "not logged in" and mislead the frontend into jumping to the login page;
+- [ ] **Every request goes through session verification**: do not bypass `SessionStore.Active` for performance — this is key to instant kick-offline;
+- [ ] **Platform permission identifier isolation**: `platform:*` permissions only on platform routes, never in tenant menu tables;
+- [ ] **Explicit exemptions**: `WithSkip`/`ExecuteIgnore` may only appear in global management code; forbidden in business queries;
+- [ ] **Refresh rotation**: the refresh endpoint creates the new session before revoking the old sid; revocation failure is only logged (the old session expires naturally);
+- [ ] **Cross-service propagation**: put tenant context into gRPC metadata / message headers; the consumer rebuilds with `tenant.With`; do not rely on implicit propagation.
 
 ---
 
-## 11. 单元测试支持
+## 11. Unit Test Support
 
-安全组件全部面向接口设计，stub 即可测试，无需真实 Redis / Casbin：
+Security components are all interface-oriented, so stubs suffice for testing, with no real Redis / Casbin needed:
 
 ```go
 type stubTokenParser struct{ claims *securityjwt.Claims; err error }
@@ -775,46 +775,46 @@ func (s *stubAuthorizer) EnforcePlatform(ctx context.Context, sub, obj string) (
 func (s *stubAuthorizer) IsPlatformAdmin(ctx context.Context, sub string) (bool, error) { return s.platformAdmin, nil }
 ```
 
-完整可编译示例见 `security/middleware/gin_test.go`（覆盖缺失头、非法 token、会话失效、基础设施错误、权限拒绝等全部分支）。会话存储测试可用 `miniredis`（devops-infra 测试依赖已内置）。Gin 路由测试用 `gin.TestMode` + `httptest`。
+Complete compilable examples are in `security/middleware/gin_test.go` (covering all branches: missing header, invalid token, session invalidated, infrastructure error, permission denied). Session store tests can use `miniredis` (already bundled in devops-infra's test dependencies). Gin route tests use `gin.TestMode` + `httptest`.
 
 ---
 
-## 12. 数据权限与中间件套件
+## 12. Data Permissions and Middleware Suite
 
-两个可直接复用的业务级基建：行级数据权限计算（`datascope`）与 huma 中间件链装配（`security/humakit`）。
-devops-system 已在用；**新模块（如 devops-user）落地时 `require devops-infra` 即可直接复用，无需复制**。
+Two directly reusable business-level building blocks: row-level data permission computation (`datascope`) and huma middleware chain assembly (`security/humakit`).
+Already in use by devops-system; **new modules (e.g. devops-user) can `require devops-infra` and reuse directly, no copying needed**.
 
-### 12.1 `datascope`：行级数据权限纯计算
+### 12.1 `datascope`: Pure Row-Level Data Permission Computation
 
-三层分工：Casbin 管「能不能调这个接口」，`tenant` 管「租户内还是租户外」，`datascope` 管租户之内「能看到/操作哪些行」。本包**纯计算、不访问 DB**——角色/用户/部门由调用方查询注入值对象。
+Three-layer division of labor: Casbin decides "can this endpoint be called", `tenant` decides "inside or outside the tenant", `datascope` decides "which rows inside the tenant can be seen/operated". This package is **pure computation, no DB access** — role/user/dept values are queried and injected as value objects by the caller.
 
-口径（对齐 yudao `t_system_role.data_scope`）：`1 全部 / 2 自定义部门 / 3 本部门 / 4 本部门及以下 / 5 仅本人`。多角色取最宽松；同为自定义取并集。
+Semantics (aligned with yudao `t_system_role.data_scope`): `1 all / 2 custom departments / 3 own department / 4 own department and below / 5 self only`. Multiple roles take the most permissive; same-custom takes the union.
 
 ```go
-// 解析：把业务查询结果转成值对象后合并
+// Parsing: convert business query results into value objects, then merge
 scope := datascope.Merge(roleScopes, user.DeptID, user.ID, datascope.ChildrenMap(deptNodes))
 
-// 消费：列表查询收口（fail-closed——ctx 未注入时挂错，不放大为全量可见）
+// Consumption: list query containment (fail-closed — errors when ctx is not injected, never widened to fully visible)
 db = datascope.Apply(ctx, db, datascope.Columns{Dept: "dept_id", Owner: "id"})
 
-// 消费：单点可见性（越权按 404，避免存在性探测）
+// Consumption: single-point visibility (privilege escalation returns 404, avoiding existence probing)
 if !scope.Visible(row.DeptID, row.ID) { return errs.NotFound(...) }
 ```
 
-### 12.2 `security/humakit`：中间件链套件
+### 12.2 `security/humakit`: Middleware Chain Suite
 
-`JWT → Tenant → Perm → Scope` 的链组合与数据权限解析。决策在 `security/middleware` 与 `tenant`，本包只做装配；**文案与业务数据源一律经 `Deps`/`Envelope` 注入**，不做默认业务绑定（nil 一律 fail-closed）。
+Chain composition for `JWT → Tenant → Perm → Scope` plus data permission resolution. Decisions live in `security/middleware` and `tenant`; this package only does assembly; **text and business data sources are always injected via `Deps`/`Envelope`**, with no default business binding (nil is always fail-closed).
 
 ```go
 kit := humakit.NewKit(authn, humakit.Deps{
     Authorizer:      authorizer,
-    TenantUsable:    myTenantChecker,                    // 停用/过期语义由业务决定
+    TenantUsable:    myTenantChecker,                    // deactivated/expired semantics decided by the business
     UserRoles:       myRoleScopes,                       // → []datascope.RoleScope
     User:            myUserRef,                          // → datascope.UserRef
     Depts:           myDeptNodes,                        // → datascope.DeptNode
-    SuperAdminRole:  "super_admin",                      // 与 Casbin 种子同源
-    WithClaims:      injectAuditActor,                   // 认证后 ctx 增强（可选）
-    Envelope:        myChineseEnvelope,                  // 401/403 中文文案（可选）
+    SuperAdminRole:  "super_admin",                      // same source as the Casbin seed
+    WithClaims:      injectAuditActor,                   // ctx enhancement after authentication (optional)
+    Envelope:        myEnglishEnvelope,                  // 401/403 English text (optional)
 })
 
 huma.Register(api, huma.Operation{
@@ -822,146 +822,146 @@ huma.Register(api, huma.Operation{
 }, handler)
 ```
 
-链组合：`Logged()`（仅认证）/ `TenantBiz()`（认证+租户）/ `Biz(perm)` / `ScopedBiz(perm)`（多挂数据权限）/ `PlatChain(perm)`（平台，不挂租户）。角色/数据变更后调 `kit.InvalidateDataScope()` 清缓存。
+Chain composition: `Logged()` (authn only) / `TenantBiz()` (authn+tenant) / `Biz(perm)` / `ScopedBiz(perm)` (adds data permissions) / `PlatChain(perm)` (platform, no tenant). After role/data changes, call `kit.InvalidateDataScope()` to clear the cache.
 
-### 12.3 `security/authz`：角色名配置与种子
+### 12.3 `security/authz`: Role Name Config and Seed
 
-角色名不再是硬编码：`RoleConfig{PlatformAdmin, SuperAdmin}` 经 `New(gdb, WithRoles(cfg))` 注入，**种子写入与 `IsPlatformAdmin` 判定同源**（否则会「种子写自定义名、判定查 platform_admin」脑裂）。不传走默认 `platform_admin` / `super_admin`。
+Role names are no longer hardcoded: `RoleConfig{PlatformAdmin, SuperAdmin}` is injected via `New(gdb, WithRoles(cfg))`, with **seed writes and `IsPlatformAdmin` verdicts sharing the same source** (otherwise you get the "seed writes a custom name, verdict queries platform_admin" brain split). Defaults to `platform_admin` / `super_admin` when not passed.
 
 ```go
 a, _ := authz.New(gdb, authz.WithRoles(authz.RoleConfig{
     PlatformAdmin: "ops_admin", SuperAdmin: "ops_super",
 }))
-_ = a.SeedBootstrap(adminUID, tenantID)   // 平台 + 租户超管初始策略（幂等）
-_ = a.SeedTenantAdmin(adminUID, tenantID) // 建租户时的超管策略（幂等）
+_ = a.SeedBootstrap(adminUID, tenantID)   // platform + tenant super admin initial policies (idempotent)
+_ = a.SeedTenantAdmin(adminUID, tenantID) // super admin policy on tenant creation (idempotent)
 ```
 
-> 改角色名需同步考虑存量 `casbin_rule` 数据的迁移。
+> Changing role names requires considering migration of existing `casbin_rule` data.
 
 ---
 
-## 13. 附录：API 速查表
+## 13. Appendix: API Cheat Sheet
 
-### HTTP（`devops-infra/http`）
+### HTTP (`devops-infra/http`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `http.Run(cfg, register, readiness...)` | 启动 HTTP 服务（Recovery/AccessLog/healthz/readyz/优雅退出） |
-| `http.ReadinessCheck{Name, Check}` | 就绪检查项 |
-| `middleware.Recovery()` | panic → 500 统一信封 |
-| `middleware.AccessLog()` | 结构化访问日志（Debug） |
+| `http.Run(cfg, register, readiness...)` | start the HTTP service (Recovery/AccessLog/healthz/readyz/graceful shutdown) |
+| `http.ReadinessCheck{Name, Check}` | readiness check item |
+| `middleware.Recovery()` | panic → 500 unified envelope |
+| `middleware.AccessLog()` | structured access log (Debug) |
 
-### 响应（`devops-infra/http/response`）
+### Response (`devops-infra/http/response`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `response.OK / OKPage` | 成功信封 / 分页信封 |
-| `response.Fail / FailErr` | 失败出口 / 错误统一出口 |
+| `response.OK / OKPage` | success envelope / paginated envelope |
+| `response.Fail / FailErr` | failure exit / unified error exit |
 | `response.Wrap(handler)` | `func(c) error` → `gin.HandlerFunc` |
-| `response.BaseResponse[T] / PageData[T]` | 信封结构体 |
+| `response.BaseResponse[T] / PageData[T]` | envelope structs |
 
-### gRPC（`devops-infra/grpc`）
+### gRPC (`devops-infra/grpc`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `grpc.Run(cfg, register)` | 启动 gRPC 服务（Recovery/AccessLog/health/reflection/优雅退出） |
-| `grpc.Dial(ctx, endpoint, timeout)` | 非阻塞拨号，内置 Unavailable 重试 |
-| `grpc.IsUnavailable(err) / Close(conn)` | 错误判定 / 关闭连接 |
-| `interceptor.Recovery() / AccessLog()` | 单独取用拦截器 |
+| `grpc.Run(cfg, register)` | start the gRPC service (Recovery/AccessLog/health/reflection/graceful shutdown) |
+| `grpc.Dial(ctx, endpoint, timeout)` | non-blocking dialing, built-in Unavailable retries |
+| `grpc.IsUnavailable(err) / Close(conn)` | error classification / close connection |
+| `interceptor.Recovery() / AccessLog()` | take interceptors individually |
 
-### JWT（`devops-infra/security/jwt`）
+### JWT (`devops-infra/security/jwt`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `NewManager(Config) (*Manager, error)` | 构造签名管理器 |
-| `Manager.Issue(ctx, Subject, sid) (TokenPair, error)` | 签发 RS256 access token |
-| `Manager.ParseAccess(token) (*Claims, error)` | 验签解析 |
-| `Manager.JWKS() (map[string]any, error)` | 输出 JWKS 文档 |
-| `PublicKeyFromPrivatePEM(pem) (*rsa.PublicKey, error)` | 私钥导公钥 |
-| `NewStaticKeySet(map[kid]*rsa.PublicKey)` | 静态公钥集合 |
-| `JWKSDocument(pub, kid)` | 单独生成 JWKS |
+| `NewManager(Config) (*Manager, error)` | build the signing manager |
+| `Manager.Issue(ctx, Subject, sid) (TokenPair, error)` | sign an RS256 access token |
+| `Manager.ParseAccess(token) (*Claims, error)` | verify and parse |
+| `Manager.JWKS() (map[string]any, error)` | output the JWKS document |
+| `PublicKeyFromPrivatePEM(pem) (*rsa.PublicKey, error)` | export public key from private key |
+| `NewStaticKeySet(map[kid]*rsa.PublicKey)` | static public key set |
+| `JWKSDocument(pub, kid)` | generate a JWKS individually |
 
-### 会话（`devops-infra/security/session`）
+### Sessions (`devops-infra/security/session`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `NewRedisStore(cacheClient, ttl) / NewRedisClientStore(goRedis, ttl)` | 构造存储 |
-| `Store.Create / Active / Lookup / Matches` | 建会话 / 活性 / 反查 / 归属校验 |
-| `Store.Revoke / RevokeUser / RevokeTenant` | 单个 / 用户全部 / 租户全部撤销 |
+| `NewRedisStore(cacheClient, ttl) / NewRedisClientStore(goRedis, ttl)` | build the store |
+| `Store.Create / Active / Lookup / Matches` | create session / liveness / reverse lookup / ownership check |
+| `Store.Revoke / RevokeUser / RevokeTenant` | single / all of a user / all of a tenant revocation |
 
-### 认证鉴权中间件（`devops-infra/security/middleware`）
+### Authentication & Authorization Middleware (`devops-infra/security/middleware`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `NewAuthenticator(TokenParser, SessionStore) *Authenticator` | 框架无关认证器 |
-| `Authenticator.Authenticate(ctx, bearerHeader)` | 认证决策，错误三类可 `errors.Is` |
-| `HumaAuthenticate(authn, opts)` | huma 认证中间件 |
-| `HumaRequirePermission(authz, perm, opts)` | 域内鉴权（uid × tid × perm） |
-| `HumaRequirePlatformPermission(authz, perm, opts)` | 平台鉴权（g2 + dom="*"） |
-| `HumaCurrentClaims(ctx) *securityjwt.Claims` | handler 中取当前身份 |
-| `HumaOptions{OnUnauthorized, OnForbidden, OnInfrastructureError}` | 错误呈现回调（nil 时默认信封） |
+| `NewAuthenticator(TokenParser, SessionStore) *Authenticator` | framework-agnostic authenticator |
+| `Authenticator.Authenticate(ctx, bearerHeader)` | authentication decision, three error classes via `errors.Is` |
+| `HumaAuthenticate(authn, opts)` | huma authentication middleware |
+| `HumaRequirePermission(authz, perm, opts)` | in-domain authorization (uid × tid × perm) |
+| `HumaRequirePlatformPermission(authz, perm, opts)` | platform authorization (g2 + dom="*") |
+| `HumaCurrentClaims(ctx) *securityjwt.Claims` | get current identity in handlers |
+| `HumaOptions{OnUnauthorized, OnForbidden, OnInfrastructureError}` | error presentation callbacks (default envelope when nil) |
 
-### Casbin（`devops-infra/security/authz`）
+### Casbin (`devops-infra/security/authz`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `New(gormDB) (*CasbinAuthorizer, error)` | 初始化（gorm-adapter 持久化） |
-| `Enforce / EnforcePlatform / IsPlatformAdmin` | 鉴权决策 |
-| `RebuildRolePolicies / RemoveRolePolicies` | 角色权限快照重建 / 清除 |
-| `RebuildUserGrouping / RemoveUserGrouping / RemoveRoleGrouping` | 用户-角色绑定维护 |
-| `AddPolicyIfAbsent("p"/"g"/"g2", values...)` | 幂等加策略（种子数据） |
+| `New(gormDB) (*CasbinAuthorizer, error)` | initialization (gorm-adapter persistence) |
+| `Enforce / EnforcePlatform / IsPlatformAdmin` | authorization decisions |
+| `RebuildRolePolicies / RemoveRolePolicies` | role permission snapshot rebuild / clear |
+| `RebuildUserGrouping / RemoveUserGrouping / RemoveRoleGrouping` | user-role binding maintenance |
+| `AddPolicyIfAbsent("p"/"g"/"g2", values...)` | idempotently add policy (seed data) |
 
-### 多租户（`devops-infra/tenant`）
+### Multi-Tenant (`devops-infra/tenant`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `HumaTenantContext(check, onUnauthorized, onForbidden)` | huma 租户注入中间件（claims → check → ctx） |
-| `With / WithTenant / From / TenantID` | 上下文注入与读取 |
-| `RequiredTenantID / RequiredTenantCode` | 严格读取（缺失即错） |
-| `RegisterPlugin(gormDB)` | GORM 自动填充 + 行级过滤回调 |
-| `Scope(db, ctx, column)` | 手动追加租户条件 |
-| `WithSkip / ExecuteIgnore / IsSkip` | 受控豁免 |
+| `HumaTenantContext(check, onUnauthorized, onForbidden)` | huma tenant injection middleware (claims → check → ctx) |
+| `With / WithTenant / From / TenantID` | context injection and reading |
+| `RequiredTenantID / RequiredTenantCode` | strict reading (error when missing) |
+| `RegisterPlugin(gormDB)` | GORM auto-fill + row-level filter callbacks |
+| `Scope(db, ctx, column)` | manually append tenant conditions |
+| `WithSkip / ExecuteIgnore / IsSkip` | controlled exemptions |
 
-### 错误码（`devops-infra/errs`）
+### Error Codes (`devops-infra/errs`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `CodeOK/Param/Unauthorized/Forbidden/NotFound/MethodNotAllowed/Internal` | 与 HTTP 状态码对齐 |
-| `errs.New(code, msg) / Wrap(err, code, msg)` | 业务错误构造（保留底层原因） |
-| `errs.ErrParam / ErrUnauthorized / ErrForbidden / ...` | 预定义错误 |
+| `CodeOK/Param/Unauthorized/Forbidden/NotFound/MethodNotAllowed/Internal` | aligned with HTTP status codes |
+| `errs.New(code, msg) / Wrap(err, code, msg)` | business error construction (retains underlying cause) |
+| `errs.ErrParam / ErrUnauthorized / ErrForbidden / ...` | predefined errors |
 
-### 数据权限（`devops-infra/datascope`）
+### Data Permissions (`devops-infra/datascope`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `ScopeAll/Custom/Dept/DeptBelow/Self` | 数据范围口径常量（对齐 yudao） |
-| `Merge(roles, ownDeptID, selfID, children) Scope` | 多角色合并（最宽松生效） |
-| `Apply(ctx, db, Columns)` | 列表查询注入过滤（fail-closed） |
-| `(Scope).Visible(deptID, rowID)` | 单点可见性（越权按 404） |
-| `ParseDeptIDs / NormalizeDeptIDs` | 自定义部门集合的存储形态 |
-| `ChildrenMap / ExpandSubtree` | 部门树展开 |
-| `WithScope / From / CtxKey` | 上下文注入与读取 |
+| `ScopeAll/Custom/Dept/DeptBelow/Self` | data scope semantic constants (aligned with yudao) |
+| `Merge(roles, ownDeptID, selfID, children) Scope` | multi-role merge (most permissive wins) |
+| `Apply(ctx, db, Columns)` | inject filter into list queries (fail-closed) |
+| `(Scope).Visible(deptID, rowID)` | single-point visibility (privilege escalation returns 404) |
+| `ParseDeptIDs / NormalizeDeptIDs` | storage form of custom department sets |
+| `ChildrenMap / ExpandSubtree` | department tree expansion |
+| `WithScope / From / CtxKey` | context injection and reading |
 
-### 中间件套件（`devops-infra/security/humakit`）
+### Middleware Suite (`devops-infra/security/humakit`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `NewKit(authn, Deps) *Kit` | 装配中间件套件（业务依赖经 Deps 注入） |
-| `JWT() / Tenant() / Scope() / Perm(p) / Plat(p)` | 单中间件 |
-| `Logged() / TenantBiz() / Biz(p) / ScopedBiz(p) / PlatChain(p)` | 链组合 |
-| `InvalidateDataScope()` | 清数据权限解析缓存 |
-| `Deps{Envelope, TenantUsable, UserRoles, ...}` | 文案与业务数据源注入（nil 一律 fail-closed） |
+| `NewKit(authn, Deps) *Kit` | assemble the middleware suite (business deps injected via Deps) |
+| `JWT() / Tenant() / Scope() / Perm(p) / Plat(p)` | single middleware |
+| `Logged() / TenantBiz() / Biz(p) / ScopedBiz(p) / PlatChain(p)` | chain composition |
+| `InvalidateDataScope()` | clear the data permission resolution cache |
+| `Deps{Envelope, TenantUsable, UserRoles, ...}` | text and business data source injection (nil is always fail-closed) |
 
-### 角色名配置（`devops-infra/security/authz`）
+### Role Name Config (`devops-infra/security/authz`)
 
-| API | 说明 |
+| API | Description |
 | --- | --- |
-| `RoleConfig{PlatformAdmin, SuperAdmin}` | 角色名配置（零值回填默认） |
-| `New(gdb, WithRoles(cfg))` | 带角色名的初始化 |
-| `SeedBootstrap(subject, domain)` | 平台 + 租户超管初始策略（幂等） |
-| `SeedTenantAdmin(subject, domain)` | 租户超管策略（幂等） |
-| `(CasbinAuthorizer).Roles()` | 当前生效的角色名配置 |
+| `RoleConfig{PlatformAdmin, SuperAdmin}` | role name config (zero values backfill defaults) |
+| `New(gdb, WithRoles(cfg))` | initialization with role names |
+| `SeedBootstrap(subject, domain)` | platform + tenant super admin initial policies (idempotent) |
+| `SeedTenantAdmin(subject, domain)` | tenant super admin policy (idempotent) |
+| `(CasbinAuthorizer).Roles()` | the currently effective role name config |
 
 ---
 
-*本文对应 devops-infra 当前实现，代码示例以包内实际导出 API 为准；参考实现见 `devops-system/internal/{auth,authz,middleware,router,tenantdb,dao/scope_source.go}`。*
+*This document corresponds to the current devops-infra implementation; code examples are subject to the actual exported APIs in the packages. Reference implementations are in `devops-system/internal/{auth,authz,middleware,router,tenantdb,dao/scope_source.go}`.*

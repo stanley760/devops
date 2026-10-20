@@ -11,7 +11,7 @@ import (
 	iddomain "github.com/stanley760/devops/devops-id/internal/domain/idgen"
 )
 
-// MetricsObserver 实现 iddomain.Observer，将领域事件记录为 OTel 指标。
+// MetricsObserver implements iddomain.Observer, recording domain events as OTel metrics.
 type MetricsObserver struct {
 	fallbackTotal  metric.Int64Counter
 	leaseLostTotal metric.Int64Counter
@@ -23,38 +23,38 @@ type MetricsObserver struct {
 	states map[string]iddomain.HealthState
 }
 
-// NewMetricsObserver 创建指标观察器。指标创建失败时 OTel 返回 noop（非 nil）。
+// NewMetricsObserver creates the metrics observer. OTel returns a noop (not nil) when metric creation fails.
 func NewMetricsObserver() *MetricsObserver {
 	meter := otel.Meter("devops-id/idgen")
 	obs := &MetricsObserver{states: make(map[string]iddomain.HealthState)}
 	var err error
 	if obs.fallbackTotal, err = meter.Int64Counter(
 		"idgen_fallback_total",
-		metric.WithDescription("进入本地降级模式的次数"),
+		metric.WithDescription("number of times local fallback mode was entered"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if obs.leaseLostTotal, err = meter.Int64Counter(
 		"idgen_lease_lost_total",
-		metric.WithDescription("etcd lease 失效次数"),
+		metric.WithDescription("number of etcd lease expiries"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if obs.rollbackTotal, err = meter.Int64Counter(
 		"idgen_clock_rollback_total",
-		metric.WithDescription("时钟回拨导致发号拒绝的次数"),
+		metric.WithDescription("number of ID generations rejected due to clock rollback"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if obs.rejectedTotal, err = meter.Int64Counter(
 		"idgen_requests_rejected_total",
-		metric.WithDescription("发号被拒绝的次数"),
+		metric.WithDescription("number of ID generation requests rejected"),
 	); err != nil {
 		otel.Handle(err)
 	}
 	if obs.healthState, err = meter.Int64ObservableGauge(
 		"idgen_health_state",
-		metric.WithDescription("发号健康状态（0=serving, 1=degraded, 2=not_serving）"),
+		metric.WithDescription("ID generation health state (0=serving, 1=degraded, 2=not_serving)"),
 	); err != nil {
 		otel.Handle(err)
 	}

@@ -1,8 +1,9 @@
-# Geo IP：按客户端 IP 查归属地（国家/省/市/ISP），注入 X-Higress-Geo-* 请求头
-# （URL 转义），devops-system 登录审计（t_system_login_log）读取落库。
-# ip_source_type=origin-source：取下行连接真实来源地址（客户端直连网关 8080，
-# 无前置 LB）；内网 IP 时插件注入「内网IP」。曾配 header+X-Real-Ip——envoy
-# 从不写该头，插件每请求报错且不注入头，2026-09-30 修正。
+# Geo IP: looks up the client IP's location (country/province/city/ISP) and injects X-Higress-Geo-* request
+# headers (URL-escaped), which the devops-system login audit (t_system_login_log) reads and persists.
+# ip_source_type=origin-source: takes the downstream connection's real source address (client connects
+# directly to gateway 8080, no front LB); for intranet IPs the plugin injects "Intranet IP". Previously
+# configured as header+X-Real-Ip — envoy never writes that header, so the plugin errored on every request
+# and injected no headers; fixed on 2026-09-30.
 apiVersion: extensions.higress.io/v1alpha1
 kind: WasmPlugin
 metadata:

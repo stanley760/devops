@@ -12,12 +12,12 @@ import (
 	securitymw "github.com/stanley760/devops/devops-infra/security/middleware"
 )
 
-// errNoScopeSource 解析数据源未注入（fail-closed：解析失败 → 空 Scope）。
+// errNoScopeSource resolution data source not injected (fail-closed: resolution failure → empty Scope).
 var errNoScopeSource = errors.New("humakit: data scope source not configured")
 
-// scopeCache 条目：(tenantID, userID) → 解析结果 + 过期时间（Kit 实例持有）。
-// 进程内 TTL 缓存：变更失效由调用方 InvalidateDataScope 兜底，
-// 多实例部署时应改为带版本号的共享缓存。
+// scopeCache entry: (tenantID, userID) → resolution result + expiry time (held by the Kit instance).
+// In-process TTL cache: change invalidation is covered by the caller's InvalidateDataScope;
+// in multi-instance deployments this should become a shared cache with a version number.
 type scopeCache struct {
 	mu      sync.RWMutex
 	entries map[[2]int64]scopeEntry
@@ -29,21 +29,22 @@ type scopeEntry struct {
 	expires time.Time
 }
 
-// newScopeCache 构造空缓存。
+// newScopeCache constructs an empty cache.
 func newScopeCache(ttl time.Duration) *scopeCache {
 	return &scopeCache{entries: make(map[[2]int64]scopeEntry), ttl: ttl}
 }
 
-// invalidate 清空全部条目。
+// invalidate clears all entries.
 func (c *scopeCache) invalidate() {
 	c.mu.Lock()
 	c.entries = make(map[[2]int64]scopeEntry)
 	c.mu.Unlock()
 }
 
-// securityScope 数据权限解析中间件（挂在受控资源路由）。
-// 解析失败 fail-closed：以空 Scope（不可见任何行）放行——功能权限（Perm）已经
-// 把过一道门，这里失败只影响数据范围，不放大为全量可见。
+// securityScope data permission resolution middleware (mounted on controlled-resource routes).
+// Fail-closed on resolution failure: pass through with an empty Scope (no rows visible) —
+// the functional permission (Perm) has already gated the request once, so a failure here
+// only affects the data scope and is not escalated to full visibility.
 func (k *Kit) securityScope() Middleware {
 	return func(hctx huma.Context, next func(huma.Context)) {
 		claims := securitymw.HumaCurrentClaims(hctx.Context())
@@ -53,7 +54,8 @@ func (k *Kit) securityScope() Middleware {
 		}
 		scope, err := k.resolveDataScope(hctx.Context(), claims.UID, claims.TenantID)
 		if err != nil {
-			// fail-closed：空集放行，请求继续（列表会得到 1=0 过滤或空可见性）
+			// fail-closed: pass through with an empty set, the request continues
+			// (the list gets a 1=0 filter or empty visibility)
 			next(huma.WithValue(hctx, datascope.CtxKey{}, datascope.Scope{}))
 			return
 		}
@@ -61,7 +63,8 @@ func (k *Kit) securityScope() Middleware {
 	}
 }
 
-// resolveDataScope 带 TTL 缓存的解析：平台管理员/租户超管直通，否则合并角色口径。
+// resolveDataScope resolution with TTL caching: platform admins/tenant super-admins
+// bypass, otherwise role scopes are merged.
 func (k *Kit) resolveDataScope(ctx context.Context, userID, tenantID int64) (datascope.Scope, error) {
 	key := [2]int64{tenantID, userID}
 
@@ -83,11 +86,12 @@ func (k *Kit) resolveDataScope(ctx context.Context, userID, tenantID int64) (dat
 	return scope, nil
 }
 
-// computeDataScope 一次解析（数据源 + 平台判定均经 Deps 注入，一律走 infra 值对象）。
+// computeDataScope a single resolution (both the data source and the platform check are
+// injected via Deps, always going through infra value objects).
 func (k *Kit) computeDataScope(ctx context.Context, userID int64) (datascope.Scope, error) {
 	deps := k.deps
 
-	// 平台管理员：跨租户全通（g2 判定，与鉴权中间件同源）
+	// platform admins: bypass across tenants (g2 check, same source as the authorization middleware)
 	if deps.IsPlatformAdmin(ctx, userID) {
 		return datascope.Scope{All: true}, nil
 	}
@@ -102,7 +106,7 @@ func (k *Kit) computeDataScope(ctx context.Context, userID int64) (datascope.Sco
 	}
 	for _, r := range roleScopes {
 		if r.Code == deps.SuperAdminRole {
-			return datascope.Scope{All: true}, nil // 租户超管：域内全通
+			return datascope.Scope{All: true}, nil // tenant super-admin: bypass within the domain
 		}
 	}
 

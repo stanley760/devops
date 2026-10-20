@@ -1,20 +1,23 @@
-// Package event 是领域事件的投影器实现（把写模型变更同步到 casbin 读模型）。
+// Package event contains the projector implementations for domain events (syncing write-model changes to the casbin read model).
 //
-// 这是 CQRS 中「写模型 / 读模型分离」的落地：聚合在事务内记录领域事件，
-// 授权策略的同步由投影器完成，投影失败不影响主流程响应，且因事件已持久化
-// 可重试而不会丢失。
+// This is the landing of the "write model / read model separation" in CQRS: aggregates record
+// domain events within the transaction, authorization policy sync is done by the projector,
+// projection failures do not affect the main-flow response, and because events are persisted
+// failures can be retried without loss.
 //
-// 改造前的问题（3 处手工补偿）：
+// The pre-refactor problem (3 manual compensations):
 //
-//	service/user.go:130  "用户已创建，但角色授权写入失败，请重试更新"
-//	service/user.go:195  "用户已更新，但角色授权刷新失败，请重试更新"
-//	service/user.go:250  "用户已删除，但角色授权清理失败"
-//	service/role.go:168  "菜单已保存，但权限策略刷新失败，请重试"
+//	service/user.go:130  "user created, but role authorization write failed, please retry the update"
+//	service/user.go:195  "user updated, but role authorization refresh failed, please retry the update"
+//	service/user.go:250  "user deleted, but role authorization cleanup failed"
+//	service/role.go:168  "menu saved, but permission policy refresh failed, please retry"
 //
-// 这些错误的共同点是：业务行已提交、授权未生效，客户端拿到一个语义模糊的
-// 提示，既不知道该重试还是该人工介入，也无法从数据上判断授权是否已同步。
-// 现在这些场景统一为：主流程返回成功 + 事件入表 + 投影器同步执行，
-// 失败则事件保持待投影状态并由重试任务补偿。
+// The common point of these errors: the business row was already committed but the
+// authorization was not in effect, leaving the client with a semantically vague prompt —
+// no way to tell whether to retry or intervene manually, and no way to tell from the data
+// whether the authorization has been synced. Now these scenarios are unified: the main flow
+// returns success + the event is stored + the projector syncs, and on failure the event stays
+// in the pending-projection state, compensated by retry tasks.
 package event
 
 import (
@@ -27,19 +30,20 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// casbinProjector 把 IAM 领域事件投影到 casbin 策略。
+// casbinProjector projects IAM domain events onto casbin policies.
 //
-// 幂等性：casbin 的 RebuildXxx 系列均为「先清后建」，RemoveXxx 为条件删除，
-// 重复执行结果一致，满足至少一次投递下的幂等要求。
+// Idempotency: casbin's RebuildXxx family are all "clear first then rebuild", and RemoveXxx is
+// conditional deletion, so repeated executions yield the same result, satisfying the idempotency
+// requirement under at-least-once delivery.
 type casbinProjector struct{}
 
-// NewCasbinProjector 构造 casbin 投影器。
+// NewCasbinProjector constructs the casbin projector.
 func NewCasbinProjector() shared.EventProjector { return casbinProjector{} }
 
-// Name 实现命名（供分发器日志使用）。
+// Name implements naming (for dispatcher logs).
 func (casbinProjector) Name() string { return "casbin" }
 
-// Handles 声明订阅的事件。
+// Handles declares the subscribed events.
 func (casbinProjector) Handles() []string {
 	return []string{
 		iam.EventUserRolesAssigned,
@@ -51,13 +55,13 @@ func (casbinProjector) Handles() []string {
 	}
 }
 
-// Handle 分发单个事件到对应的同步动作。
+// Handle dispatches a single event to the corresponding sync action.
 func (casbinProjector) Handle(ctx context.Context, e shared.Event) error {
 	switch ev := e.(type) {
 	case iam.UserRolesAssigned:
 		return authz.RebuildUserGrouping(ev.UserID, ev.TenantID, ev.RoleCodes)
 	case iam.UserDeactivated:
-		return nil // 会话撤销由 sessionProjector 处理
+		return nil // session revocation is handled by sessionProjector
 	case iam.UserDeleted:
 		return authz.RemoveUserGrouping(ev.UserID, ev.TenantID)
 	case iam.RoleMenusAssigned:
@@ -68,37 +72,37 @@ func (casbinProjector) Handle(ctx context.Context, e shared.Event) error {
 		}
 		return authz.RemoveRoleGrouping(ev.RoleCode, ev.TenantID)
 	case iam.TenantAdminSeeded:
-		// 新租户初始超管：域内全通 p 行 + g 行绑定（既有 SeedTenantAdmin 的语义）。
-		// 幂等：p/g 写入走 casbin adapter 的 add，重复执行不产生重复行。
+		// new tenant's initial super admin: in-domain all-wildcard p row + g row binding (the existing SeedTenantAdmin semantics).
+		// Idempotent: p/g writes go through the casbin adapter's add, so repeated execution produces no duplicate rows.
 		return authz.SeedTenantAdmin(ev.TenantID, ev.AdminUserID)
 	default:
-		slog.WarnContext(ctx, "casbin 投影器收到未知事件", "event", e.EventName())
+		slog.WarnContext(ctx, "casbin projector received an unknown event", "event", e.EventName())
 		return nil
 	}
 }
 
-// sessionProjector 把「用户/租户不可用」事件投影为会话撤销（踢下线）。
+// sessionProjector projects "user/tenant unavailable" events as session revocation (kick offline).
 type sessionProjector struct {
 	authM *auth.Manager
 }
 
-// NewSessionProjector 构造会话投影器。
+// NewSessionProjector constructs the session projector.
 func NewSessionProjector(authM *auth.Manager) shared.EventProjector {
 	return sessionProjector{authM: authM}
 }
 
-// Name 实现命名。
+// Name implements naming.
 func (sessionProjector) Name() string { return "session" }
 
-// Handles 声明订阅的事件。
+// Handles declares the subscribed events.
 func (sessionProjector) Handles() []string {
 	return []string{iam.EventUserDeactivated, iam.EventTenantDisabled}
 }
 
-// Handle 撤销对应范围的会话。
+// Handle revokes sessions in the corresponding scope.
 func (p sessionProjector) Handle(_ context.Context, e shared.Event) error {
 	if p.authM == nil {
-		slog.Error("会话投影器未装配 auth.Manager，跳过会话撤销", "event", e.EventName())
+		slog.Error("session projector has no auth.Manager assembled, skipping session revocation", "event", e.EventName())
 		return nil
 	}
 	switch ev := e.(type) {
@@ -110,31 +114,31 @@ func (p sessionProjector) Handle(_ context.Context, e shared.Event) error {
 	return nil
 }
 
-// cacheProjector 清理数据权限缓存。
+// cacheProjector cleans the data-permission cache.
 //
-// 改造前是 service/user.go:199 与 service/role.go:139/195 的
-// invalidateScope() 直接调用——应用层因此依赖了中间件层的回调
-// （app/service_providers.go 把 kit.InvalidateDataScope 传给 service，
-// 是「service 依赖 middleware」的反向设计）。
-// 现改为事件驱动：应用层不再持有中间件回调，依赖方向摆正。
+// Before the refactor this was the direct invalidateScope() calls at service/user.go:199 and
+// service/role.go:139/195 — the application layer thus depended on a middleware-layer callback
+// (app/service_providers.go passed kit.InvalidateDataScope to the service, a reverse design of
+// "service depends on middleware").
+// Now event-driven: the application layer no longer holds middleware callbacks, and the dependency direction is corrected.
 type cacheProjector struct {
 	invalidate func()
 }
 
-// NewScopeCacheProjector 构造数据权限缓存投影器。
+// NewScopeCacheProjector constructs the data-permission cache projector.
 func NewScopeCacheProjector(invalidate func()) shared.EventProjector {
 	return cacheProjector{invalidate: invalidate}
 }
 
-// Name 实现命名。
+// Name implements naming.
 func (cacheProjector) Name() string { return "scope-cache" }
 
-// Handles 声明订阅的事件：角色分配与数据权限口径变化都会改变可见范围。
+// Handles declares the subscribed events: role assignment and data-scope changes both alter the visible scope.
 func (cacheProjector) Handles() []string {
 	return []string{iam.EventUserRolesAssigned, iam.EventRoleMenusAssigned, iam.EventRoleDeleted}
 }
 
-// Handle 清理缓存。
+// Handle clears the cache.
 func (p cacheProjector) Handle(_ context.Context, _ shared.Event) error {
 	if p.invalidate != nil {
 		p.invalidate()

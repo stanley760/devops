@@ -1,12 +1,15 @@
-// TenantPlugin：GORM 回调自动注入/过滤 tenant_id。
+// TenantPlugin: GORM callbacks automatically inject/filter tenant_id.
 //
-// fail-closed 语义：
-//   - stmt.Schema 不含 tenant_id 字段（全局表）→ 放行
-//   - 原生 JOIN 查询（stmt.Joins 非空）→ 放行：dao 已显式过滤（裸列在多表下有歧义风险）
-//   - ctx 无租户且未显式 Skip → 直接报错，查询失败（防串数据）
-//   - 查询/改/删：注入 WHERE tenant_id = ?；新建：填充 TenantID 字段
+// Fail-closed semantics:
+//   - stmt.Schema has no tenant_id field (global table) → allow
+//   - Native JOIN queries (stmt.Joins non-empty) → allow: the dao filters
+//     explicitly (bare columns are ambiguous across multiple tables)
+//   - ctx has no tenant and no explicit Skip → error out directly, failing the
+//     query (guards against cross-tenant data leakage)
+//   - Query/modify/delete: inject WHERE tenant_id = ?; create: fill the TenantID field
 //
-// 仅在 server 装配期注册（migrate/种子直接走 db.Get()，无插件、不误伤）。
+// Registered only during server assembly (migrate/seed go straight to db.Get(),
+// with no plugin and no collateral damage).
 package tenantdb
 
 import (
@@ -14,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// RegisterPlugin 在共享连接上注册租户过滤回调（server 命令装配期调用一次）。
+// RegisterPlugin registers the tenant filtering callbacks on the shared connection (called once during server assembly).
 func RegisterPlugin(gdb *gorm.DB) error {
 	return tenant.RegisterPlugin(gdb)
 }

@@ -1,4 +1,4 @@
-// 角色管理接口（huma）。
+// Role management endpoints (huma).
 package api
 
 import (
@@ -15,60 +15,60 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// RoleHandler 角色管理接口。
+// RoleHandler serves the role management endpoints.
 type RoleHandler struct {
 	svc *service.Role
 }
 
-// NewRoleHandler 创建 handler。
+// NewRoleHandler creates the handler.
 func NewRoleHandler(svc *service.Role) *RoleHandler { return &RoleHandler{svc: svc} }
 
-// RoleListInput GET /system/api/v1/roles 查询参数。
+// RoleListInput holds the GET /system/api/v1/roles query parameters.
 type RoleListInput struct {
 	domain.PageParam
-	Name   string                   `query:"name" maxLength:"30" doc:"角色名称"`
-	Code   string                   `query:"code" maxLength:"100" doc:"角色编码"`
-	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"角色状态 0:禁用；1:启用"`
+	Name   string                   `query:"name" maxLength:"30" doc:"Role name"`
+	Code   string                   `query:"code" maxLength:"100" doc:"Role code"`
+	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"Role status 0: disabled; 1: enabled"`
 }
 
-// RoleListOutput 角色分页列表信封。
+// RoleListOutput is the paginated role list envelope.
 type RoleListOutput struct {
 	Body commonResp.BaseResponse[domain.PageResult[types.RoleDTO]]
 }
 
-// RoleIDInput path 参数。
+// RoleIDInput holds the path parameter.
 type RoleIDInput struct {
-	ID types.ParamID `path:"id" doc:"角色id"`
+	ID types.ParamID `path:"id" doc:"Role ID"`
 }
 
-// RoleGetOutput 角色详情信封（角色 + 已分配菜单 ID）。
+// RoleGetOutput is the role detail envelope (role + assigned menu IDs).
 type RoleGetOutput struct {
 	Body commonResp.BaseResponse[types.RoleDetailResp]
 }
 
-// RoleCreateInput POST /system/api/v1/roles。
+// RoleCreateInput is POST /system/api/v1/roles.
 type RoleCreateInput struct {
 	Body types.RoleSaveReq
 }
 
-// RoleEmptyOutput 无数据信封。
+// RoleEmptyOutput is the no-data envelope.
 type RoleEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// RoleUpdateInput PUT /system/api/v1/roles/{id}。
+// RoleUpdateInput is PUT /system/api/v1/roles/{id}.
 type RoleUpdateInput struct {
-	ID   types.ParamID `path:"id" doc:"角色id"`
+	ID   types.ParamID `path:"id" doc:"Role ID"`
 	Body types.RoleSaveReq
 }
 
-// RoleAssignMenusInput PUT /system/api/v1/roles/{id}/menus（重建 role_menu + p 行）。
+// RoleAssignMenusInput is PUT /system/api/v1/roles/{id}/menus (rebuilds role_menu and the p rows).
 type RoleAssignMenusInput struct {
-	ID   types.ParamID `path:"id" doc:"角色id"`
+	ID   types.ParamID `path:"id" doc:"Role ID"`
 	Body types.RoleAssignMenusReq
 }
 
-// List GET /system/api/v1/roles。
+// List handles GET /system/api/v1/roles.
 func (h *RoleHandler) List(ctx context.Context, in *RoleListInput) (*RoleListOutput, error) {
 	page, err := h.svc.List(ctx, types.RolePageQuery{
 		PageParam: in.PageParam,
@@ -82,7 +82,7 @@ func (h *RoleHandler) List(ctx context.Context, in *RoleListInput) (*RoleListOut
 	return &RoleListOutput{Body: response.OKBody(page)}, nil
 }
 
-// Get GET /system/api/v1/roles/{id}。
+// Get handles GET /system/api/v1/roles/{id}.
 func (h *RoleHandler) Get(ctx context.Context, in *RoleIDInput) (*RoleGetOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -95,7 +95,7 @@ func (h *RoleHandler) Get(ctx context.Context, in *RoleIDInput) (*RoleGetOutput,
 	return &RoleGetOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Create POST /system/api/v1/roles。
+// Create handles POST /system/api/v1/roles.
 func (h *RoleHandler) Create(ctx context.Context, in *RoleCreateInput) (*RoleEmptyOutput, error) {
 	if err := h.svc.Create(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -103,7 +103,7 @@ func (h *RoleHandler) Create(ctx context.Context, in *RoleCreateInput) (*RoleEmp
 	return &RoleEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Update PUT /system/api/v1/roles/{id}。
+// Update handles PUT /system/api/v1/roles/{id}.
 func (h *RoleHandler) Update(ctx context.Context, in *RoleUpdateInput) (*RoleEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (h *RoleHandler) Update(ctx context.Context, in *RoleUpdateInput) (*RoleEmp
 	return &RoleEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// AssignMenus PUT /system/api/v1/roles/{id}/menus（role_menu 重建 + p 行快照重建）。
+// AssignMenus handles PUT /system/api/v1/roles/{id}/menus (rebuilds role_menu and the p-row snapshot).
 func (h *RoleHandler) AssignMenus(ctx context.Context, in *RoleAssignMenusInput) (*RoleEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -127,7 +127,7 @@ func (h *RoleHandler) AssignMenus(ctx context.Context, in *RoleAssignMenusInput)
 	return &RoleEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Delete DELETE /system/api/v1/roles/{id}。
+// Delete handles DELETE /system/api/v1/roles/{id}.
 func (h *RoleHandler) Delete(ctx context.Context, in *RoleIDInput) (*RoleEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {

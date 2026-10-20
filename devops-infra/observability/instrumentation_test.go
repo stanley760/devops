@@ -76,13 +76,13 @@ func TestInstrumentGORMRegistersDBPoolMetrics(t *testing.T) {
 		t.Fatalf("InstrumentGORM() error = %v", err)
 	}
 
-	// 触发一次真实查询，确保连接池已初始化
+	// run one real query to ensure the connection pool is initialized
 	var value int
 	if err := db.Raw("SELECT ? AS value", 1).Scan(&value).Error; err != nil {
 		t.Fatalf("query sqlite: %v", err)
 	}
 
-	// 连接池指标应经 Prometheus exporter 输出，且携带 db_name 标签
+	// the connection pool metrics should be output via the Prometheus exporter and carry the db_name label
 	rec := httptest.NewRecorder()
 	rt.MetricsHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := rec.Body.String()

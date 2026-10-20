@@ -1,4 +1,4 @@
-// 部门管理接口（huma）。
+// Department management endpoints (huma).
 package api
 
 import (
@@ -14,55 +14,55 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// DeptHandler 部门管理接口。
+// DeptHandler serves the department management endpoints.
 type DeptHandler struct {
 	svc *service.Dept
 }
 
-// NewDeptHandler 创建 handler。
+// NewDeptHandler creates the handler.
 func NewDeptHandler(svc *service.Dept) *DeptHandler { return &DeptHandler{svc: svc} }
 
 // ---- Input / Output ----
 
-// DeptListInput GET /system/api/v1/depts 查询参数（返回树；status 可选）。
+// DeptListInput holds the GET /system/api/v1/depts query parameters (returns a tree; status is optional).
 type DeptListInput struct {
-	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"部门状态 0:禁用；1:启用"`
+	Status humaparam.Optional[int8] `query:"status" minimum:"0" maximum:"1" doc:"Dept status 0: disabled; 1: enabled"`
 }
 
-// DeptListOutput 部门树信封。
+// DeptListOutput is the department tree envelope.
 type DeptListOutput struct {
 	Body commonResp.BaseResponse[[]types.DeptTreeResp]
 }
 
-// DeptIDInput path 参数。
+// DeptIDInput holds the path parameter.
 type DeptIDInput struct {
-	ID types.ParamID `path:"id" doc:"部门id"`
+	ID types.ParamID `path:"id" doc:"Dept ID"`
 }
 
-// DeptGetOutput 部门详情信封。
+// DeptGetOutput is the department detail envelope.
 type DeptGetOutput struct {
 	Body commonResp.BaseResponse[types.DeptDTO]
 }
 
-// DeptCreateInput POST /system/api/v1/depts。
+// DeptCreateInput is POST /system/api/v1/depts.
 type DeptCreateInput struct {
 	Body types.DeptSaveReq
 }
 
-// DeptEmptyOutput 无数据信封。
+// DeptEmptyOutput is the no-data envelope.
 type DeptEmptyOutput struct {
 	Body commonResp.BaseResponse[any]
 }
 
-// DeptUpdateInput PUT /system/api/v1/depts/{id}。
+// DeptUpdateInput is PUT /system/api/v1/depts/{id}.
 type DeptUpdateInput struct {
-	ID   types.ParamID `path:"id" doc:"部门id"`
+	ID   types.ParamID `path:"id" doc:"Dept ID"`
 	Body types.DeptSaveReq
 }
 
 // ---- Handlers ----
 
-// List GET /system/api/v1/depts?status=（返回树）。
+// List handles GET /system/api/v1/depts?status= (returns a tree).
 func (h *DeptHandler) List(ctx context.Context, in *DeptListInput) (*DeptListOutput, error) {
 	tree, err := h.svc.List(ctx, in.Status.Ptr())
 	if err != nil {
@@ -71,7 +71,7 @@ func (h *DeptHandler) List(ctx context.Context, in *DeptListInput) (*DeptListOut
 	return &DeptListOutput{Body: response.OKBody(tree)}, nil
 }
 
-// Get GET /system/api/v1/depts/{id}。
+// Get handles GET /system/api/v1/depts/{id}.
 func (h *DeptHandler) Get(ctx context.Context, in *DeptIDInput) (*DeptGetOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -84,7 +84,7 @@ func (h *DeptHandler) Get(ctx context.Context, in *DeptIDInput) (*DeptGetOutput,
 	return &DeptGetOutput{Body: response.OKBody(*resp)}, nil
 }
 
-// Create POST /system/api/v1/depts。
+// Create handles POST /system/api/v1/depts.
 func (h *DeptHandler) Create(ctx context.Context, in *DeptCreateInput) (*DeptEmptyOutput, error) {
 	if err := h.svc.Create(ctx, auth.ClaimsFrom(ctx), in.Body); err != nil {
 		return nil, errs.ToHumaError(err)
@@ -92,7 +92,7 @@ func (h *DeptHandler) Create(ctx context.Context, in *DeptCreateInput) (*DeptEmp
 	return &DeptEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Update PUT /system/api/v1/depts/{id}（父节点不得是自身或后代，防环）。
+// Update handles PUT /system/api/v1/depts/{id} (the parent must not be the node itself or one of its descendants, preventing cycles).
 func (h *DeptHandler) Update(ctx context.Context, in *DeptUpdateInput) (*DeptEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {
@@ -104,7 +104,7 @@ func (h *DeptHandler) Update(ctx context.Context, in *DeptUpdateInput) (*DeptEmp
 	return &DeptEmptyOutput{Body: response.EmptyBody()}, nil
 }
 
-// Delete DELETE /system/api/v1/depts/{id}。
+// Delete handles DELETE /system/api/v1/depts/{id}.
 func (h *DeptHandler) Delete(ctx context.Context, in *DeptIDInput) (*DeptEmptyOutput, error) {
 	id, err := types.Parse(in.ID)
 	if err != nil {

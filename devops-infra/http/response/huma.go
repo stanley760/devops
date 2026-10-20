@@ -1,7 +1,8 @@
-// huma 出口信封 helper（D4/D7）。
+// huma envelope helpers (D4/D7).
 //
-// huma handler 的 Output.Body 直接复用这些构造函数，成功形态与
-// gin 版 OK/OKPage 字节一致；WriteHumaEnvelope 供中间件终止路径直写信封。
+// huma handler Output.Body reuses these constructors directly; the success shape is
+// byte-identical to the Gin version's OK/OKPage; WriteHumaEnvelope writes an envelope
+// directly from middleware termination paths.
 package response
 
 import (
@@ -15,17 +16,18 @@ import (
 	"github.com/stanley760/devops/devops-infra/errs"
 )
 
-// OKBody 成功响应体（huma handler Output.Body 用）。
+// OKBody is the success response body (for huma handler Output.Body).
 func OKBody[T any](data T) commonResp.BaseResponse[T] {
 	return commonResp.BaseResponse[T]{Code: errs.CodeOK, Msg: "ok", Data: data}
 }
 
-// EmptyBody 无数据成功响应体：Data 为 nil any，序列化为 "data":null（与 OK(c, nil) 字节一致）。
+// EmptyBody is the success response body with no data: Data is nil any, serialized
+// as "data":null (byte-identical to OK(c, nil)).
 func EmptyBody() commonResp.BaseResponse[any] {
 	return commonResp.BaseResponse[any]{Code: errs.CodeOK, Msg: "ok", Data: nil}
 }
 
-// PageBody 分页成功响应体（与 OKPage 字节一致）。
+// PageBody is the paginated success response body (byte-identical to OKPage).
 func PageBody[T any](page domain.PageResult[T]) commonResp.BaseResponse[domain.PageResult[T]] {
 	return commonResp.BaseResponse[domain.PageResult[T]]{
 		Code: errs.CodeOK, Msg: "ok",
@@ -33,8 +35,9 @@ func PageBody[T any](page domain.PageResult[T]) commonResp.BaseResponse[domain.P
 	}
 }
 
-// WriteHumaEnvelope 向 huma 上下文直写失败信封（中间件 401/403 等终止路径用）。
-// 仅放行 4xx/5xx，避免误传 2xx 造成语义混乱。
+// WriteHumaEnvelope writes a failure envelope directly to the huma context
+// (for middleware 401/403 termination paths).
+// Only 4xx/5xx are allowed through, to avoid mistakenly passing a 2xx and creating semantic confusion.
 func WriteHumaEnvelope(hctx huma.Context, status int, msg string) {
 	if status < 400 || status > 599 {
 		status = errs.CodeInternal

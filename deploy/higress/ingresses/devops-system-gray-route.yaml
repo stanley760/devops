@@ -1,6 +1,6 @@
-# 灰度实例专用路由：gray.devops.local 100% 直达 devops-system-gray，
-# 用于灰度版本的定向验证（不走 canary 权重随机）。
-# 与主路由同口径：仅业务 API 与 JWKS，运维端点不经公网网关暴露。
+# Dedicated route for gray instances: gray.devops.local goes 100% straight to devops-system-gray,
+# for targeted verification of gray versions (no canary weight randomness).
+# Same scope as the main route: business API and JWKS only; ops endpoints are not exposed via the public gateway.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -8,16 +8,17 @@ metadata:
   namespace: higress-system
   annotations:
     higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos
-    # 流量入口身份由 jwt-auth 插件注入的 JWT claims 表达，无需静态身份头注解。
-    # 本 ingress 已在 jwt-auth 的 matchRules 中显式列出，故灰度定向流量同样受鉴权。
+    # Traffic-ingress identity is expressed by the JWT claims injected by the jwt-auth plugin; no static identity header annotation needed.
+    # This ingress is explicitly listed in jwt-auth's matchRules, so gray-targeted traffic is likewise authenticated.
 spec:
   ingressClassName: higress
   rules:
     - host: gray.devops.local
       http:
         paths:
-          # ⚠️ 此前误写为 /api，但后端 huma 路由挂在 /system 前缀下（systemAPIPrefix），
-          # 该前缀匹配到的请求全被后端 404，灰度定向验证实际从未真正跑到灰度实例。
+          # ⚠️ This was previously miswritten as /api, but the backend huma routes hang under the /system
+          # prefix (systemAPIPrefix) — requests matching that prefix were all 404'd by the backend,
+          # so gray-targeted verification never actually reached the gray instance.
           - path: /system
             pathType: Prefix
             backend:

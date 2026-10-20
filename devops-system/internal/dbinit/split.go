@@ -2,14 +2,14 @@ package dbinit
 
 import "strings"
 
-// splitStatements 按分号切分 SQL 文本为可执行语句序列：
-//   - 单引号 '…'、双引号 "…"、反引号 `…` 字面量内的分号不算语句边界；
-//   - MySQL 反斜杠转义（'\”）与相邻双写引号（'it”s'）均在字面量内原样保留；
-//   - -- 行注释与 /* */ 块注释整体剥离（含被注释掉的分号）；
-//   - 纯注释/空白段不产出语句。
+// splitStatements splits SQL text into an executable statement sequence by semicolons:
+//   - semicolons inside single-quoted '…', double-quoted "…", and backtick-quoted `…` literals are not statement boundaries;
+//   - MySQL backslash escapes ('\") and adjacent doubled quotes ('it"s') are preserved verbatim inside literals;
+//   - -- line comments and /* */ block comments are stripped entirely (including commented-out semicolons);
+//   - comment-only/whitespace segments produce no statement.
 //
-// 方言边界：本包面向 MySQL（生产）与 sqlite（单测），不处理 PG 的
-// dollar-quoted 字符串——当前脚本不含该语法。
+// Dialect boundary: this package targets MySQL (production) and sqlite (tests); PG's
+// dollar-quoted strings are not handled — the current scripts contain no such syntax.
 func splitStatements(sql string) []string {
 	var stmts []string
 	var b strings.Builder
@@ -33,7 +33,7 @@ func splitStatements(sql string) []string {
 			for i+1 < n && !(sql[i] == '*' && sql[i+1] == '/') {
 				i++
 			}
-			i += 2 // 跳过 "*/"；未闭合时 i 越界由外层条件兜住
+			i += 2 // skip "*/"; when unclosed, an out-of-range i is caught by the outer condition
 		case c == ';':
 			flush()
 			i++
@@ -46,8 +46,9 @@ func splitStatements(sql string) []string {
 	return stmts
 }
 
-// copyQuoted 把 sql[i] 起的一个带引号字面量整体复制进 b，返回字面量
-// 结束后的下标。引号未闭合时返回 len(sql)，语法错误交给数据库报错。
+// copyQuoted copies one quoted literal starting at sql[i] as a whole into b, returning the
+// index just after the literal ends. If the quote is unclosed it returns len(sql), and the
+// syntax error is left for the database to report.
 func copyQuoted(sql string, i int, b *strings.Builder) int {
 	q := sql[i]
 	b.WriteByte(q)
@@ -58,10 +59,10 @@ func copyQuoted(sql string, i int, b *strings.Builder) int {
 		i++
 		switch {
 		case c == '\\' && q != '`' && i < len(sql):
-			b.WriteByte(sql[i]) // MySQL 反斜杠转义：带上下一个字符
+			b.WriteByte(sql[i]) // MySQL backslash escape: include the next character
 			i++
 		case c == q && i < len(sql) && sql[i] == q:
-			b.WriteByte(q) // 相邻双写引号（''）是字面量内转义
+			b.WriteByte(q) // adjacent doubled quotes ('') are an in-literal escape
 			i++
 		case c == q:
 			return i

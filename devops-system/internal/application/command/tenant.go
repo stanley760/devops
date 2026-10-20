@@ -10,20 +10,20 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// TenantCommand 租户写侧命令处理器。
+// TenantCommand is the write-side tenant command handler.
 type TenantCommand struct {
 	tenants iam.TenantRepository
 	users   iam.UserRepository
 	roles   iam.RoleRepository
 	txs     shared.TxManager
 	now     shared.NowFunc
-	// SuperAdminRole 内置超管角色编码（由 authz 角色名配置注入）。
+	// SuperAdminRole is the built-in super-admin role code (injected from the authz role-name config).
 	SuperAdminRole func() string
-	// HashPassword 口令哈希（生产 bcrypt）。
+	// HashPassword hashes passwords (bcrypt in production).
 	HashPassword func(string) (string, error)
 }
 
-// NewTenantCommand 构造租户命令处理器。
+// NewTenantCommand constructs the tenant command handler.
 func NewTenantCommand(
 	tenants iam.TenantRepository,
 	users iam.UserRepository,
@@ -36,7 +36,7 @@ func NewTenantCommand(
 	}
 }
 
-// CreateTenantCmd 创建租户命令（含初始超管）。
+// CreateTenantCmd is the create-tenant command (includes the initial super admin).
 type CreateTenantCmd struct {
 	Name          string
 	Code          string
@@ -48,32 +48,39 @@ type CreateTenantCmd struct {
 	AdminPassword string
 }
 
-// Create 创建租户 + 初始超管（角色 + 管理员账号）。
+// Create creates a tenant + initial super admin (role + admin account).
 //
-// 这是本次重构最能体现价值的一处：改造前（service/tenant.go:104-108）因
-// 事务边界被封在 dao 包内，应用层无法声明「建租户 + 建超管」的事务边界，
-// 只能靠手工补偿——
+// This is where the refactor pays off most: before it
+// (service/tenant.go:104-108), the transaction boundary was locked inside
+// the dao package, so the application layer could not declare "create
+// tenant + create super admin" as one transaction and had to rely on manual
+// compensation —
 //
 //	if err := dao.SeedTenantAdmin(tctx, role, admin); err != nil {
-//	    _ = dao.HardDeleteTenant(ctx, t.ID) // 补偿：回滚租户行
+//	    _ = dao.HardDeleteTenant(ctx, t.ID) // compensation: roll back the tenant row
 //	    return nil, err
 //	}
 //
-// 这段补偿本身有缺陷：补偿失败被 `_ =` 吞掉，会留下「有租户无超管」的
-// 不可用状态；且补偿与原始写不在同一事务，并发下可能误删他人数据。
+// That compensation was itself flawed: a failed compensation was swallowed
+// by `_ =`, leaving an unusable "tenant without super admin" state; and
+// because the compensation was not in the same transaction as the original
+// write, it could delete other people's data under concurrency.
 //
-// 现在事务边界由 TxManager 声明，租户行、角色行、管理员行、角色绑定
-// 与领域事件在同一事务内提交——要么全成，要么全败。
+// Now the transaction boundary is declared by TxManager, and the tenant row,
+// role row, admin row, role binding, and domain events commit in a single
+// transaction — all or nothing.
 //
-// 注意：初始超管授权（casbin p/g 行）仍走事件投影，不在本事务内，
-// 因此不再出现 "租户已创建，但超管授权写入失败，请重试" 的模糊错误。
+// Note: the initial super-admin authorization (casbin p/g rows) still goes
+// through event projection, outside this transaction, so the vague error
+// "tenant created, but super-admin authorization failed, please retry"
+// no longer occurs.
 func (c *TenantCommand) Create(ctx context.Context, cmd CreateTenantCmd) error {
 	exists, err := c.tenants.CodeExists(ctx, cmd.Code, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errParam("租户编码已存在")
+		return errParam("tenant code already exists")
 	}
 
 	hash, err := hashPassword(cmd.AdminPassword, c.HashPassword)
@@ -97,7 +104,7 @@ func (c *TenantCommand) Create(ctx context.Context, cmd CreateTenantCmd) error {
 			return err
 		}
 
-		// 租户内表的写仍需注入新租户上下文，TenantPlugin 依此填充 tenant_id。
+		// Writes to tenant-scoped tables still need the new tenant context injected; TenantPlugin uses it to fill tenant_id.
 		tctx := infratenant.With(ctx, t.ID, t.Code)
 
 		role := &iam.Role{
@@ -119,15 +126,16 @@ func (c *TenantCommand) Create(ctx context.Context, cmd CreateTenantCmd) error {
 			Nickname: cmd.AdminUsername,
 			Status:   iam.UserStatusEnabled,
 		}
-		// 分配超管角色：记录 UserRolesAssigned 事件，投影器据此建 casbin g 行。
+		// Assign the super-admin role: record the UserRolesAssigned event, from which the projector builds the casbin g rows.
 		admin.AssignRoles([]int64{role.ID}, []string{role.Code}, now)
 		if err := c.users.Save(tctx, admin); err != nil {
 			return err
 		}
 
-		// 初始超管授权（域内全通 p 行 + g 行）：记录事件交投影器执行。
-		// 改造前在此处同步调用 authz.SeedTenantAdmin，失败即返回
-		// "租户已创建，但超管授权写入失败，请重试"。
+		// Initial super-admin authorization (domain-wide p rows + g rows): record an
+		// event and let the projector execute it. Before the refactor this called
+		// authz.SeedTenantAdmin synchronously here, returning "tenant created, but
+		// super-admin authorization failed, please retry" on failure.
 		role.RecordEvent(iam.TenantAdminSeeded{
 			BaseEvent:   shared.BaseEvent{Time: now},
 			TenantID:    t.ID,
@@ -137,7 +145,7 @@ func (c *TenantCommand) Create(ctx context.Context, cmd CreateTenantCmd) error {
 	})
 }
 
-// UpdateTenantCmd 更新租户命令。
+// UpdateTenantCmd is the update-tenant command.
 type UpdateTenantCmd struct {
 	TenantID      int64
 	Name          string
@@ -147,11 +155,12 @@ type UpdateTenantCmd struct {
 	Remark        string
 }
 
-// Update 更新租户。
+// Update updates a tenant.
 //
-// 业务规则：传了过期时间则据其推导状态（未来→启用，过去→停用），
-// 未传则清空过期时间（永不过期）。该规则原先在 service/tenant.go:130-140
-// 以 updates map 的形式表达，现提为领域方法。
+// Business rule: if an expiry time is provided, the status is derived from
+// it (future → enabled, past → disabled); if omitted, the expiry time is
+// cleared (never expires). This rule used to live in service/tenant.go:130-140
+// as an updates map and is now a domain method.
 func (c *TenantCommand) Update(ctx context.Context, cmd UpdateTenantCmd) error {
 	t, err := c.tenants.Get(ctx, cmd.TenantID)
 	if err != nil {
@@ -173,16 +182,17 @@ func (c *TenantCommand) Update(ctx context.Context, cmd UpdateTenantCmd) error {
 	})
 }
 
-// ChangeTenantStatusCmd 变更租户状态命令。
+// ChangeTenantStatusCmd is the change-tenant-status command.
 type ChangeTenantStatusCmd struct {
 	TenantID int64
 	Status   int8
 }
 
-// ChangeStatus 启停租户。
+// ChangeStatus enables or disables a tenant.
 //
-// 停用时聚合记录 TenantDisabled 事件，由投影器撤销该租户全部会话（全员下线），
-// 主流程不再同步等待会话撤销完成。
+// On disable the aggregate records a TenantDisabled event, and the projector
+// revokes all of that tenant's sessions (everyone goes offline); the main
+// flow no longer waits synchronously for session revocation to finish.
 func (c *TenantCommand) ChangeStatus(ctx context.Context, cmd ChangeTenantStatusCmd) error {
 	t, err := c.tenants.Get(ctx, cmd.TenantID)
 	if err != nil {
@@ -202,12 +212,12 @@ func (c *TenantCommand) ChangeStatus(ctx context.Context, cmd ChangeTenantStatus
 	})
 }
 
-// DeleteTenantCmd 删除租户命令。
+// DeleteTenantCmd is the delete-tenant command.
 type DeleteTenantCmd struct {
 	TenantID int64
 }
 
-// Delete 软删租户。
+// Delete soft-deletes a tenant.
 func (c *TenantCommand) Delete(ctx context.Context, cmd DeleteTenantCmd) error {
 	t, err := c.tenants.Get(ctx, cmd.TenantID)
 	if err != nil {

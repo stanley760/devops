@@ -1,5 +1,5 @@
--- t_system_role_menu 角色-菜单关联（租户表；菜单全局，但授权按租户的角色发生）。
--- 复合主键、无独立 ID、不走发号；物理删除（无 deleted_at），理由同 t_system_user_role。
+-- t_system_role_menu role-menu association (tenant table; menus are global, but grants happen per tenant role).
+-- Composite primary key, no standalone ID, no ID issuance; physical deletion (no deleted_at), for the same reason as t_system_user_role.
 CREATE TABLE IF NOT EXISTS t_system_role_menu (
     tenant_id BIGINT NOT NULL,
     role_id   BIGINT NOT NULL,

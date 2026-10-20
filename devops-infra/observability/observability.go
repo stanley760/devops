@@ -1,12 +1,13 @@
-// Package observability 统一装配 OpenTelemetry 可观测性：
-// trace（OTLP 出口）+ metrics（Prometheus exporter）+ 日志 trace 关联。
+// Package observability assembles OpenTelemetry observability in one place:
+// trace (OTLP export) + metrics (Prometheus exporter) + log trace correlation.
 //
-// 装配位置：各服务在 logging.Init 之后、任何请求处理之前调用 Init，
-// 进程退出前调用 Runtime.Shutdown flush 在途数据（对齐 logging.Close 的收尾语义）。
+// Assembly point: each service calls Init after logging.Init and before any request
+// handling, and calls Runtime.Shutdown before process exit to flush in-flight data
+// (matching the cleanup semantics of logging.Close).
 //
-// 埋点一次、两处消费：业务代码只面对 OTel API；
-// trace 经 OTLP HTTP 发往 Jaeger/Tempo，metrics 经 Prometheus exporter
-// 由 Prometheus 抓取 /metrics，无需双重埋点。
+// Instrument once, consume twice: business code only sees the OTel API;
+// traces go to Jaeger/Tempo via OTLP HTTP, metrics are scraped by Prometheus via
+// the Prometheus exporter at /metrics — no double instrumentation required.
 package observability
 
 import (
@@ -36,21 +37,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Config 可观测性装配配置。
+// Config configures observability assembly.
 type Config struct {
-	ServiceName    string  // 服务名；应与 nacos 注册名一致（跨服务 trace 与 Grafana 过滤依赖）
-	Env            string  // deployment.environment 资源属性（dev/test/prod）
-	OTLPEndpoint   string  // OTLP HTTP 端点，如 "http://jaeger:4318"；空 = 不装配 trace 出口
-	SamplerRatio   float64 // 根 span 采样率；dev 建议 1.0，prod 建议 0.1；<=0 视为 1.0
-	MetricsEnabled bool    // 是否装配 Prometheus exporter（/metrics）
+	ServiceName    string  // service name; should match the nacos registration name (cross-service trace and Grafana filtering depend on it)
+	Env            string  // deployment.environment resource attribute (dev/test/prod)
+	OTLPEndpoint   string  // OTLP HTTP endpoint, e.g. "http://jaeger:4318"; empty = no trace exporter
+	SamplerRatio   float64 // root span sampling ratio; 1.0 recommended in dev, 0.1 in prod; <=0 means 1.0
+	MetricsEnabled bool    // whether to assemble the Prometheus exporter (/metrics)
 }
 
-// Runtime 装配产物：MetricsHandler 非 nil 时挂载到公开路由 /metrics。
+// Runtime is the assembly product: when MetricsHandler is non-nil it is mounted on the public route /metrics.
 type Runtime struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  *sdkmetric.MeterProvider
-	// registry 是 /metrics 的自建注册表；指标未启用时为 nil。
-	// 依赖 USE 指标（如 SQL 连接池）通过它注册，与 OTel 指标同端点输出。
+	// registry is the self-built registry behind /metrics; nil when metrics are disabled.
+	// USE metrics (e.g. the SQL connection pool) are registered through it, output alongside the OTel metrics.
 	registry       *prometheus.Registry
 	MetricsHandler http.Handler
 
@@ -60,10 +61,12 @@ type Runtime struct {
 	httpInFlight metric.Int64UpDownCounter
 }
 
-// Init 装配全局 OTel（TracerProvider / MeterProvider / W3C 传播器）并做日志 trace 关联。
+// Init assembles the global OTel (TracerProvider / MeterProvider / W3C propagators)
+// and correlates logs with traces.
 //
-// fail-open 设计：可观测性故障不应阻断业务启动——OTLP exporter 创建失败仅记日志并
-// 跳过 trace 出口（本地 span 仍创建，只是不上报）；Resource 构建失败才视为装配错误。
+// Fail-open design: observability failures must not block business startup — a failed
+// OTLP exporter creation is only logged and the trace export skipped (local spans are
+// still created, just not reported); only a failed Resource build is treated as an assembly error.
 func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	res, err := resource.New(ctx,
 		resource.WithFromEnv(),
@@ -74,7 +77,7 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("observability: 构建资源失败: %w", err)
+		return nil, fmt.Errorf("observability: failed to build resource: %w", err)
 	}
 
 	rt := &Runtime{}
@@ -83,16 +86,18 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 
 	if cfg.OTLPEndpoint != "" {
 		otlpOpts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(cfg.OTLPEndpoint)}
-		// WithEndpointURL 对无 path 的 URL 会规范化为 "/"，且不追加默认信号路径 /v1/traces
-		// （otlptracehttp options.go:106-109）——发到 / 会被 Jaeger 404 拒收，trace 静默丢弃。
-		// 仅当业务配置未显式带 path 时补全；Insecure 由 scheme 自动推导（http→明文）。
+		// WithEndpointURL normalizes a URL with no path to "/", and does not append the
+		// default signal path /v1/traces (otlptracehttp options.go:106-109) — sending to /
+		// gets a 404 from Jaeger and traces are silently dropped.
+		// Only backfill it when the business config does not carry a path explicitly;
+		// Insecure is derived automatically from the scheme (http→plaintext).
 		if u, perr := url.Parse(cfg.OTLPEndpoint); perr == nil && u.Path == "" {
 			otlpOpts = append(otlpOpts, otlptracehttp.WithURLPath("/v1/traces"))
 		}
 		exp, err := otlptracehttp.New(ctx, otlpOpts...)
 		if err != nil {
-			// exporter 不可用不阻断启动：记日志、跳过出口（本地 span 照常）
-			slog.Warn("observability: 创建 OTLP exporter 失败，trace 出口关闭", "err", err, "endpoint", cfg.OTLPEndpoint)
+			// an unavailable exporter must not block startup: log it and skip the export (local spans still work)
+			slog.Warn("observability: failed to create the OTLP exporter, trace export disabled", "err", err, "endpoint", cfg.OTLPEndpoint)
 		} else {
 			traceOpts = append(traceOpts,
 				sdktrace.WithBatcher(exp,
@@ -106,8 +111,8 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	rt.tracerProvider = sdktrace.NewTracerProvider(traceOpts...)
 
 	if cfg.MetricsEnabled {
-		// 自定义 registry：OTel 指标 + Go 运行时/进程指标（GC、goroutine、内存）
-		// 同处一个 /metrics 端点，Grafana 面板可直接引用 runtime 曲线
+		// custom registry: OTel metrics + Go runtime/process metrics (GC, goroutines, memory)
+		// behind a single /metrics endpoint, so Grafana dashboards can reference runtime curves directly
 		registry := prometheus.NewRegistry()
 		registry.MustRegister(
 			collectors.NewGoCollector(),
@@ -116,15 +121,16 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		rt.registry = registry
 		exp, err := promexporter.New(
 			promexporter.WithRegisterer(registry),
-			// 将 OTel Resource 的 service.name / deployment.environment 提升为常量标签，
-			// Grafana 面板按 service_name 维度过滤/聚合；
-			// 其余资源属性（进程/运行时版本等）不进标签，控制series基数。
+			// Promote service.name / deployment.environment from the OTel Resource to
+			// constant labels so Grafana dashboards can filter/aggregate by service_name;
+			// the remaining resource attributes (process/runtime versions etc.) stay out
+			// of labels to control series cardinality.
 			promexporter.WithResourceAsConstantLabels(func(kv attribute.KeyValue) bool {
 				return kv.Key == semconv.ServiceNameKey || kv.Key == semconv.DeploymentEnvironmentKey
 			}),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("observability: 创建 Prometheus exporter 失败: %w", err)
+			return nil, fmt.Errorf("observability: failed to create the Prometheus exporter: %w", err)
 		}
 		rt.meterProvider = sdkmetric.NewMeterProvider(
 			sdkmetric.WithResource(res),
@@ -133,7 +139,7 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		rt.MetricsHandler = promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 		if err := rt.initHTTPMetrics(); err != nil {
 			_ = rt.meterProvider.Shutdown(ctx)
-			return nil, fmt.Errorf("observability: 初始化 HTTP 指标失败: %w", err)
+			return nil, fmt.Errorf("observability: failed to initialize HTTP metrics: %w", err)
 		}
 	}
 
@@ -141,19 +147,23 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	if rt.meterProvider != nil {
 		otel.SetMeterProvider(rt.meterProvider)
 	}
-	// W3C tracecontext + baggage：与 Higress 网关、前端及跨服务 gRPC/HTTP 传播对齐
+	// W3C tracecontext + baggage: aligned with the Higress gateway, the frontend, and cross-service gRPC/HTTP propagation
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	// 日志 trace 关联：包装当前默认 handler，现有 slog 调用自动携带 trace_id/span_id。
-	// 自递归防护：SetDefault 会把 log 包默认输出桥接回 slog.Default()；若当前默认
-	// handler 仍是内建 defaultHandler（写 log.Default()），TraceHandler→log.Default()
-	// →TraceHandler 成环，请求路径第一条日志即在 log 互斥锁上自死锁。log 默认
-	// writer 仍是 os.Stderr 说明从未 SetDefault 过（logging.Init 未先行，典型如
-	// 单元测试），此时以等价的直写 stderr handler 顶替；生产路径 logging.Init 的
-	// 文件/控制台 handler 直写 writer、不经 log.Default()，原样包装。
+	// Log trace correlation: wrap the current default handler so existing slog calls
+	// automatically carry trace_id/span_id.
+	// Self-recursion guard: SetDefault bridges the log package's default output back to
+	// slog.Default(); if the current default handler is still the built-in defaultHandler
+	// (writing to log.Default()), TraceHandler → log.Default() → TraceHandler forms a
+	// loop and the first log on the request path self-deadlocks on the log mutex. When
+	// log's default writer is still os.Stderr it means SetDefault was never called
+	// (logging.Init did not run first, typically in unit tests), so substitute an
+	// equivalent handler that writes straight to stderr; in the production path
+	// logging.Init's file/console handlers write directly to the writer and do not go
+	// through log.Default(), so they are wrapped as-is.
 	base := slog.Default().Handler()
 	if log.Default().Writer() == os.Stderr {
 		base = slog.NewTextHandler(os.Stderr, nil)
@@ -163,7 +173,7 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	return rt, nil
 }
 
-// Shutdown flush 在途 trace/metrics 后释放；进程退出前调用（带超时 ctx）。
+// Shutdown flushes in-flight trace/metrics before releasing; call before process exit (with a timeout ctx).
 func (rt *Runtime) Shutdown(ctx context.Context) error {
 	if rt == nil {
 		return nil
@@ -182,7 +192,8 @@ func (rt *Runtime) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// ShutdownWithTimeout 使用有界超时 flush 在途数据，避免外部后端不可用时阻塞进程退出。
+// ShutdownWithTimeout flushes in-flight data with a bounded timeout, avoiding a
+// blocked process exit when an external backend is unavailable.
 func (rt *Runtime) ShutdownWithTimeout(parent context.Context, timeout time.Duration) error {
 	if parent == nil {
 		parent = context.Background()

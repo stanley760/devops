@@ -6,7 +6,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/domain/shared"
 )
 
-// 用户域事件名（持久化与投影路由的键，改动需同步迁移历史数据）。
+// User domain event names (keys for persistence and projection routing; changes require migrating historical data in sync).
 const (
 	EventUserRolesAssigned   = "iam.user.roles_assigned"
 	EventUserDeactivated     = "iam.user.deactivated"
@@ -15,11 +15,11 @@ const (
 	EventUserPasswordChanged = "iam.user.password_changed"
 )
 
-// UserRolesAssigned 用户角色分配变更 → 重建 casbin g 行。
+// UserRolesAssigned: user role assignment changed → rebuild casbin g rows.
 //
-// 投影：casbin.RebuildUserGrouping（先清后建，天然幂等）。
-// 改造前为 service/user.go:195 的同步调用，失败返回
-// "用户已更新，但角色授权刷新失败，请重试更新"。
+// Projection: casbin.RebuildUserGrouping (clear first then rebuild, naturally idempotent).
+// Before the refactor this was a synchronous call at service/user.go:195; on failure it returned
+// "user updated, but role authorization refresh failed, please retry the update".
 type UserRolesAssigned struct {
 	shared.BaseEvent
 	UserID    int64
@@ -28,67 +28,67 @@ type UserRolesAssigned struct {
 	RoleCodes []string
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e UserRolesAssigned) EventName() string { return EventUserRolesAssigned }
 
 func (e UserRolesAssigned) aggregateInfo() (string, int64) { return "iam.user", e.UserID }
 
 func (e UserRolesAssigned) eventTenantID() int64 { return e.TenantID }
 
-// UserDeactivated 用户被停用 → 撤销该用户全部会话（踢下线）。
+// UserDeactivated: user disabled → revoke all sessions of that user (kick offline).
 //
-// 投影：auth.RevokeAllSessions。改造前为 service/user.go:202 的同步调用。
+// Projection: auth.RevokeAllSessions. Before the refactor this was a synchronous call at service/user.go:202.
 type UserDeactivated struct {
 	shared.BaseEvent
 	UserID   int64
 	TenantID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e UserDeactivated) EventName() string { return EventUserDeactivated }
 
 func (e UserDeactivated) aggregateInfo() (string, int64) { return "iam.user", e.UserID }
 
 func (e UserDeactivated) eventTenantID() int64 { return e.TenantID }
 
-// UserActivated 用户被启用（当前无需外部动作，保留以便后续通知/审计场景）。
+// UserActivated: user enabled (no external action needed for now; kept for future notification/audit scenarios).
 type UserActivated struct {
 	shared.BaseEvent
 	UserID   int64
 	TenantID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e UserActivated) EventName() string { return EventUserActivated }
 
 func (e UserActivated) aggregateInfo() (string, int64) { return "iam.user", e.UserID }
 
 func (e UserActivated) eventTenantID() int64 { return e.TenantID }
 
-// UserDeleted 用户被软删 → 清理 casbin g 行。
+// UserDeleted: user soft-deleted → clean up casbin g rows.
 //
-// 投影：casbin.RemoveUserGrouping。改造前为 service/user.go:250 的同步调用，
-// 失败返回 "用户已删除，但角色授权清理失败"。
+// Projection: casbin.RemoveUserGrouping. Before the refactor this was a synchronous call at service/user.go:250;
+// on failure it returned "user deleted, but role authorization cleanup failed".
 type UserDeleted struct {
 	shared.BaseEvent
 	UserID   int64
 	TenantID int64
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e UserDeleted) EventName() string { return EventUserDeleted }
 
 func (e UserDeleted) aggregateInfo() (string, int64) { return "iam.user", e.UserID }
 
 func (e UserDeleted) eventTenantID() int64 { return e.TenantID }
 
-// UserEventPayload 是用户域事件的持久化载荷（事件表 Payload 列）。
+// UserEventPayload is the persistence payload for user domain events (the event table's Payload column).
 //
-// 领域事件是纯值类型（含 BaseEvent.Time），可直接 JSON 往返；
-// 这里统一封装反序列化入口，供后台重试投影任务使用。
+// Domain events are pure value types (including BaseEvent.Time) and can round-trip through JSON directly;
+// this unified deserialization entry is provided for the background retry projection task.
 type UserEventPayload struct{}
 
-// Decode 按事件名还原事件实例。未知事件名返回 ok=false，由调用方跳过。
+// Decode restores an event instance by event name. An unknown event name returns ok=false, and the caller skips it.
 func (UserEventPayload) Decode(name string, raw []byte) (shared.Event, bool, error) {
 	switch name {
 	case EventUserRolesAssigned:
@@ -116,20 +116,21 @@ func (UserEventPayload) Decode(name string, raw []byte) (shared.Event, bool, err
 	}
 }
 
-// UserPasswordChanged 口令变更 → 强制重新登录（撤销全部会话）。
+// UserPasswordChanged: password changed → force re-login (revoke all sessions).
 //
-// 改造前为 service/user.go:226（重置密码）与 service/auth.go（改密）里的
-// 同步调用 authM.RevokeAllSessions；现由投影器执行，
-// 会话撤销失败不再让「改密成功但用户仍在线」这一不一致状态静默发生。
+// Before the refactor these were the synchronous calls authM.RevokeAllSessions in service/user.go:226
+// (reset password) and service/auth.go (change password); now executed by the projector, so a
+// session revocation failure no longer lets the inconsistent state of "password changed but user
+// still online" happen silently.
 type UserPasswordChanged struct {
 	shared.BaseEvent
 	UserID   int64
 	TenantID int64
-	// SelfChange 是否为本人改密（本人改密亦应重置其他会话）。
+	// SelfChange indicates whether it is the user's own password change (a self-change should also reset other sessions).
 	SelfChange bool
 }
 
-// EventName 实现 Event。
+// EventName implements Event.
 func (e UserPasswordChanged) EventName() string { return EventUserPasswordChanged }
 
 func (e UserPasswordChanged) aggregateInfo() (string, int64) { return "iam.user", e.UserID }

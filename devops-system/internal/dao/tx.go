@@ -1,5 +1,6 @@
-// 事务封装：*gorm.DB 只在 dao 出现，service 经本包的聚合事务函数编排，
-// 不感知事务句柄（分层约定见 internal/service 包注释）。
+// Transaction wrapper: *gorm.DB only appears in dao; the service orchestrates aggregate
+// transactions through this package's functions and never sees transaction handles
+// (layering convention: see the internal/service package comment).
 package dao
 
 import (
@@ -10,7 +11,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/tenantdb"
 )
 
-// WithTx 在租户感知连接上开启事务（dao 内部多步写共用）。
+// WithTx opens a transaction on the tenant-aware connection (shared by multi-step writes inside dao).
 func WithTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return tenantdb.DB(ctx).Transaction(fn)
 }

@@ -1,15 +1,15 @@
-# devops-system 容器环境覆盖：挂载为镜像内 /app/config/devops-system-prod.yaml，APP_ENV=prod 生效。
-# 地址为 docker-compose 服务名（同一网络内的服务发现）；
-# K8s 部署时换成对应 Service 名或外部托管服务地址。
+# devops-system container environment override: mounted as /app/config/devops-system-prod.yaml inside the image, effective with APP_ENV=prod.
+# Addresses are docker-compose service names (service discovery within the same network);
+# for K8s deployment, replace them with the corresponding Service names or externally managed service addresses.
 log:
   level: info
   dir: /app/logs
-  console: true       # 容器标准：日志走 stdout，由 docker/k8s 日志驱动收集
+  console: true       # container standard: logs go to stdout, collected by docker/k8s log drivers
   format: json
 
 mysql:
   host: mysql
-  password: "devopspwd"       # TODO 生产必改，与 MySQL 容器环境变量一致
+  password: "devopspwd"       # TODO must be changed in production; must match the MySQL container environment variable
 
 redis:
   host: redis
@@ -25,45 +25,45 @@ nacos:
     service_name: "devops-system"
 
 jwt:
-  # RS256 私钥（PKCS#8 PEM），部署时由密钥管理注入，禁止将真实私钥提交入库。
-  # 生成：openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+  # RS256 private key (PKCS#8 PEM); injected from secrets management at deploy time — never commit the real private key.
+  # Generate: openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
   signing_key: "REPLACE_WITH_RSA_PRIVATE_KEY_PEM"
   key_id: devops-system-rs256-1
   issuer: devops
-  access_expire: 2h        # access token 有效期
-  refresh_expire: 168h     # refresh token（会话）有效期
+  access_expire: 2h        # access token validity period
+  refresh_expire: 168h     # refresh token (session) validity period
 
 idclient:
   endpoint: "nacos:///devops-id"
 
-# 生产观测口径：采样 0.1 起步（问题排查临时调高）；/metrics 仅内网抓取，不经 Higress。
-# otlp_endpoint 留空 = 本地 span 不上报；接入 Jaeger/Tempo/otel-collector 后填写其 OTLP HTTP 地址。
+# Production observability settings: sampling starts at 0.1 (raise temporarily for troubleshooting); /metrics is scraped only on the intranet, never via Higress.
+# An empty otlp_endpoint means local spans are not reported; fill in its OTLP HTTP address after wiring up Jaeger/Tempo/otel-collector.
 observability:
   otlp_endpoint: ""
   sampler_ratio: 0.1
   metrics_enabled: true
 
 apidoc:
-  enabled: false              # prod 必须关闭接口文档
+  enabled: false              # interactive API docs must be disabled in prod
   base_path: /apidoc
 
 server:
-  # Higress/Docker 默认网段；K8s 部署时按实际 Pod/Service 网段调整
+  # Higress/Docker default CIDRs; adjust to the actual Pod/Service CIDRs for K8s deployment
   trusted_proxies:
     - "172.16.0.0/12"
     - "192.168.0.0/16"
 
-# 流量入口收口：要求请求携带可独立校验通过的 Bearer JWT。
-# 网关侧已由 Higress jwt-auth 插件验签（deploy/higress/wasmplugins/jwt-auth-2.0.0.yaml），
-# 客户端伪造 Authorization 无效（签名验证 + Redis 会话吊销 + 租户状态检查）。
+# Traffic-ingress containment: require requests to carry a Bearer JWT that can be independently verified.
+# The gateway side is already verified by the Higress jwt-auth plugin (deploy/higress/wasmplugins/jwt-auth-2.0.0.yaml);
+# a forged client Authorization header is ineffective (signature verification + Redis session revocation + tenant status checks).
 #
-# docker compose 无 NetworkPolicy，网关可被同网络容器绕过且绕过时不经过任何插件，
-# 故应用层再校验一次（纵深防御）。K8s 形态下本层退化为 defense-in-depth。
+# docker compose has no NetworkPolicy, so the gateway can be bypassed by same-network containers, and the bypass path goes through no plugin at all.
+# Hence the application layer verifies once more (defense in depth). In the K8s form this layer degrades to defense-in-depth.
 #
-# 旧配置 require_token / token（静态 X-Gateway-Token）已移除：该凭据不表达身份、
-# 无过期、无吊销，且明文散落，泄露即无限重放。改动见 .workbuddy/memory/2026-10-16.md。
+# The old config require_token / token (static X-Gateway-Token) has been removed: that credential expressed no identity,
+# had no expiry and no revocation, and was scattered in plaintext; a leak meant unlimited replay. See .workbuddy/memory/2026-10-16.md for the change.
 gateway:
   require_jwt: true
-  # 追加放行名单（相对路径）：/healthz /readyz /metrics、login / refresh /
-  # jwks.json 与 apidoc.base_path 已由代码统一放行，此处仅列额外业务端点。
+  # Additional exemption entries (relative paths): /healthz /readyz /metrics, login / refresh /
+  # jwks.json and apidoc.base_path are already uniformly allowed in code; only extra business endpoints go here.
   exempt_paths: []

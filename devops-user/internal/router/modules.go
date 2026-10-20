@@ -8,60 +8,69 @@ import (
 	"github.com/stanley760/devops/devops-user/internal/service"
 )
 
-// userAPIPrefix C 端接口对外前缀。与 devops-system 的 /system 区分，
-// 便于网关侧按前缀分流与分别限流。
+// userAPIPrefix is the external prefix for C-side endpoints. Distinct from
+// devops-system's /system, making it easy for the gateway to route and
+// rate-limit by prefix.
 const userAPIPrefix = "/user"
 
-// 匿名端点全路径。必须由本包导出、且与下方 huma 注册共用同一份定义，
-// 避免与 deploy/higress/ingresses/devops-user-public.yaml 或守卫放行名单
-// 各写一份字符串而悄悄漂移（漂移后果是登录被锁死）。
+// Full paths of the anonymous endpoints. They must be exported by this package
+// and share one definition with the huma registrations below, avoiding each of
+// deploy/higress/ingresses/devops-user-public.yaml and the guard allowlist
+// writing its own copy of the string and silently drifting (the consequence of
+// drift is login deadlocking).
 //
-// 这些端点必须匿名：调用方此时还没有 token。C 端 jwt-auth 必须挂在独立
-// ingress 上（插件按 Ingress 资源挂载、不支持路径匹配），应用层守卫也须同步放行。
+// These endpoints must be anonymous: the caller has no token yet. The C-side
+// jwt-auth must be mounted on a separate ingress (plugins are mounted per
+// Ingress resource and do not support path matching), and the application-layer
+// guard must allow them through in sync.
 const (
-	// AuthLoginPath 登录端点，签发 access token。
+	// AuthLoginPath is the login endpoint, which issues an access token.
 	AuthLoginPath = userAPIPrefix + "/api/v1/auth/login"
-	// AuthRegisterPath 注册端点。
+	// AuthRegisterPath is the registration endpoint.
 	AuthRegisterPath = userAPIPrefix + "/api/v1/auth/register"
-	// AuthRefreshPath 刷新端点。必须匿名：调用方此刻 access 已过期，
-	// 若强制携带 JWT 则永远换不到新 token（与 login 同理）。
+	// AuthRefreshPath is the refresh endpoint. Must be anonymous: the caller's
+	// access token has expired by now, and forcing a JWT would make it
+	// impossible to ever get a new token (same as login).
 	AuthRefreshPath = userAPIPrefix + "/api/v1/auth/refresh"
-	// JWKSPath 验签公钥，供其他服务自验签与人工排查。
+	// JWKSPath is the verification public key, for other services'
+	// self-verification and manual debugging.
 	JWKSPath = "/.well-known/jwks.json"
 )
 
-// AuthRoutes 认证相关路由（登录 / 注册）。
+// AuthRoutes holds authentication-related routes (login / register).
 type AuthRoutes func(huma.API)
 
-// ProfileRoutes 用户资料路由（读取 / 修改当前用户）。
+// ProfileRoutes holds user profile routes (read / update the current user).
 type ProfileRoutes func(huma.API)
 
-// OAuthRoutes 三方登录路由。
+// OAuthRoutes holds third-party login routes.
 type OAuthRoutes func(huma.API)
 
-// Modules 是应用层需要显式组合的业务路由模块集合。
+// Modules is the set of business route modules that the application layer
+// explicitly composes.
 //
-// 用 func(huma.API) 而非直接调 handler：让 router 包不依赖具体 Handler 类型，
-// 模块可独立测试与替换。
+// Using func(huma.API) instead of calling handlers directly: the router package
+// does not depend on concrete Handler types, so modules can be tested and
+// replaced independently.
 type Modules struct {
 	Auth    AuthRoutes
 	Profile ProfileRoutes
 	OAuth   OAuthRoutes
 }
 
-// NewAuthRoutes 由 service 构造认证路由。
+// NewAuthRoutes builds the auth routes from a service.
 func NewAuthRoutes(svc *service.Auth, kit *middleware.Kit) AuthRoutes {
 	h := apiv1.NewAuthHandler(svc)
 	return func(api huma.API) { registerAuth(api, h, kit) }
 }
 
-// NewProfileRoutes 由 service 构造用户资料路由。
+// NewProfileRoutes builds the user profile routes from a service.
 func NewProfileRoutes(svc *service.Profile, kit *middleware.Kit) ProfileRoutes {
 	h := apiv1.NewProfileHandler(svc)
 	return func(api huma.API) { registerProfile(api, h, kit) }
 }
 
-// NewOAuthRoutes 由 service 构造三方登录路由。
+// NewOAuthRoutes builds the third-party login routes from a service.
 func NewOAuthRoutes(svc *service.OAuth, kit *middleware.Kit) OAuthRoutes {
 	h := apiv1.NewOAuthHandler(svc)
 	return func(api huma.API) { registerOAuth(api, h, kit) }

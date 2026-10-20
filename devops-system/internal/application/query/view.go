@@ -9,16 +9,17 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// 领域对象 → API DTO 的视图映射。
+// View mappings from domain objects to API DTOs.
 //
-// 改造前这些映射散落在 service 层，共 8 处手写 toXxxDTO（另有两处内联
-// 重复实现，其中 service/auth.go:235-250 的 toUserDTO 副本与
-// service/user.go:258 的版本字段几乎一一对应，只是一个用 derefString、
-// 一个用 if 判空——典型的映射漂移隐患）。
+// Before the refactor these mappings were scattered across the service
+// layer: 8 hand-written toXxxDTO functions (plus two more inline duplicate
+// implementations, where the toUserDTO copy in service/auth.go:235-250
+// matched the version in service/user.go:258 field for field — one using
+// derefString, the other an if-nil check: a classic mapping-drift hazard).
 //
-// 现在全部收敛到本文件，且用户映射只有一份。
+// They are now all consolidated in this file, with a single user mapping.
 
-// idsToIDs int64 → []types.ID。
+// idsToIDs converts int64 → []types.ID.
 func idsToIDs(ids []int64) []types.ID {
 	out := make([]types.ID, 0, len(ids))
 	for _, id := range ids {
@@ -27,7 +28,7 @@ func idsToIDs(ids []int64) []types.ID {
 	return out
 }
 
-// derefString 解引用可空字符串（空指针 → 空串）。
+// derefString dereferences a nullable string (nil pointer → empty string).
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -35,9 +36,9 @@ func derefString(s *string) string {
 	return *s
 }
 
-// ---- 用户 ----
+// ---- Users ----
 
-// UserDTO 领域用户 → API DTO（不含口令）。
+// UserDTO maps a domain user → API DTO (without the password).
 func UserDTO(u *iam.User) types.UserDTO {
 	dto := types.UserDTO{
 		ID:       types.ID(u.ID),
@@ -58,7 +59,7 @@ func UserDTO(u *iam.User) types.UserDTO {
 	return dto
 }
 
-// UserDetail 用户详情（基本信息 + 角色/岗位 ID）。
+// UserDetail maps user details (basic info + role/post IDs).
 func UserDetail(u *iam.User) *types.UserDetailResp {
 	dto := UserDTO(u)
 	return &types.UserDetailResp{
@@ -68,9 +69,9 @@ func UserDetail(u *iam.User) *types.UserDetailResp {
 	}
 }
 
-// ---- 角色 ----
+// ---- Roles ----
 
-// RoleDTO 领域角色 → API DTO。
+// RoleDTO maps a domain role → API DTO.
 func RoleDTO(r *iam.Role) types.RoleDTO {
 	return types.RoleDTO{
 		ID:               types.ID(r.ID),
@@ -86,7 +87,7 @@ func RoleDTO(r *iam.Role) types.RoleDTO {
 	}
 }
 
-// RoleDetail 角色详情（含已分配菜单 ID）。
+// RoleDetail maps role details (including assigned menu IDs).
 func RoleDetail(r *iam.Role) *types.RoleDetailResp {
 	return &types.RoleDetailResp{
 		RoleDTO: RoleDTO(r),
@@ -94,9 +95,9 @@ func RoleDetail(r *iam.Role) *types.RoleDetailResp {
 	}
 }
 
-// ---- 菜单 ----
+// ---- Menus ----
 
-// MenuDTO 领域菜单 → API DTO。
+// MenuDTO maps a domain menu → API DTO.
 func MenuDTO(m *iam.Menu) types.MenuDTO {
 	return types.MenuDTO{
 		ID:            types.ID(m.ID),
@@ -117,7 +118,7 @@ func MenuDTO(m *iam.Menu) types.MenuDTO {
 	}
 }
 
-// MenuTree 组装菜单树（复用泛型 BuildTree，消除改造前 service/menu.go 的重复实现）。
+// MenuTree assembles the menu tree (reusing the generic BuildTree, eliminating the duplicate implementation in the pre-refactor service/menu.go).
 func MenuTree(menus []*iam.Menu) []types.MenuTreeResp {
 	nodes := BuildTree(menus,
 		func(m *iam.Menu) int64 { return m.ID },
@@ -129,9 +130,9 @@ func MenuTree(menus []*iam.Menu) []types.MenuTreeResp {
 	}, func(n *types.MenuTreeResp, cs []types.MenuTreeResp) { n.Children = cs })
 }
 
-// ---- 部门 ----
+// ---- Departments ----
 
-// DeptDTO 领域部门 → API DTO。
+// DeptDTO maps a domain department → API DTO.
 func DeptDTO(d *iam.Dept) types.DeptDTO {
 	return types.DeptDTO{
 		ID:           types.ID(d.ID),
@@ -146,7 +147,7 @@ func DeptDTO(d *iam.Dept) types.DeptDTO {
 	}
 }
 
-// DeptTree 组装部门树。
+// DeptTree assembles the department tree.
 func DeptTree(depts []*iam.Dept) []types.DeptTreeResp {
 	nodes := BuildTree(depts,
 		func(d *iam.Dept) int64 { return d.ID },
@@ -158,9 +159,9 @@ func DeptTree(depts []*iam.Dept) []types.DeptTreeResp {
 	}, func(n *types.DeptTreeResp, cs []types.DeptTreeResp) { n.Children = cs })
 }
 
-// ---- 岗位 ----
+// ---- Posts ----
 
-// PostDTO 领域岗位 → API DTO。
+// PostDTO maps a domain post → API DTO.
 func PostDTO(p *iam.Post) types.PostDTO {
 	return types.PostDTO{
 		ID:         types.ID(p.ID),
@@ -173,9 +174,9 @@ func PostDTO(p *iam.Post) types.PostDTO {
 	}
 }
 
-// ---- 租户 ----
+// ---- Tenants ----
 
-// TenantDTO 领域租户 → API DTO。
+// TenantDTO maps a domain tenant → API DTO.
 func TenantDTO(t *iam.Tenant) types.TenantDTO {
 	return types.TenantDTO{
 		ID:            types.ID(t.ID),
@@ -190,14 +191,14 @@ func TenantDTO(t *iam.Tenant) types.TenantDTO {
 	}
 }
 
-// TenantBrief 租户摘要（登录响应内嵌）。
+// TenantBrief is the tenant brief (embedded in the login response).
 func TenantBrief(t *iam.Tenant) types.TenantBrief {
 	return types.TenantBrief{ID: types.ID(t.ID), Name: t.Name, Code: t.Code}
 }
 
-// ---- 审计日志 ----
+// ---- Audit logs ----
 
-// LoginLogDTO 登录日志 → API DTO。
+// LoginLogDTO maps a login log → API DTO.
 func LoginLogDTO(l *auditlog.LoginLog) types.LoginLogDTO {
 	return types.LoginLogDTO{
 		ID:          types.ID(l.ID),
@@ -215,7 +216,7 @@ func LoginLogDTO(l *auditlog.LoginLog) types.LoginLogDTO {
 	}
 }
 
-// OperationLogDTO 操作日志 → API DTO。
+// OperationLogDTO maps an operation log → API DTO.
 func OperationLogDTO(l *auditlog.OperationLog) types.OperationLogDTO {
 	return types.OperationLogDTO{
 		ID:            types.ID(l.ID),
@@ -243,7 +244,7 @@ func OperationLogDTO(l *auditlog.OperationLog) types.OperationLogDTO {
 	}
 }
 
-// mapNodes 把泛型节点树映射为 API DTO 树。
+// mapNodes maps a generic node tree onto an API DTO tree.
 func mapNodes[S, D any](nodes []TreeNode[S], wrap func(S) D, attach func(*D, []D)) []D {
 	out := make([]D, 0, len(nodes))
 	var walk func([]TreeNode[S]) []D
@@ -265,7 +266,7 @@ func mapNodes[S, D any](nodes []TreeNode[S], wrap func(S) D, attach func(*D, []D
 	return out
 }
 
-// MapPageEntities 领域分页结果 → DTO 分页结果（保留分页元数据）。
+// MapPageEntities maps a domain page result → DTO page result (preserving pagination metadata).
 func MapPageEntities[S, D any](page domain.PageResult[S], convert func(S) D) domain.PageResult[D] {
 	return domain.MapPage(page, convert)
 }

@@ -1,44 +1,51 @@
-// Package query 是 CQRS 读侧：查询定义与处理器。
+// Package query is the CQRS read side: query definitions and handlers.
 //
-// 读侧刻意绕过聚合：查询不触发业务规则、不产生副作用，直接读读模型并组装
-// 视图 DTO。这正是 CQRS 的价值——把「写要守不变量」与「读要快且可自由 JOIN」
-// 两件冲突的事分开，各用各的最优形态。
+// The read side deliberately bypasses aggregates: queries trigger no
+// business rules and produce no side effects; they read the read model
+// directly and assemble view DTOs. This is the value of CQRS — separating
+// the two conflicting goals of "writes must enforce invariants" and "reads
+// must be fast and free to JOIN", each in its own optimal form.
 //
-// 契约边界：本包的输出类型是 API 契约 DTO（internal/types），JSON 形态由
-// huma 反射生成 OpenAPI。领域层与仓储层不认识这些 DTO（见 internal/types
-// 包的单一 ID 契约说明）——依赖方向是 query → types，而非反向。
+// Contract boundary: this package's output types are API contract DTOs
+// (internal/types), whose JSON shape is reflected into OpenAPI by huma. The
+// domain and repository layers know nothing about these DTOs (see the single
+// ID contract note in the internal/types package) — the dependency direction
+// is query → types, never the reverse.
 package query
 
 import (
 	"sort"
 )
 
-// TreeNode 泛型树节点。
+// TreeNode is a generic tree node.
 //
-// 用途：消除改造前 3 份逐字重复的树组装代码——
-// service/dept.go:143-164（部门树）、service/menu.go:204-225（菜单树）、
-// service/auth.go:267-293（前端路由树），三者的判定式
-// `if parent, ok := byID[x.ParentID]; ok && x.ParentID != x.ID` 完全相同。
+// Purpose: eliminate the three verbatim-duplicated tree assembly
+// implementations from before the refactor — service/dept.go:143-164
+// (department tree), service/menu.go:204-225 (menu tree), and
+// service/auth.go:267-293 (frontend router tree), whose predicate
+// `if parent, ok := byID[x.ParentID]; ok && x.ParentID != x.ID` was
+// identical in all three.
 //
-// 现在统一为 BuildTree 一个实现。
+// They are now unified into the single BuildTree implementation.
 type TreeNode[T any] struct {
-	// ID 节点 ID（扁平列表中的唯一键）。
+	// ID is the node ID (the unique key in the flat list).
 	ID int64
-	// ParentID 父节点 ID；0 表示根。
+	// ParentID is the parent node ID; 0 means root.
 	ParentID int64
-	// Order 排序值；为 0 时按加载顺序稳定排列。
+	// Order is the sort value; when 0, nodes keep their load order stably.
 	Order int
-	// Value 节点载荷（DTO 指针）。
+	// Value is the node payload (a DTO pointer).
 	Value T
-	// Children 子节点。
+	// Children holds the child nodes.
 	Children []TreeNode[T]
 }
 
-// ptrNode 是装配阶段的中间节点（仅内部使用）。
+// ptrNode is the intermediate node used during assembly (internal only).
 //
-// 必须用指针而非 TreeNode 值：若在挂载时对节点做值拷贝，父节点里存下的会是
-// 「挂载那一刻」的快照，其后续才挂上的子孙不会出现在该副本中
-// （典型症状：孙节点丢失）。
+// Pointers are required instead of TreeNode values: if nodes were
+// value-copied at mount time, what the parent stored would be a snapshot of
+// "the moment of mounting", and descendants attached later would not appear
+// in that copy (classic symptom: missing grandchildren).
 type ptrNode[T any] struct {
 	id       int64
 	parentID int64
@@ -47,10 +54,12 @@ type ptrNode[T any] struct {
 	children []*ptrNode[T]
 }
 
-// sortPtrRoots 根节点排序：Order 升序，0 视为「不参与排序」保持原序。
+// sortPtrRoots sorts root nodes: Order ascending, with 0 treated as
+// "does not participate in sorting" so the original order is kept.
 //
-// 用稳定排序：Order 为 0 表示未指定顺序，此时保持原加载顺序，
-// 与既有三处树实现的 `sort ASC` 口径一致。
+// A stable sort is used: Order 0 means no order was specified, so the
+// original load order is preserved, matching the `sort ASC` semantics of the
+// three pre-existing tree implementations.
 func sortPtrRoots[T any](roots []*ptrNode[T]) {
 	if len(roots) < 2 {
 		return
@@ -64,11 +73,13 @@ func sortPtrRoots[T any](roots []*ptrNode[T]) {
 	})
 }
 
-// BuildTree 由扁平列表装配树。
+// BuildTree assembles a tree from a flat list.
 //
-// 口径（与既有三处实现逐字对齐）：
-//   - 父节点不存在于列表中，或父节点是自己 → 该节点归入根层级；
-//   - 根节点按 Order 升序，Order 为 0 的节点保持原加载顺序（稳定）。
+// Semantics (aligned verbatim with the three pre-existing implementations):
+//   - If the parent is absent from the list, or the parent is the node
+//     itself, the node is placed at the root level;
+//   - Root nodes are sorted by Order ascending, and nodes with Order 0 keep
+//     their original load order (stable).
 func BuildTree[T any](items []T, idOf func(T) int64, parentOf func(T) int64, orderOf func(T) int) []TreeNode[T] {
 	byID := make(map[int64]*ptrNode[T], len(items))
 	order := make([]int64, 0, len(items))
@@ -116,9 +127,12 @@ func BuildTree[T any](items []T, idOf func(T) int64, parentOf func(T) int64, ord
 	return out
 }
 
-// sortRoots 根节点排序：Order 升序，0 视为「不参与排序」保持原序。
+// sortRoots sorts root nodes: Order ascending, with 0 treated as
+// "does not participate in sorting" so the original order is kept.
 //
-// 用稳定排序而非插入排序，语义更直观且根节点数量小，无需手写排序算法。
+// A stable sort is used instead of insertion sort: the semantics are more
+// obvious and the number of root nodes is small, so no hand-written sorting
+// algorithm is needed.
 func sortRoots[T any](roots []*TreeNode[T]) {
 	if len(roots) < 2 {
 		return
@@ -126,13 +140,13 @@ func sortRoots[T any](roots []*TreeNode[T]) {
 	sort.SliceStable(roots, func(i, j int) bool {
 		a, b := roots[i].Order, roots[j].Order
 		if a == 0 || b == 0 {
-			return false // 有一方未指定顺序时保持原序
+			return false // keep the original order when either side has no order specified
 		}
 		return a < b
 	})
 }
 
-// FlattenTree 把树拍平回列表（部分接口需要平铺形态）。
+// FlattenTree flattens a tree back into a list (some endpoints need the flat form).
 func FlattenTree[T any](nodes []TreeNode[T]) []T {
 	out := make([]T, 0, len(nodes))
 	var walk func([]TreeNode[T])

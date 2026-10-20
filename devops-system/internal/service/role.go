@@ -1,7 +1,9 @@
-// 角色管理服务：CRUD + casbin p 行按域重建。
+// Role management service: CRUD + rebuilding casbin p rows per domain.
 //
-// 内置角色（type=1，如 super_admin）跳过 p 行重建：其通配 p 行（*, {tid}, *）
-// 是种子赋予的域内全通语义，不随菜单分配变化，避免把超管锁死。
+// Builtin roles (type=1, e.g. super_admin) skip p row rebuilding: their
+// wildcard p row (*, {tid}, *) is seed-granted domain-wide allow-all semantics
+// that must not change with menu assignment, so the super admin is never
+// locked out.
 package service
 
 import (
@@ -19,27 +21,28 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// validateDataScope 数据权限口径校验：自定义部门必须携带可解析的非空部门集合
-// （JSON 数组字符串，与 post_ids 存储格式一致）。
+// validateDataScope validates the data permission scope: a custom department
+// scope must carry a parseable non-empty department set (a JSON array string,
+// same storage format as post_ids).
 func validateDataScope(dataScope int8, deptIDs string) error {
 	if dataScope != datascope.ScopeCustom {
 		return nil
 	}
 	if len(datascope.ParseDeptIDs(deptIDs)) == 0 {
-		return errs.New(errs.CodeParam, "自定义部门口径必须提供部门 ID 集合（data_scope_dept_ids，JSON 数组）")
+		return errs.New(errs.CodeParam, "the custom department scope must provide a department ID set (data_scope_dept_ids, JSON array)")
 	}
 	return nil
 }
 
-// Role 角色管理服务。
+// Role is the role management service.
 type Role struct {
-	invalidateScope func() // 数据权限缓存失效（角色口径/绑定变更时调用）
+	invalidateScope func() // data permission cache invalidation (called when the role scope/bindings change)
 }
 
-// NewRole 创建服务（invalidateScope 清数据权限缓存）。
+// NewRole creates the service (invalidateScope clears the data permission cache).
 func NewRole(invalidateScope func()) *Role { return &Role{invalidateScope: invalidateScope} }
 
-// List 分页查询。
+// List returns a paginated query.
 func (s *Role) List(ctx context.Context, q types.RolePageQuery) (domain.PageResult[types.RoleDTO], error) {
 	page, err := dao.ListRoles(ctx, q)
 	if err != nil {
@@ -50,7 +53,7 @@ func (s *Role) List(ctx context.Context, q types.RolePageQuery) (domain.PageResu
 	}), nil
 }
 
-// Get 角色详情（含已分配菜单 ID）。
+// Get returns the role details (including assigned menu IDs).
 func (s *Role) Get(ctx context.Context, id types.ID) (*types.RoleDetailResp, error) {
 	r, err := dao.GetRoleByID(ctx, id.Int64())
 	if err != nil {
@@ -67,17 +70,18 @@ func (s *Role) Get(ctx context.Context, id types.ID) (*types.RoleDetailResp, err
 	return &types.RoleDetailResp{RoleDTO: toRoleDTO(r), MenuIDs: mids}, nil
 }
 
-// Create 创建角色：code 租户内唯一 → 发号落库（可选初始菜单）。
+// Create creates a role: the code is unique within a tenant → issue an ID and
+// persist (optional initial menus).
 func (s *Role) Create(ctx context.Context, claims *auth.AccessClaims, req types.RoleSaveReq) error {
 	if req.Code == "" {
-		return errs.New(errs.CodeParam, "角色编码不能为空")
+		return errs.New(errs.CodeParam, "role code cannot be empty")
 	}
 	exists, err := dao.RoleCodeExists(ctx, req.Code, 0)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return errs.New(errs.CodeParam, "角色编码已存在")
+		return errs.New(errs.CodeParam, "role code already exists")
 	}
 	if err := validateDataScope(req.DataScope, req.DataScopeDeptIDs); err != nil {
 		return err
@@ -93,7 +97,7 @@ func (s *Role) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 		DataScope:        req.DataScope,
 		DataScopeDeptIDs: datascope.NormalizeDeptIDs(req.DataScopeDeptIDs),
 		Status:           req.Status,
-		Type:             2, // 自定义
+		Type:             2, // custom
 		Remark:           req.Remark,
 	}
 	if r.DataScope == 0 {
@@ -103,7 +107,7 @@ func (s *Role) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 	return dao.CreateRole(ctx, r)
 }
 
-// Update 更新角色（code 不可改，避免 casbin p/g 行失联）。
+// Update updates a role (the code cannot be changed, to avoid losing track of casbin p/g rows).
 func (s *Role) Update(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.RoleSaveReq) error {
 	r, err := dao.GetRoleByID(ctx, id.Int64())
 	if err != nil {
@@ -113,8 +117,10 @@ func (s *Role) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	if dataScope == 0 {
 		dataScope = r.DataScope
 	}
-	// 口径未变且未传部门集合时保留存量（data_scope_dept_ids 随字段整体覆盖，空入参会清空）。
-	// 落库前 NormalizeDeptIDs 统一为数字数组形态，杜绝同一语义多种写法入库。
+	// When the scope is unchanged and no department set is supplied, keep the
+	// existing value (data_scope_dept_ids is overwritten wholesale, so an empty
+	// input clears it). NormalizeDeptIDs unifies the numeric-array form before
+	// persistence, preventing multiple spellings of the same semantics in storage.
 	deptIDs := req.DataScopeDeptIDs
 	if deptIDs == "" && dataScope == r.DataScope {
 		deptIDs = r.DataScopeDeptIDs
@@ -135,12 +141,14 @@ func (s *Role) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 	if err := dao.UpdateRole(ctx, r.ID, updates); err != nil {
 		return err
 	}
-	// 数据权限口径已变：清缓存（该角色下所有用户下次请求重新解析）
+	// The data permission scope has changed: clear the cache (all users under
+	// the role re-resolve on their next request)
 	s.invalidateScope()
 	return nil
 }
 
-// AssignMenus 分配菜单：role_menu 重建 + p 行按 (role, tenant) 快照重建（即时生效）。
+// AssignMenus assigns menus: rebuild role_menu + rebuild the p rows from a
+// (role, tenant) snapshot (effective immediately).
 func (s *Role) AssignMenus(ctx context.Context, claims *auth.AccessClaims, id types.ID, req types.RoleAssignMenusReq) error {
 	r, err := dao.GetRoleByID(ctx, id.Int64())
 	if err != nil {
@@ -157,7 +165,7 @@ func (s *Role) AssignMenus(ctx context.Context, claims *auth.AccessClaims, id ty
 	}
 
 	if r.Type == 1 {
-		return nil // 内置角色保持域内通配，不派生 p 行
+		return nil // builtin roles keep their domain-wide wildcard and derive no p rows
 	}
 	perms := make([]string, 0, len(menus))
 	for _, m := range menus {
@@ -166,19 +174,20 @@ func (s *Role) AssignMenus(ctx context.Context, claims *auth.AccessClaims, id ty
 		}
 	}
 	if err := authz.RebuildRolePolicies(r.Code, claims.TenantID, perms); err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "菜单已保存，但权限策略刷新失败，请重试")
+		return errs.Wrap(err, errs.CodeInternal, "menus saved, but the permission policy refresh failed; please retry")
 	}
 	return nil
 }
 
-// Delete 删除角色：内置不可删 → 清关联（user_role/role_menu）→ 清 p 行与 g 行引用。
+// Delete deletes a role: builtin roles cannot be deleted → clear associations
+// (user_role/role_menu) → clear p row and g row references.
 func (s *Role) Delete(ctx context.Context, claims *auth.AccessClaims, id types.ID) error {
 	r, err := dao.GetRoleByID(ctx, id.Int64())
 	if err != nil {
 		return err
 	}
 	if r.Type == 1 {
-		return errs.New(errs.CodeParam, "内置角色不可删除")
+		return errs.New(errs.CodeParam, "builtin roles cannot be deleted")
 	}
 
 	if err := dao.DeleteRole(ctx, r); err != nil {
@@ -186,17 +195,17 @@ func (s *Role) Delete(ctx context.Context, claims *auth.AccessClaims, id types.I
 	}
 
 	if err := authz.RemoveRolePolicies(r.Code, claims.TenantID); err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "角色已删除，但权限策略清理失败")
+		return errs.Wrap(err, errs.CodeInternal, "role deleted, but the permission policy cleanup failed")
 	}
 	if err := authz.RemoveRoleGrouping(r.Code, claims.TenantID); err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "角色已删除，但用户绑定清理失败")
+		return errs.Wrap(err, errs.CodeInternal, "role deleted, but the user binding cleanup failed")
 	}
-	// 角色删除影响其下用户的数据权限：清缓存重新解析
+	// Deleting the role affects the data permissions of its users: clear the cache for re-resolution
 	s.invalidateScope()
 	return nil
 }
 
-// toRoleDTO model.Role → DTO。
+// toRoleDTO maps model.Role → DTO.
 func toRoleDTO(r *model.Role) types.RoleDTO {
 	return types.RoleDTO{
 		ID:               types.ID(r.ID),

@@ -1,4 +1,4 @@
-// 用户管理 dao（P5）：纯模型查询由 TenantPlugin 注入租户过滤。
+// User management dao (P5): pure model queries get tenant filtering injected by TenantPlugin.
 package dao
 
 import (
@@ -19,9 +19,10 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// ListUsers 分页查询用户（筛选 username 模糊/mobile/状态/部门；行级数据权限收敛）。
-// datascope.Apply 注入 ctx 中的可见范围（users 路由挂 HumaDataScope 解析中间件）；
-// 未注入时 fail-closed 查询报错，防漏配退化为全量可见。
+// ListUsers paginates users (filter by fuzzy username/mobile/status/dept; row-level data-permission narrowing).
+// datascope.Apply injects the visible scope from ctx (the users route mounts the HumaDataScope
+// resolution middleware); if not injected, the query fails closed to prevent a misconfiguration
+// from degrading into full visibility.
 func ListUsers(ctx context.Context, q types.UserPageQuery) (domain.PageResult[model.User], error) {
 	db := datascope.Apply(ctx, tenantdb.DB(ctx).Model(&model.User{}),
 		datascope.Columns{Dept: "dept_id", Owner: "id"})
@@ -43,12 +44,12 @@ func ListUsers(ctx context.Context, q types.UserPageQuery) (domain.PageResult[mo
 		domain.PageParam{PageNum: q.PageNum, PageSize: q.PageSize},
 	)
 	if err != nil {
-		return domain.PageResult[model.User]{}, errs.Wrap(err, errs.CodeInternal, "查询用户列表失败")
+		return domain.PageResult[model.User]{}, errs.Wrap(err, errs.CodeInternal, "failed to query user list")
 	}
 	return page, nil
 }
 
-// UsernameExists 租户内用户名是否已占用（excludeID 排除自身，更新场景）。
+// UsernameExists reports whether the username is already taken within the tenant (excludeID excludes itself, for the update case).
 func UsernameExists(ctx context.Context, username string, excludeID int64) (bool, error) {
 	db := tenantdb.DB(ctx).Model(&model.User{}).Where("username = ?", username)
 	if excludeID > 0 {
@@ -56,12 +57,12 @@ func UsernameExists(ctx context.Context, username string, excludeID int64) (bool
 	}
 	var cnt int64
 	if err := db.Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "检查用户名唯一性失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to check username uniqueness")
 	}
 	return cnt > 0, nil
 }
 
-// MobileExists 租户内手机号是否已占用。
+// MobileExists reports whether the mobile number is already taken within the tenant.
 func MobileExists(ctx context.Context, mobile string, excludeID int64) (bool, error) {
 	if mobile == "" {
 		return false, nil
@@ -72,34 +73,35 @@ func MobileExists(ctx context.Context, mobile string, excludeID int64) (bool, er
 	}
 	var cnt int64
 	if err := db.Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "检查手机号唯一性失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to check mobile uniqueness")
 	}
 	return cnt > 0, nil
 }
 
-// CreateUser 创建用户（主键经 BeforeCreate 发号）。
+// CreateUser creates a user (primary key is assigned via BeforeCreate).
 func CreateUser(ctx context.Context, u *model.User) error {
 	if err := tenantdb.DB(ctx).Create(u).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "创建用户失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to create user")
 	}
 	return nil
 }
 
-// UpdateUser 更新用户可变字段（map 形式，仅非零字段）。
+// UpdateUser updates mutable user fields (map form, non-zero fields only).
 func UpdateUser(ctx context.Context, userID int64, updates map[string]any) error {
 	res := tenantdb.DB(ctx).Model(&model.User{}).
 		Where("id = ?", userID).Updates(updates)
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "更新用户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to update user")
 	}
 	if res.RowsAffected == 0 {
-		return errs.New(errs.CodeNotFound, "用户不存在")
+		return errs.New(errs.CodeNotFound, "user not found")
 	}
 	return nil
 }
 
-// SoftDeleteUserTx 软删用户（事务内）：改写 username/mobile 绕开租户内唯一索引，
-// 保证同 username 可重新创建（方案「软删同名重建」）。
+// SoftDeleteUserTx soft-deletes a user (within a transaction): rewrites username/mobile to
+// bypass the tenant-scoped unique index, ensuring the same username can be created again
+// (the "soft delete, same-name recreate" approach).
 func SoftDeleteUserTx(tx *gorm.DB, userID int64, u *model.User, operator string) error {
 	now := time.Now()
 	res := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
@@ -109,15 +111,15 @@ func SoftDeleteUserTx(tx *gorm.DB, userID int64, u *model.User, operator string)
 		"updater":    operator,
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "删除用户失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to delete user")
 	}
 	return nil
 }
 
-// SyncUserRolesTx 事务内重建用户-角色关联（清空再批插）。
+// SyncUserRolesTx rebuilds user-role associations within a transaction (clear, then batch insert).
 func SyncUserRolesTx(tx *gorm.DB, userID int64, roleIDs []int64) error {
 	if err := tx.Where("user_id = ?", userID).Delete(&model.UserRole{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "清理用户角色失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to clean user roles")
 	}
 	if len(roleIDs) == 0 {
 		return nil
@@ -129,11 +131,11 @@ func SyncUserRolesTx(tx *gorm.DB, userID int64, roleIDs []int64) error {
 	return tx.Create(&rows).Error
 }
 
-// CreateUserWithRoles 建用户 + 初始角色关联（单事务）。
+// CreateUserWithRoles creates a user + initial role associations (single transaction).
 func CreateUserWithRoles(ctx context.Context, u *model.User, roleIDs []int64) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(u).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "创建用户失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to create user")
 		}
 		if len(roleIDs) > 0 {
 			rows := make([]model.UserRole, 0, len(roleIDs))
@@ -141,49 +143,49 @@ func CreateUserWithRoles(ctx context.Context, u *model.User, roleIDs []int64) er
 				rows = append(rows, model.UserRole{UserID: u.ID, RoleID: rid})
 			}
 			if err := tx.Create(&rows).Error; err != nil {
-				return errs.Wrap(err, errs.CodeInternal, "保存用户角色失败")
+				return errs.Wrap(err, errs.CodeInternal, "failed to save user roles")
 			}
 		}
 		return nil
 	})
 }
 
-// UpdateUserWithRoles 更新用户字段 + 重建角色关联（单事务）。
+// UpdateUserWithRoles updates user fields + rebuilds role associations (single transaction).
 func UpdateUserWithRoles(ctx context.Context, userID int64, updates map[string]any, roleIDs []int64) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := tx.Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "更新用户失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to update user")
 		}
 		return SyncUserRolesTx(tx, userID, roleIDs)
 	})
 }
 
-// DeleteUser 软删用户 + 清角色关联（单事务）。
+// DeleteUser soft-deletes a user + clears role associations (single transaction).
 func DeleteUser(ctx context.Context, u *model.User, operator string) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := SoftDeleteUserTx(tx, u.ID, u, operator); err != nil {
 			return err
 		}
 		if err := tx.Where("user_id = ?", u.ID).Delete(&model.UserRole{}).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "删除用户失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to delete user")
 		}
 		return nil
 	})
 }
 
-// GetUserRoleIDs 用户在租户内的角色 ID 列表。
+// GetUserRoleIDs returns the user's role ID list within the tenant.
 func GetUserRoleIDs(ctx context.Context, userID int64) ([]int64, error) {
 	var ids []int64
 	err := tenantdb.DB(ctx).Model(&model.UserRole{}).
 		Where("user_id = ?", userID).Pluck("role_id", &ids).Error
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询用户角色失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query user roles")
 	}
 	return ids, nil
 }
 
-// RoleCodesByIDs 按角色 ID 集合查角色编码（租户内；顺带校验归属）。
-// 返回按入参顺序对应的编码；任一 ID 不存在/非本租户返回错误。
+// RoleCodesByIDs looks up role codes by a set of role IDs (within the tenant; also validates ownership).
+// Returns the codes in input order; an error is returned if any ID does not exist or belongs to another tenant.
 func RoleCodesByIDs(ctx context.Context, roleIDs []int64) ([]string, error) {
 	if len(roleIDs) == 0 {
 		return nil, nil
@@ -192,10 +194,10 @@ func RoleCodesByIDs(ctx context.Context, roleIDs []int64) ([]string, error) {
 	err := tenantdb.DB(ctx).
 		Where("id IN ?", roleIDs).Find(&roles).Error
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询角色失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query roles")
 	}
 	if len(roles) != len(roleIDs) {
-		return nil, errs.New(errs.CodeParam, "存在无效的角色")
+		return nil, errs.New(errs.CodeParam, "invalid role included")
 	}
 	codes := make([]string, 0, len(roles))
 	for _, r := range roles {
@@ -204,8 +206,9 @@ func RoleCodesByIDs(ctx context.Context, roleIDs []int64) ([]string, error) {
 	return codes, nil
 }
 
-// PostIDsOf 用户 post_ids JSON 字符串转 []ID。存储唯一形态是数字数组（PostIDsJSON
-// 写侧收口）；字符串元素（["4"]）视为脏数据，整体解析失败返回空集，不做兼容读。
+// PostIDsOf converts a user's post_ids JSON string to []ID. The only stored form is a numeric
+// array (funneled on the write side by PostIDsJSON); string elements (["4"]) are treated as dirty
+// data — a whole-parse failure returns an empty set, with no compatibility read.
 func PostIDsOf(postIDs string) []types.ID {
 	if postIDs == "" {
 		return []types.ID{}
@@ -221,10 +224,12 @@ func PostIDsOf(postIDs string) []types.ID {
 	return out
 }
 
-// PostIDsJSON []ID → JSON 字符串（元素转 int64 后 marshal，落库形态为数字数组 [4,5]；
-// 空集返回 ""，由调用方决定写 NULL）。
-// 不直接 marshal []types.ID——其 MarshalJSON 输出字符串元素（["4","5"]，API 线上契约），
-// 会泄漏进存储层，与种子数据及 JSON_CONTAINS(post_ids, 4) 的数字匹配口径不一致。
+// PostIDsJSON converts []ID to a JSON string (elements are cast to int64 before marshaling;
+// the persisted form is a numeric array [4,5]; an empty set returns "", and the caller decides
+// whether to write NULL).
+// []types.ID is not marshaled directly — its MarshalJSON emits string elements (["4","5"],
+// the API wire contract), which would leak into the storage layer and be inconsistent with the
+// seed data and the numeric matching semantics of JSON_CONTAINS(post_ids, 4).
 func PostIDsJSON(ids []types.ID) string {
 	if len(ids) == 0 {
 		return ""

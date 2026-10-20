@@ -1,34 +1,38 @@
-# 单机容器化部署：MySQL + Redis + Nacos + etcd / Higress + devops-id + devops-system
+# Single-host containerized deployment: MySQL + Redis + Nacos + etcd / Higress + devops-id + devops-system
 #
-# 标准流程（也可用根目录 justfile 快捷命令）：
-#   just build                        # 构建镜像
-#   just migrate                      # 业务表 + 种子数据
-#   just up                           # 启动
-# 等价于：
+# Standard flow (or use the root justfile shortcuts):
+#   just build                        # build images
+#   just migrate                      # business tables + seed data
+#   just up                           # start
+# Equivalent to:
 #   docker compose -f deploy/docker-compose.yml build
 #   docker compose -f deploy/docker-compose.yml run --rm devops-system migrate
 #   docker compose -f deploy/docker-compose.yml up -d
-#   后端不直接发布到宿主机，统一通过 Higress 访问：
+#   The backend is never published directly to the host — all access goes through Higress:
 #   curl -H 'Host: api.devops.local' http://localhost:8080/healthz
 #
-# Higress 网关（可选）：
+# Higress gateway (optional):
 #   docker compose -f deploy/docker-compose.yml --profile gateway up -d
 #   curl -H 'Host: api.devops.local' http://localhost:8080/healthz
-#   控制台 http://localhost:8001；Nacos 控制台 http://localhost:8848/nacos
+#   Console http://localhost:8001; Nacos console http://localhost:8848/nacos
 #
-# devops-id 使用 snowflake，并按 leaf_name + biz_tag 在 etcd 中分配独立 worker：
+# devops-id uses snowflake and allocates independent workers per leaf_name + biz_tag in etcd:
 #   docker compose -f deploy/docker-compose.yml exec etcd etcdctl \
 #     --endpoints=http://etcd:2379 get --prefix idgen/snowflake/
 #
-# 生产提示：本文件密码均为本地默认值；K8s 部署见 deploy/k8s/devops.yaml
+# Production note: all passwords in this file are local defaults; for K8s deployment see deploy/k8s/devops.yaml
 #
-# —— 网络隔离（流量入口收口第一层）——
-#   edge  ：仅网关 + 业务服务。基础设施容器不在此网络，无法直连 devops-system:9999。
-#   infra ：internal: true，无外网出口，所有中间件与业务服务在此通信。
-#   业务服务同时挂两个网络：既能被网关访问（edge），又能访问数据库等中间件（infra），
-#   同时经 edge 保留出网能力（对接第三方 API / webhook）。
-#   注意：所有服务均显式声明 networks，default 网络不会创建；
-#   新增服务若漏写 networks 会落到 default 网络而脱离隔离，务必显式声明。
+# —— Network isolation (first layer of traffic-ingress containment) ——
+#   edge  : gateway + business services only. Infrastructure containers are not on this
+#          network and cannot reach devops-system:9999 directly.
+#   infra : internal: true, no external egress; all middleware and business services
+#          communicate here.
+#   Business services join both networks: reachable by the gateway (edge) while still
+#   able to reach databases and other middleware (infra), and they keep egress via
+#   edge (for third-party APIs / webhooks).
+#   Note: every service declares networks explicitly; the default network is not created.
+#   A new service that omits networks would fall onto the default network and escape
+#   the isolation — always declare it explicitly.
 name: devops
 
 services:
@@ -36,9 +40,9 @@ services:
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: rootpwd
-      MYSQL_DATABASE: devops        # 与 config 中 database 保持一致
+      MYSQL_DATABASE: devops        # must match database in config
       MYSQL_USER: devops
-      MYSQL_PASSWORD: devopspwd     # 与 deploy/config/*-prod.yaml 保持一致
+      MYSQL_PASSWORD: devopspwd     # must match deploy/config/*-prod.yaml
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -93,14 +97,14 @@ services:
     networks:
       - infra
 
-  # Higress all-in-one 仅适合本地/体验环境；生产请使用 Helm 部署到 K8s。
+  # The Higress all-in-one is only suitable for local/trial environments; for production use Helm on K8s.
   higress:
     image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/all-in-one:2.2.3
     profiles: ["gateway"]
     ports:
-      - "8001:8001"           # 控制台
-      - "8080:8080"           # HTTP 网关
-      - "8443:8443"           # HTTPS 网关
+      - "8001:8001"           # console
+      - "8080:8080"           # HTTP gateway
+      - "8443:8443"           # HTTPS gateway
     volumes:
       - ./higress:/data
     depends_on:
@@ -108,10 +112,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - edge                 # 流量入口：与业务服务同网，才能把请求转到 9999
-      - infra                # 同时需要访问 nacos / redis（McpBridge 服务来源）
+      - edge                 # traffic ingress: same network as the business services so requests can be forwarded to 9999
+      - infra                # also needs access to nacos / redis (McpBridge service sources)
 
-  # devops-id snowflake worker 协调依赖
+  # devops-id snowflake worker coordination dependency
   etcd:
     image: quay.io/coreos/etcd:v3.5.17
     command:
@@ -142,18 +146,18 @@ services:
       APP_ENV: prod
     volumes:
       - ./config/id-prod.yaml:/app/config/devops-id-prod.yaml:ro
-      # per-biz_tag worker 缓存；容器重建后由 etcd 重新分配
+      # per-biz_tag worker cache; re-allocated from etcd after container recreation
       - id-data:/app/data
     depends_on:
       nacos:
         condition: service_healthy
       etcd:
         condition: service_healthy
-    # 优雅退出：程序收到 SIGTERM 后 revoke lease 立即释放 worker 槽位
+    # Graceful shutdown: after SIGTERM the program revokes its lease and immediately releases the worker slot
     stop_grace_period: 30s
     restart: unless-stopped
     networks:
-      - infra                # 仅 ID 生成，无对外流量，无需 edge
+      - infra                # ID generation only, no external traffic, no edge needed
 
   devops-system:
     build:
@@ -161,7 +165,7 @@ services:
       dockerfile: devops-system/Dockerfile
     image: devops-system:latest
     expose:
-      - "9999"                # 仅供网关/容器网络访问，不发布到宿主机
+      - "9999"                # gateway/container network access only; not published to the host
     environment:
       APP_ENV: prod
     volumes:
@@ -177,8 +181,8 @@ services:
         condition: service_started
     restart: unless-stopped
     networks:
-      - edge                 # 网关唯一入口：只在此网络暴露 9999
-      - infra                # 访问 mysql/redis/nacos；同时经 edge 保留出网能力
+      - edge                 # the gateway's only ingress: 9999 is exposed on this network only
+      - infra                # access mysql/redis/nacos; keeps egress via edge
 
   devops-system-gray:
     build:
@@ -206,10 +210,11 @@ services:
       - infra
 
 networks:
-  # 流量入口网络：只有网关与业务服务。基础设施容器不在此网络，
-  # 因此无法绕过网关直连 devops-system:9999。
+  # Traffic-ingress network: gateway and business services only. Infrastructure containers
+  # are not on it, so they cannot bypass the gateway to reach devops-system:9999 directly.
   edge:
-  # 中间件网络：internal: true 表示容器无外网出口，只能被同网络服务访问。
+  # Middleware network: internal: true means containers have no external egress and can
+  # only be reached by services on the same network.
   infra:
     internal: true
 

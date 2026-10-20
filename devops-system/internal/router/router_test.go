@@ -31,7 +31,7 @@ import (
 	"time"
 )
 
-// newTestKit 构造测试中间件套件（无 DB/缓存环境；测试路径只到 JWT 层）。
+// newTestKit builds the test middleware kit (no DB/cache environment; the test path only reaches the JWT layer).
 func newTestKit(m *auth.Manager) *middleware.Kit {
 	return middleware.NewKit(m, middleware.Deps{})
 }
@@ -51,7 +51,7 @@ func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *aut
 	return NewRegister(docCfg, authM, modules)
 }
 
-// jwksEnv 构建真实共享安全装配（RS256 + miniredis 会话）与业务路由。
+// jwksEnv builds a real shared security assembly (RS256 + miniredis session) together with the business routes.
 func jwksEnv(t *testing.T) (*auth.Manager, *rsa.PublicKey, *gin.Engine) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -97,28 +97,29 @@ func jwksEnv(t *testing.T) (*auth.Manager, *rsa.PublicKey, *gin.Engine) {
 	return m, pub, r
 }
 
-// operationIDRE 匹配 operations.go 中的 OperationID 字面量。
+// operationIDRE matches the OperationID literals in operations.go.
 var operationIDRE = regexp.MustCompile(`OperationID:\s*"([a-z0-9-]+)"`)
 
-// declaredOperationIDs 从 operations.go 源文件解析出全部已声明的 OperationID。
+// declaredOperationIDs parses every declared OperationID from the operations.go source file.
 //
-// 以源码为唯一契约来源，避免手工维护清单与实际注册漂移——
-// 这正是改造前硬编码计数 43 失效的原因。
+// The source file is the single contract of truth, avoiding drift between a
+// manually maintained list and the actual registration —
+// which is exactly how the hardcoded count 43 used to fail.
 func declaredOperationIDs(t *testing.T) []string {
 	t.Helper()
 	src, err := os.ReadFile("operations.go")
 	if err != nil {
-		t.Fatalf("读取 operations.go 失败: %v", err)
+		t.Fatalf("failed to read operations.go: %v", err)
 	}
 	matches := operationIDRE.FindAllStringSubmatch(string(src), -1)
 	if len(matches) == 0 {
-		t.Fatal("未从 operations.go 解析出任何 OperationID")
+		t.Fatal("no OperationID parsed from operations.go")
 	}
 	out := make([]string, 0, len(matches))
 	seen := make(map[string]bool, len(matches))
 	for _, m := range matches {
 		if seen[m[1]] {
-			t.Errorf("OperationID %q 重复声明", m[1])
+			t.Errorf("OperationID %q declared more than once", m[1])
 			continue
 		}
 		seen[m[1]] = true
@@ -159,12 +160,16 @@ func TestRegisterAPIDoc(t *testing.T) {
 	if _, ok := doc.Paths["/system/api/v1/auth/refresh"]; !ok {
 		t.Fatalf("refresh operation missing: %+v", doc.Paths)
 	}
-	// 业务接口计数：apidoc 文档启用时自注册 export-openapi（tag "apidoc"），须排除。
+	// Business operation count: when apidoc is enabled it self-registers
+	// export-openapi (tag "apidoc"), which must be excluded.
 	//
-	// 期望值不再硬编码，而是从 operations.go 源文件解析 OperationID 清单得到——
-	// 声明即契约，测试与实现不可能漂移。改造前此处写死 43，而 feat(audit)
-	// 提交新增了 operationlog 的 list/delete/clean 三个接口却没同步该常量，
-	// 护栏就此长期失效（git log 046b6b9）。
+	// The expected value is no longer hardcoded but derived by parsing the
+	// OperationID list from the operations.go source file —
+	// a declaration is the contract, so the test cannot drift from the
+	// implementation. Before the refactor this hardcoded 43, while the
+	// feat(audit) commit added three operationlog endpoints (list/delete/clean)
+	// without updating the constant, leaving the guardrail silently broken
+	// for a long time (git log 046b6b9).
 	declared := declaredOperationIDs(t)
 
 	operationCount := 0
@@ -181,12 +186,12 @@ func TestRegisterAPIDoc(t *testing.T) {
 		}
 	}
 	if operationCount != len(declared) {
-		t.Fatalf("business operation count = %d, operations.go 声明了 %d 个", operationCount, len(declared))
+		t.Fatalf("business operation count = %d, operations.go declares %d", operationCount, len(declared))
 	}
-	// 逐个点名：漏注册会直接报出缺失的 ID，比只报数字更有排查价值。
+	// Name every ID: a missing registration reports the exact missing ID, which is more actionable than a bare count.
 	for _, id := range declared {
 		if _, ok := registered[id]; !ok {
-			t.Errorf("OperationID %q 已声明但未注册到 OpenAPI", id)
+			t.Errorf("OperationID %q is declared but not registered in OpenAPI", id)
 		}
 	}
 	bearer, ok := doc.Components.SecuritySchemes["bearerAuth"]
@@ -199,13 +204,14 @@ func TestRegisterAPIDoc(t *testing.T) {
 	}
 }
 
-// TestRegisterAPIDocEnabledKeepsAuthRoutes 回归：apidoc 开启时 login/refresh 改由
-// huma 注册，其余 auth 路由（gin 注册）必须仍然可用——早期版本 authH 在开启时为 nil，
-// logout/info 等路由调用即 panic（nil handler 解引用）。
+// TestRegisterAPIDocEnabledKeepsAuthRoutes regression: when apidoc is enabled,
+// login/refresh move to huma registration, and the remaining auth routes
+// (gin-registered) must stay available — in early versions authH was nil when
+// enabled, so calling routes like logout/info panicked (nil handler dereference).
 func TestRegisterAPIDocEnabledKeepsAuthRoutes(t *testing.T) {
 	_, _, r := jwksEnv(t)
 
-	// 无 token：JWT 中间件应返回 401 信封，而不是 nil handler panic
+	// Without a token: the JWT middleware should return a 401 envelope, not a nil handler panic
 	logout := httptest.NewRecorder()
 	r.ServeHTTP(logout, httptest.NewRequest(http.MethodPost, "/system/api/v1/auth/logout", nil))
 	if logout.Code != http.StatusUnauthorized {
@@ -218,7 +224,7 @@ func TestRegisterAPIDocEnabledKeepsAuthRoutes(t *testing.T) {
 		t.Fatalf("info without token status = %d, want 401, body = %s", info.Code, info.Body.String())
 	}
 
-	// huma 注册的 login 路由可达：请求应命中（参数校验/内容协商错误均可），而非 404
+	// The huma-registered login route is reachable: the request should hit (any parameter validation/content negotiation error is fine), not 404
 	login := httptest.NewRecorder()
 	r.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/system/api/v1/auth/login", strings.NewReader("{}")))
 	if login.Code == http.StatusNotFound {
@@ -278,7 +284,8 @@ func TestRegisterAPIDocDisabled(t *testing.T) {
 		t.Fatalf("disabled apidoc status = %d, want 404", rec.Code)
 	}
 
-	// D5：Enabled 只门控文档端点，业务路由恒注册（auth 已迁 huma，禁用文档时仍可达）
+	// D5: Enabled gates only the documentation endpoints; business routes are always registered
+	// (auth has moved to huma, so it remains reachable when docs are disabled)
 	login := httptest.NewRecorder()
 	r.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/system/api/v1/auth/login", nil))
 	if login.Code == http.StatusNotFound {
@@ -292,8 +299,9 @@ func TestRegisterAPIDocDisabled(t *testing.T) {
 	}
 }
 
-// TestJWKSEndpointVerifiesIssuedToken 模拟 Higress jwt-auth 完整验签路径：
-// 拉取 /.well-known/jwks.json → 按 kid 选公钥 → RS256 PKCS#1 v1.5 验签。
+// TestJWKSEndpointVerifiesIssuedToken simulates the full Higress jwt-auth
+// verification path: fetch /.well-known/jwks.json → select the public key by
+// kid → verify with RS256 PKCS#1 v1.5.
 func TestJWKSEndpointVerifiesIssuedToken(t *testing.T) {
 	m, signingPub, r := jwksEnv(t)
 
@@ -324,7 +332,7 @@ func TestJWKSEndpointVerifiesIssuedToken(t *testing.T) {
 		t.Fatalf("jwks key fields: %+v", k)
 	}
 
-	// JWKS 公钥与签发私钥配对
+	// The JWKS public key pairs with the signing private key
 	n, _ := base64.RawURLEncoding.DecodeString(k.N)
 	e, _ := base64.RawURLEncoding.DecodeString(k.E)
 	jwksPub := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(new(big.Int).SetBytes(e).Int64())}
@@ -332,7 +340,7 @@ func TestJWKSEndpointVerifiesIssuedToken(t *testing.T) {
 		t.Fatal("jwks public key does not match signing key")
 	}
 
-	// 用 JWKS 公钥对签发的 access token 做 RS256 验签（等价 Higress jwt-auth 行为）
+	// Verify the issued access token's RS256 signature with the JWKS public key (equivalent to Higress jwt-auth behavior)
 	access, _, _, err := m.Issue(context.Background(), 42, "alice", 7, "tenant-7")
 	if err != nil {
 		t.Fatal(err)

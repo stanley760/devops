@@ -1,7 +1,7 @@
-// Package workerfile 在本地磁盘持久化 worker 槽位与时间水位
-// （{root}/{leaf_name}/{biz_tag}/worker_id 与 watermark）。
-// worker_id 为纯十进制整数文本（与历史缓存兼容）；watermark 为 Unix 毫秒。
-// 两者均以原子写（temp + rename）持久化。实现 domain 的 WorkerCache 端口。
+// Package workerfile persists worker slots and time watermarks on local disk
+// ({root}/{leaf_name}/{biz_tag}/worker_id and watermark).
+// worker_id is plain decimal integer text (compatible with historical caches); the watermark is Unix milliseconds.
+// Both are persisted via atomic write (temp + rename). Implements the domain's WorkerCache port.
 package workerfile
 
 import (
@@ -12,12 +12,12 @@ import (
 	"strconv"
 )
 
-// Cache 持久化单个 biz_tag 的 worker 槽位与时间水位。
+// Cache persists the worker slot and time watermark of a single biz_tag.
 type Cache struct {
 	dir string
 }
 
-// New 按 {root}/{leafName}/{bizTag} 构造缓存目录。
+// New builds the cache directory as {root}/{leafName}/{bizTag}.
 func New(root, leafName, bizTag string) *Cache {
 	return &Cache{dir: filepath.Join(root, leafName, bizTag)}
 }
@@ -25,7 +25,7 @@ func New(root, leafName, bizTag string) *Cache {
 func (c *Cache) workerPath() string    { return filepath.Join(c.dir, "worker_id") }
 func (c *Cache) watermarkPath() string { return filepath.Join(c.dir, "watermark") }
 
-// Ensure 创建缓存所在的目录树。
+// Ensure creates the directory tree the cache lives in.
 func (c *Cache) Ensure() error {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return fmt.Errorf("create cache directory %s: %w", c.dir, err)
@@ -33,12 +33,12 @@ func (c *Cache) Ensure() error {
 	return nil
 }
 
-// Load 读取缓存槽位；缺失或损坏返回 ok=false。
+// Load reads the cached slot; a missing or corrupt file returns ok=false.
 func (c *Cache) Load() (int64, bool) {
 	return readInt64(c.workerPath())
 }
 
-// Save 原子写入槽位；失败返回错误（降级路径由调用方决定是否 fatal）。
+// Save atomically writes the slot; on failure it returns an error (the fallback path's caller decides whether it is fatal).
 func (c *Cache) Save(value int64) error {
 	if err := writeAtomic(c.workerPath(), value); err != nil {
 		slog.Warn("write worker cache failed", "path", c.workerPath(), "err", err)
@@ -47,17 +47,17 @@ func (c *Cache) Save(value int64) error {
 	return nil
 }
 
-// LoadWatermark 读取时间水位（Unix 毫秒）；缺失或损坏返回 ok=false。
+// LoadWatermark reads the time watermark (Unix milliseconds); a missing or corrupt file returns ok=false.
 func (c *Cache) LoadWatermark() (int64, bool) {
 	return readInt64(c.watermarkPath())
 }
 
-// SaveWatermark 原子写入时间水位（Unix 毫秒）。
+// SaveWatermark atomically writes the time watermark (Unix milliseconds).
 func (c *Cache) SaveWatermark(ts int64) error {
 	return writeAtomic(c.watermarkPath(), ts)
 }
 
-// readInt64 读取十进制整数文件；缺失或损坏返回 ok=false。
+// readInt64 reads a decimal integer file; a missing or corrupt file returns ok=false.
 func readInt64(path string) (int64, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -70,7 +70,7 @@ func readInt64(path string) (int64, bool) {
 	return value, true
 }
 
-// writeAtomic 以 temp + rename 原子写入十进制整数。
+// writeAtomic atomically writes a decimal integer via temp + rename.
 func writeAtomic(path string, value int64) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-*")

@@ -1,8 +1,8 @@
-// Package grpc 组装 gRPC 服务端与客户端。
+// Package grpc assembles the gRPC server and client.
 //
-// 服务端：recovery 拦截器（panic → Internal，堆栈进日志）、accesslog 拦截器、
-// 标准健康检查（grpc.health.v1），dev 环境开启 reflection 便于 grpcurl 调试。
-// 客户端：拨号封装，内置 Unavailable 指数退避重试（对发号类幂等调用安全）。
+// Server: recovery interceptor (panic → Internal, stack into logs), accesslog interceptor,
+// standard health check (grpc.health.v1), and reflection in dev environments for grpcurl debugging.
+// Client: dial wrapper with built-in Unavailable exponential backoff retry (safe for ID-generation-style idempotent calls).
 package grpc
 
 import (
@@ -21,20 +21,20 @@ import (
 	"time"
 )
 
-// ServerConfig gRPC 服务配置
+// ServerConfig is the gRPC server config.
 type ServerConfig struct {
-	Listen     string // 监听地址，如 ":9090"
-	Reflection bool   // 是否开启 reflection（建议 dev 环境）
+	Listen     string // listen address, e.g. ":9090"
+	Reflection bool   // whether to enable reflection (recommended in dev environments)
 
-	// StatsHandler 可选 OTel stats handler（otelgrpc.NewServerHandler()），
-	// 非空时注入：trace + RED metrics 一次到位，与 HTTP 侧同口径。
+	// StatsHandler optional OTel stats handler (otelgrpc.NewServerHandler());
+	// injected when non-nil: trace + RED metrics in one step, consistent with the HTTP side.
 	StatsHandler stats.Handler
-	// UnaryInterceptors 追加在 Recovery/AccessLog 之后的自定义一元拦截器。
+	// UnaryInterceptors custom unary interceptors appended after Recovery/AccessLog.
 	UnaryInterceptors []grpc.UnaryServerInterceptor
 }
 
-// Run 启动 gRPC 服务，收到 SIGINT/SIGTERM 后优雅退出。
-// register 由各服务调用，用于注册自身的 gRPC 服务实现与健康状况。
+// Run starts the gRPC server and shuts down gracefully on SIGINT/SIGTERM.
+// register is called by each service to register its own gRPC service implementations and health status.
 func Run(cfg ServerConfig, register func(s *grpc.Server, hc *health.Server)) error {
 	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(append([]grpc.UnaryServerInterceptor{
@@ -58,7 +58,7 @@ func Run(cfg ServerConfig, register func(s *grpc.Server, hc *health.Server)) err
 
 	lis, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		return fmt.Errorf("监听 %s 失败: %w", cfg.Listen, err)
+		return fmt.Errorf("failed to listen on %s: %w", cfg.Listen, err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -66,7 +66,7 @@ func Run(cfg ServerConfig, register func(s *grpc.Server, hc *health.Server)) err
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("gRPC 服务启动", "addr", cfg.Listen)
+		slog.Info("gRPC server starting", "addr", cfg.Listen)
 		if err := s.Serve(lis); err != nil {
 			errCh <- err
 		}
@@ -74,11 +74,11 @@ func Run(cfg ServerConfig, register func(s *grpc.Server, hc *health.Server)) err
 
 	select {
 	case err := <-errCh:
-		return fmt.Errorf("gRPC 服务异常: %w", err)
+		return fmt.Errorf("gRPC server error: %w", err)
 	case <-ctx.Done():
 	}
 
-	slog.Info("收到退出信号，开始优雅关闭")
+	slog.Info("shutdown signal received, starting graceful shutdown")
 	stopped := make(chan struct{})
 	go func() {
 		s.GracefulStop()
@@ -87,8 +87,8 @@ func Run(cfg ServerConfig, register func(s *grpc.Server, hc *health.Server)) err
 	select {
 	case <-stopped:
 	case <-time.After(10 * time.Second):
-		s.Stop() // 超时强停，避免退出流程卡死
+		s.Stop() // force stop on timeout to avoid a stuck shutdown
 	}
-	slog.Info("gRPC 服务已停止")
+	slog.Info("gRPC server stopped")
 	return nil
 }

@@ -2,18 +2,19 @@ package authz
 
 import "fmt"
 
-// 初始策略种子（幂等）：角色名取自 RoleConfig，规则形状与历史版本逐字同形。
+// Initial policy seeds (idempotent): role names come from RoleConfig, and the rule
+// shapes are word-for-word identical to the historical versions.
 //
-//	SeedBootstrap:  p,  {pa}, *,          *      平台管理员跨域全通（g2 路径）
-//	                g2, {subject}, {pa}           绑定平台管理员
-//	                p,  {sa}, {domain},   *      租户超管域内全通
+//	SeedBootstrap:  p,  {pa}, *,          *      platform admins bypass domains (g2 path)
+//	                g2, {subject}, {pa}           bind the platform admin
+//	                p,  {sa}, {domain},   *      tenant super-admins bypass within the domain
 //	                g,  {subject}, {sa},  {domain}
 //
-//	SeedTenantAdmin: p, {sa}, {domain},   *      租户超管域内全通
+//	SeedTenantAdmin: p, {sa}, {domain},   *      tenant super-admins bypass within the domain
 //	                 g, {subject}, {sa},  {domain}
 
-// SeedBootstrap 初始策略（幂等，migrate/首次启动复用）。
-// subject 为初始管理员主键（string 形态由调用方转换），domain 为租户域。
+// SeedBootstrap seeds the initial policies (idempotent, reused by migrate/first startup).
+// subject is the initial admin primary key (its string form is converted by the caller), domain is the tenant domain.
 func (a *CasbinAuthorizer) SeedBootstrap(subject, domain string) error {
 	if _, err := a.getEnforcer(); err != nil {
 		return err
@@ -30,13 +31,14 @@ func (a *CasbinAuthorizer) SeedBootstrap(subject, domain string) error {
 		{"g", []string{subject, sa, domain}},
 	} {
 		if err := a.AddPolicyIfAbsent(rule.ptype, rule.vals...); err != nil {
-			return fmt.Errorf("写入种子 %s 行失败: %w", rule.ptype, err)
+			return fmt.Errorf("failed to write seed %s row: %w", rule.ptype, err)
 		}
 	}
 	return nil
 }
 
-// SeedTenantAdmin 租户初始超管策略（创建租户时调用，幂等）。
+// SeedTenantAdmin seeds the tenant's initial super-admin policy (called when creating
+// a tenant, idempotent).
 func (a *CasbinAuthorizer) SeedTenantAdmin(subject, domain string) error {
 	if _, err := a.getEnforcer(); err != nil {
 		return err
@@ -44,10 +46,10 @@ func (a *CasbinAuthorizer) SeedTenantAdmin(subject, domain string) error {
 
 	sa := a.roles.SuperAdmin
 	if err := a.AddPolicyIfAbsent("p", sa, domain, "*"); err != nil {
-		return fmt.Errorf("写入租户超管策略失败: %w", err)
+		return fmt.Errorf("failed to write the tenant super-admin policy: %w", err)
 	}
 	if err := a.AddPolicyIfAbsent("g", subject, sa, domain); err != nil {
-		return fmt.Errorf("写入租户超管绑定失败: %w", err)
+		return fmt.Errorf("failed to write the tenant super-admin binding: %w", err)
 	}
 	return nil
 }

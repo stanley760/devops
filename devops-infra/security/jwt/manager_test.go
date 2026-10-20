@@ -139,7 +139,8 @@ func TestParseRequiresExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 无 exp 的签名有效 token 也必须拒绝（验证侧不信任签发方总写 exp）。
+	// A token signed without exp must also be rejected (the verifying side
+	// does not trust issuers to always write exp).
 	noExp := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, Claims{
 		RegisteredClaims: jwtlib.RegisteredClaims{Issuer: cfg.Issuer, IssuedAt: jwtlib.NewNumericDate(time.Now())},
 	})

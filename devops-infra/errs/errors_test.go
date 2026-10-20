@@ -61,7 +61,7 @@ func TestToHumaErrorNil(t *testing.T) {
 	}
 }
 
-// captureSlog 把默认 slog 输出重定向到缓冲区，返回还原函数。
+// captureSlog redirects the default slog output to a buffer and returns a restore function.
 func captureSlog(t *testing.T) (*bytes.Buffer, func()) {
 	t.Helper()
 	var buf bytes.Buffer
@@ -72,23 +72,23 @@ func captureSlog(t *testing.T) (*bytes.Buffer, func()) {
 
 func TestWrapCapturesCallerStack(t *testing.T) {
 	cause := errors.New("dial tcp: connection refused")
-	got := errs.Wrap(cause, errs.CodeInternal, "发号失败")
+	got := errs.Wrap(cause, errs.CodeInternal, "ID generation failed")
 
 	stack := got.Stack()
 	if !strings.Contains(stack, "TestWrapCapturesCallerStack") {
-		t.Fatalf("Stack() 未落在业务调用点:\n%s", stack)
+		t.Fatalf("Stack() did not land on the business call point:\n%s", stack)
 	}
 	if strings.Contains(stack, "devops-infra/errs.") {
-		t.Fatalf("Stack() 不应包含 errs 包自身帧:\n%s", stack)
+		t.Fatalf("Stack() must not contain frames from the errs package itself:\n%s", stack)
 	}
 	if !strings.Contains(got.Error(), cause.Error()) {
-		t.Fatalf("Error() 应保留底层原因: %q", got.Error())
+		t.Fatalf("Error() must keep the underlying cause: %q", got.Error())
 	}
 }
 
 func TestStackOfZeroValueBizErrorIsEmpty(t *testing.T) {
 	if got := (&errs.BizError{}).Stack(); got != "" {
-		t.Fatalf("零值 BizError Stack() = %q, want 空串", got)
+		t.Fatalf("zero-value BizError Stack() = %q, want empty string", got)
 	}
 }
 
@@ -101,12 +101,12 @@ func TestToHumaErrorLogsUnclassifiedWithStack(t *testing.T) {
 
 	var statusErr huma.StatusError
 	if !errors.As(got, &statusErr) || statusErr.GetStatus() != errs.CodeInternal {
-		t.Fatalf("ToHumaError(非 BizError) 应为 500, got %v", got)
+		t.Fatalf("ToHumaError(non-BizError) should be 500, got %v", got)
 	}
-	if log := buf.String(); !strings.Contains(log, "未分类错误") ||
+	if log := buf.String(); !strings.Contains(log, "unclassified error") ||
 		!strings.Contains(log, cause.Error()) ||
 		!strings.Contains(log, "TestToHumaErrorLogsUnclassifiedWithStack") {
-		t.Fatalf("未分类错误日志应含错误链与调用点堆栈, got:\n%s", log)
+		t.Fatalf("unclassified error log must contain the error chain and the call-point stack, got:\n%s", log)
 	}
 }
 
@@ -115,13 +115,13 @@ func TestToHumaErrorLogs5xxBizErrorWithCauseAndStack(t *testing.T) {
 	defer restore()
 
 	cause := errors.New("Error 1062: Duplicate entry")
-	_ = errs.ToHumaError(errs.Wrap(cause, errs.CodeInternal, "创建用户失败"))
+	_ = errs.ToHumaError(errs.Wrap(cause, errs.CodeInternal, "failed to create user"))
 
 	log := buf.String()
-	if !strings.Contains(log, "业务错误（5xx）") ||
+	if !strings.Contains(log, "business error (5xx)") ||
 		!strings.Contains(log, cause.Error()) ||
 		!strings.Contains(log, "TestToHumaErrorLogs5xxBizErrorWithCauseAndStack") {
-		t.Fatalf("5xx 日志应含业务语义、底层原因与堆栈, got:\n%s", log)
+		t.Fatalf("5xx log must contain the business semantics, underlying cause, and stack, got:\n%s", log)
 	}
 }
 
@@ -129,9 +129,9 @@ func TestToHumaErrorSkips4xxLogging(t *testing.T) {
 	buf, restore := captureSlog(t)
 	defer restore()
 
-	_ = errs.ToHumaError(errs.New(errs.CodeParam, "用户名已存在"))
+	_ = errs.ToHumaError(errs.New(errs.CodeParam, "username already exists"))
 
 	if log := buf.String(); log != "" {
-		t.Fatalf("4xx 属预期业务拒绝, 不应记错误日志, got:\n%s", log)
+		t.Fatalf("4xx are expected business rejections and must not be logged as errors, got:\n%s", log)
 	}
 }

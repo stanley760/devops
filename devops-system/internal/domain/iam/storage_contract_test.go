@@ -5,21 +5,21 @@ import (
 	"testing"
 )
 
-// TestEncodeIDArray 存储形态必须是数字数组（存量数据与唯一索引依赖此形态）。
+// TestEncodeIDArray: the storage form must be a numeric array (existing data and the unique index depend on this form).
 //
-// 迁移说明：这三条用例对应改造前 dao/user_admin_test.go 的
-// TestPostIDsJSON / TestPostIDsOf / TestPostIDsRoundTrip，
-// 是「API 的 ID 字符串化契约不得泄漏进存储层」的守门人。
+// Migration note: these three cases correspond to the pre-refactor TestPostIDsJSON /
+// TestPostIDsOf / TestPostIDsRoundTrip in dao/user_admin_test.go, and guard against
+// "the API's ID-stringification contract leaking into the storage layer".
 func TestEncodeIDArray(t *testing.T) {
 	cases := []struct {
 		name string
 		in   []int64
 		want string
 	}{
-		{name: "空集合", in: nil, want: ""},
-		{name: "空切片", in: []int64{}, want: ""},
-		{name: "单元素", in: []int64{4}, want: "[4]"},
-		{name: "多元素", in: []int64{4, 5}, want: "[4,5]"},
+		{name: "nil set", in: nil, want: ""},
+		{name: "empty slice", in: []int64{}, want: ""},
+		{name: "single element", in: []int64{4}, want: "[4]"},
+		{name: "multiple elements", in: []int64{4, 5}, want: "[4,5]"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -36,14 +36,14 @@ func TestDecodeIDArray(t *testing.T) {
 		in   string
 		want []int64
 	}{
-		{name: "空串", in: "", want: []int64{}},
-		{name: "数字数组", in: "[4,5]", want: []int64{4, 5}},
-		{name: "单元素", in: "[4]", want: []int64{4}},
-		// 字符串元素是 API 契约形态（types.ID.MarshalJSON 的产物），
-		// 在存储层视为脏数据：整体解析失败返回空集，不做兼容读。
-		{name: "字符串元素视为脏数据", in: `["4","5"]`, want: []int64{}},
-		{name: "非法 JSON", in: "not-json", want: []int64{}},
-		{name: "null 字面量", in: "null", want: []int64{}},
+		{name: "empty string", in: "", want: []int64{}},
+		{name: "numeric array", in: "[4,5]", want: []int64{4, 5}},
+		{name: "single element", in: "[4]", want: []int64{4}},
+		// String elements are the API contract form (a product of types.ID.MarshalJSON);
+		// in the storage layer they are treated as dirty data: a whole-parse failure returns an empty set, with no compatibility read.
+		{name: "string elements treated as dirty data", in: `["4","5"]`, want: []int64{}},
+		{name: "invalid JSON", in: "not-json", want: []int64{}},
+		{name: "null literal", in: "null", want: []int64{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,15 +64,15 @@ func TestIDArrayRoundTrip(t *testing.T) {
 	orig := []int64{4, 5, 100}
 	encoded := EncodeIDArray(orig)
 	if encoded != "[4,5,100]" {
-		t.Fatalf("编码 = %q, want \"[4,5,100]\"（必须是数字数组）", encoded)
+		t.Fatalf("encoded = %q, want \"[4,5,100]\" (must be a numeric array)", encoded)
 	}
 	back := DecodeIDArray(encoded)
 	if len(back) != len(orig) {
-		t.Fatalf("往返长度 = %d, want %d", len(back), len(orig))
+		t.Fatalf("round-trip length = %d, want %d", len(back), len(orig))
 	}
 	for i := range orig {
 		if back[i] != orig[i] {
-			t.Fatalf("往返值 = %v, want %v", back, orig)
+			t.Fatalf("round-trip value = %v, want %v", back, orig)
 		}
 	}
 }
@@ -83,9 +83,9 @@ func TestNormalizeIDArrayJSON(t *testing.T) {
 		in   string
 		want string
 	}{
-		{name: "已是数字数组", in: "[4,5]", want: "[4,5]"},
-		{name: "脏数据归一为空", in: `["4"]`, want: ""},
-		{name: "空串", in: "", want: ""},
+		{name: "already a numeric array", in: "[4,5]", want: "[4,5]"},
+		{name: "dirty data normalized to empty", in: `["4"]`, want: ""},
+		{name: "empty string", in: "", want: ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,12 +96,12 @@ func TestNormalizeIDArrayJSON(t *testing.T) {
 	}
 }
 
-// TestSoftDeletedNaming 软删改写唯一键的命名格式是存储契约
-// （存量软删数据与唯一索引共存依赖此格式，勿改）。
+// TestSoftDeletedNaming: the naming format for soft-delete unique-key rewrites is a storage contract
+// (existing soft-deleted data coexisting with the unique index depends on this format; do not change).
 func TestSoftDeletedNaming(t *testing.T) {
 	at := fixedTime()
-	// 时间戳后缀按 Unix 秒拼接，期望值由同一时刻推导而非手写常量，
-	// 避免测试与实现各自漂移。
+	// the timestamp suffix is concatenated by Unix seconds; expected values are derived from the same
+	// instant rather than hand-written constants, to avoid test and implementation drifting apart.
 	want := "alice_del_42_" + strconv.FormatInt(at.Unix(), 10)
 	if got := RenameSoftDeleted("alice", 42, at); got != want {
 		t.Fatalf("RenameSoftDeleted = %q, want %q", got, want)
@@ -115,7 +115,7 @@ func TestIDsFromStrings(t *testing.T) {
 	got := IDsFromStrings([]string{"4", " 5 ", "bad", "6"})
 	want := []int64{4, 5, 6}
 	if len(got) != len(want) {
-		t.Fatalf("IDsFromStrings = %v, want %v（非法项应跳过）", got, want)
+		t.Fatalf("IDsFromStrings = %v, want %v (invalid entries should be skipped)", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {

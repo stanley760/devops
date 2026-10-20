@@ -1,26 +1,26 @@
-# devops-system 用户权限系统镜像（多阶段构建：静态编译 + alpine 运行时）。
+# devops-system user permission system image (multi-stage build: static compilation + alpine runtime).
 #
-# 构建上下文为仓库根。镜像内以 GOWORK=off 构建：只复制本模块源码，
-# 兄弟模块（devops-common / devops-id / devops-infra）由 go.mod 的 require
-# 从代理拉取，与外部使用者的真实拉取路径一致，因此这些版本必须已发布。
+# The build context is the repo root. The image builds with GOWORK=off: only this module's source is copied,
+# sibling modules (devops-common / devops-id / devops-infra) are pulled from the proxy per the require in go.mod,
+# matching the real pull path for external users, so these versions must already be published.
 #   docker build -f devops-system/Dockerfile -t devops-system:dev .
 #
-# 镜像内配置仅为占位（config/config.yaml），实际环境差异通过
-# APP_ENV 合并环境文件覆盖（挂载 devops-system-prod.yaml，见 deploy/）。
-# go.mod 要求 go >= 1.27.1，且官方镜像锁定 GOTOOLCHAIN=local，
-# 基础镜像必须与 go.work/go.mod 的 go 指令一致，否则 go 命令直接失败。
+# The config inside the image is only a placeholder (config/config.yaml); environment differences are overlaid via
+# the APP_ENV env file (mount devops-system-prod.yaml, see deploy/).
+# go.mod requires go >= 1.27.1, and the official image pins GOTOOLCHAIN=local,
+# so the base image must match the go directive in go.work/go.mod, otherwise go commands fail outright.
 FROM golang:1.27-alpine AS builder
 
 ARG VERSION=dev
-# 默认走国内代理（与宿主机 go env GOPROXY 一致），海外构建可 --build-arg GOPROXY= 覆盖
+# Default to the domestic proxy (consistent with the host's go env GOPROXY); overseas builds can override with --build-arg GOPROXY=
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
-# 关闭工作区模式：镜像内只存在本模块，兄弟模块按 require 版本从代理解析
+# Disable workspace mode: only this module exists in the image; sibling modules are resolved from the proxy per their require versions
 ENV GOWORK=off
 
 WORKDIR /src
 
-# 依赖描述先于源码拷贝，go.sum 不变时命中层缓存
+# Dependency descriptors are copied before the source, so the layer cache hits when go.sum is unchanged
 COPY devops-system/go.mod devops-system/go.sum devops-system/
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY devops-system/ devops-system/
 
-# CGO_ENABLED=0 静态编译；-trimpath 去掉本机路径
+# CGO_ENABLED=0 static build; -trimpath strips local paths
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd devops-system && \
@@ -55,6 +55,6 @@ EXPOSE 9999
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:9999/healthz || exit 1
 
-# 优雅退出由程序自身处理（刷新会话/关连接），务必用 exec 形式传信号
+# Graceful shutdown is handled by the program itself (refresh sessions/close connections); always use exec form so signals are passed through
 ENTRYPOINT ["devops-system"]
 CMD ["server"]

@@ -6,30 +6,30 @@ import (
 	"github.com/stanley760/devops/devops-common/domain"
 )
 
-// 仓储端口（Repository Pattern）。
+// Repository ports (Repository Pattern).
 //
-// 关键设计：入参一律使用本包定义的纯 Go Filter 类型，**不带任何 huma/GORM tag**。
+// Key design: all inputs use pure Go Filter types defined in this package, carrying no huma/GORM tags.
 //
-// 改造前的反向依赖：6 个 dao 文件 import internal/types，方法签名形如
-// ListUsers(ctx, types.UserPageQuery)，导致存储层被 huma/OpenAPI 的
-// form/binding/doc 标签污染，仓储无法脱离 HTTP 契约独立演进。
-// 现在 API 契约止于 handler 层——handler 做 Input → Filter 的转换，
-// 仓储以下游不再认识 OpenAPI。
+// The reverse dependency before the refactor: 6 dao files imported internal/types, with method
+// signatures like ListUsers(ctx, types.UserPageQuery), causing the storage layer to be polluted
+// by huma/OpenAPI form/binding/doc tags, and the repository could not evolve independently of
+// the HTTP contract. Now the API contract stops at the handler layer — the handler does the
+// Input → Filter conversion, and everything below the repository no longer knows OpenAPI.
 //
-// 端口定义在领域层，实现在 infrastructure/persistence（GORM），
-// 由 app 层装配注入。这也让 service 层可以注入内存假实现做单元测试，
-// 彻底解决「dao 层零测试覆盖」的问题。
+// Ports are defined in the domain layer, implemented in infrastructure/persistence (GORM),
+// and wired/injected by the app layer. This also lets the service layer inject in-memory fake
+// implementations for unit tests, completely solving the "zero test coverage in the dao layer" problem.
 
-// UserFilter 用户列表查询条件（领域侧，纯 Go）。
+// UserFilter is the user list query condition (domain side, pure Go).
 type UserFilter struct {
 	domain.PageParam
-	Username string // 模糊匹配
-	Mobile   string // 精确匹配
+	Username string // fuzzy match
+	Mobile   string // exact match
 	Status   *int8
 	DeptID   *int64
 }
 
-// RoleFilter 角色列表查询条件。
+// RoleFilter is the role list query condition.
 type RoleFilter struct {
 	domain.PageParam
 	Name   string
@@ -37,20 +37,20 @@ type RoleFilter struct {
 	Status *int8
 }
 
-// MenuFilter 菜单列表查询条件。
+// MenuFilter is the menu list query condition.
 type MenuFilter struct {
 	MenuType *int8
 	Name     string
 	Status   *int8
 }
 
-// DeptFilter 部门列表查询条件。
+// DeptFilter is the dept list query condition.
 type DeptFilter struct {
 	Name   string
 	Status *int8
 }
 
-// PostFilter 岗位列表查询条件。
+// PostFilter is the post list query condition.
 type PostFilter struct {
 	domain.PageParam
 	Code   string
@@ -58,7 +58,7 @@ type PostFilter struct {
 	Status *int8
 }
 
-// TenantFilter 租户列表查询条件。
+// TenantFilter is the tenant list query condition.
 type TenantFilter struct {
 	domain.PageParam
 	Name   string
@@ -66,7 +66,7 @@ type TenantFilter struct {
 	Status *int8
 }
 
-// LoginLogFilter 登录日志查询条件。
+// LoginLogFilter is the login log query condition.
 type LoginLogFilter struct {
 	domain.PageParam
 	Username  string
@@ -76,7 +76,7 @@ type LoginLogFilter struct {
 	EndTime   *string
 }
 
-// OperationLogFilter 操作日志查询条件。
+// OperationLogFilter is the operation log query condition.
 type OperationLogFilter struct {
 	domain.PageParam
 	Title    string
@@ -85,73 +85,73 @@ type OperationLogFilter struct {
 	Status   *int8
 }
 
-// UserRepository 用户仓储端口。
+// UserRepository is the user repository port.
 type UserRepository interface {
-	// Save 保存聚合（新增或更新），并在同一事务内落库领域事件。
+	// Save persists the aggregate (insert or update), and persists domain events in the same transaction.
 	Save(ctx context.Context, u *User) error
-	// Get 按 ID 加载聚合（含角色引用）。
+	// Get loads the aggregate by ID (including role references).
 	Get(ctx context.Context, id int64) (*User, error)
-	// GetByUsername 按用户名加载（登录场景）。
+	// GetByUsername loads by username (login scenario).
 	GetByUsername(ctx context.Context, username string) (*User, error)
-	// List 分页查询（读侧，直接返回领域对象列表）。
+	// List paginates (read side, directly returns a list of domain objects).
 	List(ctx context.Context, f UserFilter) (domain.PageResult[*User], error)
-	// Delete 软删（改写唯一键 + 清关联），并落库领域事件。
+	// Delete soft-deletes (rewrites the unique key + clears associations), and persists domain events.
 	Delete(ctx context.Context, u *User, operator string) error
-	// UsernameExists 用户名是否已占用（excludeID 排除自身）。
+	// UsernameExists reports whether the username is already taken (excludeID excludes itself).
 	UsernameExists(ctx context.Context, username string, excludeID int64) (bool, error)
-	// MobileExists 手机号是否已占用。
+	// MobileExists reports whether the mobile number is already taken.
 	MobileExists(ctx context.Context, mobile string, excludeID int64) (bool, error)
-	// ReplaceRoles 重建用户角色关联（事务内）。
+	// ReplaceRoles rebuilds user-role associations (within a transaction).
 	ReplaceRoles(ctx context.Context, userID int64, roleIDs []int64) error
-	// RoleCodesByIDs 按角色 ID 查编码（顺带校验归属，非本租户即报错）。
+	// RoleCodesByIDs looks up codes by role ID (also validates ownership; an error if not in this tenant).
 	RoleCodesByIDs(ctx context.Context, roleIDs []int64) ([]string, error)
-	// TouchLogin 记录登录 IP 与时间。
+	// TouchLogin records the login IP and time.
 	TouchLogin(ctx context.Context, userID int64, ip string) error
 }
 
-// RoleRepository 角色仓储端口。
+// RoleRepository is the role repository port.
 type RoleRepository interface {
 	Save(ctx context.Context, r *Role) error
 	Get(ctx context.Context, id int64) (*Role, error)
 	List(ctx context.Context, f RoleFilter) (domain.PageResult[*Role], error)
 	Delete(ctx context.Context, r *Role, operator string) error
 	CodeExists(ctx context.Context, code string, excludeID int64) (bool, error)
-	// ReplaceMenus 重建角色菜单关联。
+	// ReplaceMenus rebuilds role-menu associations.
 	ReplaceMenus(ctx context.Context, roleID int64, menuIDs []int64) error
-	// MenusByIDs 按 ID 批量查菜单（分配菜单时派生权限标识）。
+	// MenusByIDs batch-queries menus by ID (derives permission identifiers when assigning menus).
 	MenusByIDs(ctx context.Context, menuIDs []int64) ([]*Menu, error)
-	// PermissionsByMenuIDs 批量取菜单权限标识（避免加载整个菜单聚合）。
+	// PermissionsByMenuIDs batch-fetches menu permission identifiers (avoids loading the whole menu aggregate).
 	PermissionsByMenuIDs(ctx context.Context, menuIDs []int64) ([]string, error)
 }
 
-// MenuRepository 菜单仓储端口。
+// MenuRepository is the menu repository port.
 type MenuRepository interface {
 	Save(ctx context.Context, m *Menu) error
 	Get(ctx context.Context, id int64) (*Menu, error)
-	// ListAll 全部菜单（构建树用，无分页）。
+	// ListAll returns all menus (for tree construction, no pagination).
 	ListAll(ctx context.Context, f MenuFilter) ([]*Menu, error)
-	// ListByUserRoles 取用户在租户内可见的菜单（登录后前端路由树）。
+	// ListByUserRoles returns the menus visible to the user within the tenant (frontend route tree after login).
 	ListByUserRoles(ctx context.Context, userID int64, menuTypes []int8) ([]*Menu, error)
-	// ListByIDs 按 ID 批量查。
+	// ListByIDs batch-queries by ID.
 	ListByIDs(ctx context.Context, ids []int64) ([]*Menu, error)
 	Delete(ctx context.Context, id int64) error
 }
 
-// DeptRepository 部门仓储端口。
+// DeptRepository is the dept repository port.
 type DeptRepository interface {
 	Save(ctx context.Context, d *Dept) error
 	Get(ctx context.Context, id int64) (*Dept, error)
 	List(ctx context.Context, f DeptFilter) ([]*Dept, error)
 	Delete(ctx context.Context, d *Dept, operator string) error
-	// HasChildren 是否存在下级部门。
+	// HasChildren reports whether sub-departments exist.
 	HasChildren(ctx context.Context, id int64) (bool, error)
-	// HasMembers 部门下是否有用户。
+	// HasMembers reports whether the dept has users.
 	HasMembers(ctx context.Context, id int64) (bool, error)
-	// LeaderNames 批量取部门负责人姓名（登录后组树展示）。
+	// LeaderNames batch-fetches dept leader names (tree display after login).
 	LeaderNames(ctx context.Context, deptIDs []int64) (map[int64]string, error)
 }
 
-// PostRepository 岗位仓储端口。
+// PostRepository is the post repository port.
 type PostRepository interface {
 	Save(ctx context.Context, p *Post) error
 	Get(ctx context.Context, id int64) (*Post, error)
@@ -160,7 +160,7 @@ type PostRepository interface {
 	CodeExists(ctx context.Context, code string, excludeID int64) (bool, error)
 }
 
-// TenantRepository 租户仓储端口。
+// TenantRepository is the tenant repository port.
 type TenantRepository interface {
 	Save(ctx context.Context, t *Tenant) error
 	Get(ctx context.Context, id int64) (*Tenant, error)
@@ -168,6 +168,6 @@ type TenantRepository interface {
 	List(ctx context.Context, f TenantFilter) (domain.PageResult[*Tenant], error)
 	Delete(ctx context.Context, t *Tenant, operator string) error
 	CodeExists(ctx context.Context, code string, excludeID int64) (bool, error)
-	// IsAnyUserExists 租户下是否已有用户（新建租户时拒绝占用已用编码）。
+	// IsAnyUserExists reports whether the tenant already has any user (rejects taking an already-used code when creating a tenant).
 	IsAnyUserExists(ctx context.Context, tenantID int64) (bool, error)
 }

@@ -1,4 +1,4 @@
-// 角色管理 dao（P6）：p 行重建相关见 service 层（casbin 与 DB 事务边界）。
+// Role management dao (P6): p row rebuild logic lives in the service layer (casbin and DB transaction boundaries).
 package dao
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/stanley760/devops/devops-system/internal/types"
 )
 
-// ListRoles 分页查询角色（筛选 name/code/status）。
+// ListRoles paginates roles (filter by name/code/status).
 func ListRoles(ctx context.Context, q types.RolePageQuery) (domain.PageResult[model.Role], error) {
 	db := tenantdb.DB(ctx).Model(&model.Role{})
 	if q.Name != "" {
@@ -36,34 +36,34 @@ func ListRoles(ctx context.Context, q types.RolePageQuery) (domain.PageResult[mo
 		domain.PageParam{PageNum: q.PageNum, PageSize: q.PageSize},
 	)
 	if err != nil {
-		return domain.PageResult[model.Role]{}, errs.Wrap(err, errs.CodeInternal, "查询角色列表失败")
+		return domain.PageResult[model.Role]{}, errs.Wrap(err, errs.CodeInternal, "failed to query role list")
 	}
 	return page, nil
 }
 
-// UpdateRole 更新角色字段（map 形式，仅非零字段）。
+// UpdateRole updates role fields (map form, non-zero fields only).
 func UpdateRole(ctx context.Context, roleID int64, updates map[string]any) error {
 	if err := tenantdb.DB(ctx).Model(&model.Role{}).
 		Where("id = ?", roleID).Updates(updates).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "更新角色失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to update role")
 	}
 	return nil
 }
 
-// GetRoleByID 按 ID 取角色（租户内）。
+// GetRoleByID fetches a role by ID (within the tenant).
 func GetRoleByID(ctx context.Context, roleID int64) (*model.Role, error) {
 	var r model.Role
 	err := tenantdb.DB(ctx).Where("id = ?", roleID).First(&r).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.New(errs.CodeNotFound, "角色不存在")
+			return nil, errs.New(errs.CodeNotFound, "role not found")
 		}
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询角色失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query role")
 	}
 	return &r, nil
 }
 
-// RoleCodeExists 租户内角色编码是否已占用（excludeID 排除自身）。
+// RoleCodeExists reports whether the role code is already taken within the tenant (excludeID excludes itself).
 func RoleCodeExists(ctx context.Context, code string, excludeID int64) (bool, error) {
 	db := tenantdb.DB(ctx).Model(&model.Role{}).Where("code = ?", code)
 	if excludeID > 0 {
@@ -71,46 +71,47 @@ func RoleCodeExists(ctx context.Context, code string, excludeID int64) (bool, er
 	}
 	var cnt int64
 	if err := db.Count(&cnt).Error; err != nil {
-		return false, errs.Wrap(err, errs.CodeInternal, "检查角色编码唯一性失败")
+		return false, errs.Wrap(err, errs.CodeInternal, "failed to check role code uniqueness")
 	}
 	return cnt > 0, nil
 }
 
-// CreateRole 创建角色（主键发号）。
+// CreateRole creates a role (primary key is assigned).
 func CreateRole(ctx context.Context, r *model.Role) error {
 	if err := tenantdb.DB(ctx).Create(r).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "创建角色失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to create role")
 	}
 	return nil
 }
 
-// SoftDeleteRoleTx 事务内软删角色：改写 code 绕开租户内唯一索引（同名可重建）。
+// SoftDeleteRoleTx soft-deletes a role within a transaction: rewrites the code to bypass
+// the tenant-scoped unique index (a role with the same name can be recreated).
 func SoftDeleteRoleTx(tx *gorm.DB, roleID int64, code string) error {
 	res := tx.Model(&model.Role{}).Where("id = ?", roleID).Updates(map[string]any{
 		"code":       code + "_del_" + strconv.FormatInt(roleID, 10),
 		"deleted_at": time.Now(),
 	})
 	if res.Error != nil {
-		return errs.Wrap(res.Error, errs.CodeInternal, "删除角色失败")
+		return errs.Wrap(res.Error, errs.CodeInternal, "failed to delete role")
 	}
 	return nil
 }
 
-// GetRoleMenuIDs 角色已分配的菜单 ID 列表（tenant_id 由插件注入）。
+// GetRoleMenuIDs returns the role's assigned menu IDs (tenant_id is injected by the plugin).
 func GetRoleMenuIDs(ctx context.Context, roleID int64) ([]int64, error) {
 	var ids []int64
 	err := tenantdb.DB(ctx).Model(&model.RoleMenu{}).
 		Where("role_id = ?", roleID).Pluck("menu_id", &ids).Error
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询角色菜单失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query role menus")
 	}
 	return ids, nil
 }
 
-// SyncRoleMenusTx 事务内重建角色-菜单关联（物理删旧 + 批量插新）。
+// SyncRoleMenusTx rebuilds role-menu associations within a transaction (physical delete old + batch insert new).
 func SyncRoleMenusTx(tx *gorm.DB, roleID int64, menuIDs []int64) error {
 	if err := tx.Where("role_id = ?", roleID).Delete(&model.RoleMenu{}).Error; err != nil {
-		return errs.Wrap(err, errs.CodeInternal, "清理角色菜单失败")
+		return errs.Wrap(err, errs.CodeInternal, "failed to clean role menus")
 	}
 	if len(menuIDs) == 0 {
 		return nil
@@ -122,7 +123,7 @@ func SyncRoleMenusTx(tx *gorm.DB, roleID int64, menuIDs []int64) error {
 	return tx.Create(&rows).Error
 }
 
-// RoleIDsByMenuIDs 引用指定菜单集合的角色 ID 列表（重建 p 行用）。
+// RoleIDsByMenuIDs returns the role IDs referencing the given menu set (used to rebuild p rows).
 func RoleIDsByMenuIDs(ctx context.Context, menuIDs []int64) ([]int64, error) {
 	if len(menuIDs) == 0 {
 		return nil, nil
@@ -131,34 +132,34 @@ func RoleIDsByMenuIDs(ctx context.Context, menuIDs []int64) ([]int64, error) {
 	err := tenantdb.DB(ctx).Model(&model.RoleMenu{}).
 		Where("menu_id IN ?", menuIDs).Distinct().Pluck("role_id", &ids).Error
 	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "查询菜单引用角色失败")
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query roles referencing menus")
 	}
 	return ids, nil
 }
 
-// ClearRoleBindingsTx 事务内清理角色的用户关联（删除角色时）。
+// ClearRoleBindingsTx cleans up a role's user associations within a transaction (on role deletion).
 func ClearRoleBindingsTx(tx *gorm.DB, roleID int64) error {
 	return tx.Where("role_id = ?", roleID).Delete(&model.UserRole{}).Error
 }
 
-// ReplaceRoleMenus 重建角色的菜单关联（单事务）。
+// ReplaceRoleMenus rebuilds a role's menu associations (single transaction).
 func ReplaceRoleMenus(ctx context.Context, roleID int64, menuIDs []int64) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		return SyncRoleMenusTx(tx, roleID, menuIDs)
 	})
 }
 
-// DeleteRole 删除角色（单事务）：软删（改写 code）→ 清用户关联 → 清菜单关联。
+// DeleteRole deletes a role (single transaction): soft delete (rewrite code) -> clear user associations -> clear menu associations.
 func DeleteRole(ctx context.Context, r *model.Role) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := SoftDeleteRoleTx(tx, r.ID, r.Code); err != nil {
 			return err
 		}
 		if err := ClearRoleBindingsTx(tx, r.ID); err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "清理用户角色失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to clean user roles")
 		}
 		if err := tx.Where("role_id = ?", r.ID).Delete(&model.RoleMenu{}).Error; err != nil {
-			return errs.Wrap(err, errs.CodeInternal, "删除角色失败")
+			return errs.Wrap(err, errs.CodeInternal, "failed to delete role")
 		}
 		return nil
 	})

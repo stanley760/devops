@@ -6,28 +6,31 @@ import (
 	"strings"
 )
 
-// 存储层 ID 数组的 JSON 编解码。
+// JSON encoding/decoding of storage-layer ID arrays.
 //
-// 这是一个不可变的存储契约（存量数据 + 唯一索引 + SQL 数字匹配口径依赖它）：
+// This is an immutable storage contract (existing data + unique index + SQL numeric matching
+// semantics all depend on it):
 //
-//	合法形态：[4,5]          数字数组
-//	脏数据：  ["4","5"]      字符串元素 → 视为脏数据，整体解析失败返回空集
+//	valid form: [4,5]          numeric array
+//	dirty data:  ["4","5"]     string elements → treated as dirty data; a whole-parse failure returns an empty set
 //
-// 为什么不能直接 marshal []types.ID：types.ID 是 API 契约类型，其 MarshalJSON
-// 输出字符串元素（["4","5"]，前端契约要求 ID 字符串化以避免 JS 2^53 精度丢失）。
-// 若直接复用会把 API 形态泄漏进存储层，与种子数据及
-// JSON_CONTAINS(post_ids, 4) 的数字匹配口径不一致。
+// Why []types.ID cannot be marshaled directly: types.ID is an API contract type whose
+// MarshalJSON emits string elements (["4","5"] — a frontend contract requirement that IDs be
+// stringified to avoid JS 2^53 precision loss). Reusing it directly would leak the API form
+// into the storage layer, inconsistent with the seed data and the numeric matching semantics
+// of JSON_CONTAINS(post_ids, 4).
 //
-// 改造前该逻辑在 dao/user_admin.go:209-241（PostIDsOf / PostIDsJSON），
-// 且因为 dao 反向依赖 internal/types 才不得不手写这套转换。领域层不认识
-// API 契约类型后，编解码自然归位于此。
+// Before the refactor, this logic lived in dao/user_admin.go:209-241 (PostIDsOf / PostIDsJSON),
+// and only because dao had a reverse dependency on internal/types did it have to hand-write
+// this conversion. Once the domain layer no longer knows the API contract type, the
+// encoding/decoding naturally belongs here.
 
-// EncodeIDArray 数字 ID 切片 → 存储 JSON 字符串。空集返回 ""（由仓储决定写 NULL）。
+// EncodeIDArray converts a numeric ID slice to a storage JSON string. An empty set returns "" (the repository decides whether to write NULL).
 func EncodeIDArray(ids []int64) string {
 	if len(ids) == 0 {
 		return ""
 	}
-	// 复制一份并剔除 nil 语义：空切片会被 marshal 成 [] 而非 null。
+	// copy and strip nil semantics: an empty slice marshals to [] rather than null.
 	b, err := json.Marshal(ids)
 	if err != nil {
 		return ""
@@ -35,11 +38,11 @@ func EncodeIDArray(ids []int64) string {
 	return string(b)
 }
 
-// DecodeIDArray 存储 JSON 字符串 → 数字 ID 切片。
+// DecodeIDArray converts a storage JSON string to a numeric ID slice.
 //
-// 容错口径（与既有实现逐字对齐）：
-//   - 空串 → 空切片（非 nil）
-//   - 非法 JSON 或含非数字元素 → 空切片，不做兼容读
+// Tolerance semantics (verbatim aligned with the existing implementation):
+//   - empty string → empty slice (not nil)
+//   - invalid JSON or non-numeric elements → empty slice, with no compatibility read
 func DecodeIDArray(raw string) []int64 {
 	if raw == "" {
 		return []int64{}
@@ -54,8 +57,8 @@ func DecodeIDArray(raw string) []int64 {
 	return ids
 }
 
-// decodeInt64JSONArray 是 DecodeIDArray 的宽松变体：非法输入返回 nil 而非空切片，
-// 用于「自定义数据权限部门集合」这类「非法即视为未配置」的判定场景。
+// decodeInt64JSONArray is a lenient variant of DecodeIDArray: invalid input returns nil rather than an
+// empty slice, for judgment scenarios like "custom data-permission dept sets" where invalid means unconfigured.
 func decodeInt64JSONArray(raw string) []int64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -68,15 +71,16 @@ func decodeInt64JSONArray(raw string) []int64 {
 	return ids
 }
 
-// NormalizeIDArrayJSON 归一化为数字数组形态（落库前统一口径）。
+// NormalizeIDArrayJSON normalizes to the numeric array form (unified semantics before persistence).
 //
-// 改造前该归一化由 devops-infra/datascope.NormalizeDeptIDs 承担角色部门集合，
-// 此处为同构实现，使岗位集合（post_ids）也能复用同一口径。
+// Before the refactor, this normalization was handled by devops-infra/datascope.NormalizeDeptIDs
+// for role dept sets; here it is an isomorphic implementation so post sets (post_ids) can
+// reuse the same semantics.
 func NormalizeIDArrayJSON(raw string) string {
 	return EncodeIDArray(DecodeIDArray(raw))
 }
 
-// IDsFromStrings 从字符串数字列表转 int64 切片（非法项跳过）。
+// IDsFromStrings converts a list of numeric strings to an int64 slice (invalid entries are skipped).
 func IDsFromStrings(raw []string) []int64 {
 	out := make([]int64, 0, len(raw))
 	for _, s := range raw {

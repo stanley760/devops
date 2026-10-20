@@ -8,9 +8,10 @@ import (
 	"math/big"
 )
 
-// JWKSDocument 生成 RFC 7517 JWKS 文档（{"keys":[...]}），
-// 供 Higress jwt-auth 插件（jwks 或 jwksFromUrl）与各服务做 RS256 验签。
-// 仅输出公钥材料（n/e），不暴露私钥。
+// JWKSDocument produces an RFC 7517 JWKS document ({"keys":[...]}) for the
+// Higress jwt-auth plugin (jwks or jwksFromUrl) and for RS256 verification
+// in each service. It emits public key material only (n/e) and never exposes
+// the private key.
 func JWKSDocument(pub *rsa.PublicKey, keyID string) (map[string]any, error) {
 	if pub == nil || pub.N == nil || pub.E <= 0 {
 		return nil, fmt.Errorf("%w: missing public key", ErrInvalidConfig)
@@ -29,7 +30,7 @@ func JWKSDocument(pub *rsa.PublicKey, keyID string) (map[string]any, error) {
 	return map[string]any{"keys": []any{key}}, nil
 }
 
-// JWKS 返回管理器签名密钥对应的 JWKS 文档。
+// JWKS returns the JWKS document for the manager's signing key.
 func (m *Manager) JWKS() (map[string]any, error) {
 	if m == nil || m.privateKey == nil {
 		return nil, ErrInvalidConfig
@@ -38,7 +39,7 @@ func (m *Manager) JWKS() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 确认可序列化，调用方直接交给 HTTP 层。
+	// Confirm the document marshals cleanly; callers hand it straight to the HTTP layer.
 	if _, err := json.Marshal(doc); err != nil {
 		return nil, err
 	}

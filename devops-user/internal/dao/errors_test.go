@@ -8,9 +8,10 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// TestDuplicateField_RealMySQLMessage 用真实 MySQL 报错文本验证索引名解析。
+// TestDuplicateField_RealMySQLMessage verifies index-name parsing against real
+// MySQL error text.
 //
-// 依据实测（devops-user 接入 GORM 时抓到的真实日志）：
+// Based on real logs captured when devops-user integrated GORM:
 //
 //	Error 1062 (23000): Duplicate entry 'shared@example.com' for key 't_user.uk_email'
 func TestDuplicateField_RealMySQLMessage(t *testing.T) {
@@ -22,7 +23,7 @@ func TestDuplicateField_RealMySQLMessage(t *testing.T) {
 		{"email", "Duplicate entry 'shared@example.com' for key 't_user.uk_email'", "uk_email"},
 		{"mobile", "Duplicate entry '13900000001' for key 't_user.uk_mobile'", "uk_mobile"},
 		{"username", "Duplicate entry 'alice' for key 't_user.uk_username'", "uk_username"},
-		{"无表前缀", "Duplicate entry 'x' for key 'uk_email'", "uk_email"},
+		{"no table prefix", "Duplicate entry 'x' for key 'uk_email'", "uk_email"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -37,42 +38,46 @@ func TestDuplicateField_RealMySQLMessage(t *testing.T) {
 	}
 }
 
-// TestDuplicateField_ThroughWrapping 错误经包装后仍能解析出索引名。
+// TestDuplicateField_ThroughWrapping the index name is still parsed after the
+// error is wrapped.
 //
-// GORM 返回的错误可能带上下文，必须保证 errors.As 能穿透。
+// GORM errors may carry context, so errors.As must be able to see through them.
 func TestDuplicateField_ThroughWrapping(t *testing.T) {
 	base := &mysql.MySQLError{Number: errDupEntry, Message: "Duplicate entry 'a@b.com' for key 't_user.uk_email'"}
 
-	if _, index := duplicateField(fmt.Errorf("插入失败: %w", base)); index != "uk_email" {
-		t.Fatalf("fmt.Errorf 包装后 index = %q", index)
+	if _, index := duplicateField(fmt.Errorf("insert failed: %w", base)); index != "uk_email" {
+		t.Fatalf("index after fmt.Errorf wrapping = %q", index)
 	}
-	if _, index := duplicateField(errors.Join(errors.New("外层"), base)); index != "uk_email" {
-		t.Fatalf("errors.Join 后 index = %q", index)
+	if _, index := duplicateField(errors.Join(errors.New("outer"), base)); index != "uk_email" {
+		t.Fatalf("index after errors.Join = %q", index)
 	}
 }
 
-// TestDuplicateField_NotDuplicate 非唯一约束错误不应误判。
+// TestDuplicateField_NotDuplicate non-unique-constraint errors must not be
+// misjudged.
 func TestDuplicateField_NotDuplicate(t *testing.T) {
 	cases := []error{
-		errors.New("普通错误"),
+		errors.New("ordinary error"),
 		&mysql.MySQLError{Number: 1146, Message: "Table 'devops.t_user' doesn't exist"},
 	}
 	for _, err := range cases {
 		if dup, _ := duplicateField(err); dup {
-			t.Fatalf("err=%v 不应判为重复键", err)
+			t.Fatalf("err=%v should not be treated as a duplicate key", err)
 		}
 	}
 }
 
-// TestDuplicateField_UnknownIndex 冲突但解析不出索引名时，dup 为 true、索引为空。
+// TestDuplicateField_UnknownIndex when the conflict is detected but the index
+// name cannot be parsed, dup is true and the index is empty.
 //
-// 此时调用方会走兜底文案（不泄露细节），这是期望行为。
+// In that case the caller falls back to a generic message (without leaking
+// details), which is the expected behavior.
 func TestDuplicateField_UnknownIndex(t *testing.T) {
 	dup, index := duplicateField(&mysql.MySQLError{Number: errDupEntry, Message: "Duplicate entry 'x'"})
 	if !dup {
 		t.Fatal("dup = false, want true")
 	}
 	if index != "" {
-		t.Fatalf("index = %q, want 空串", index)
+		t.Fatalf("index = %q, want empty string", index)
 	}
 }

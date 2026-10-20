@@ -1,5 +1,5 @@
-# Docker 容器环境覆盖（仅 migrate 一次性容器使用）。
-# 业务服务改为本地 go run 启动，加载仓库内 devops-system/config/devops-system-dev.yaml（地址 127.0.0.1）。
+# Docker container environment override (used by the one-shot migrate container only).
+# Business services are started via local go run instead, loading devops-system/config/devops-system-dev.yaml from the repo (address 127.0.0.1).
 log:
   level: debug
   dir: /app/logs
@@ -29,8 +29,8 @@ nacos:
     service_name: "devops-system"
 
 jwt:
-  # RS256 私钥（PKCS#8 PEM）：存量 HS256 token 升级时整体失效，refresh 会话不受影响。
-  # 公钥经 /.well-known/jwks.json 暴露给 Higress（jwt-auth 插件 jwksFromUrl）与服务验签。
+  # RS256 private key (PKCS#8 PEM): existing HS256 tokens become invalid wholesale on upgrade; refresh sessions are unaffected.
+  # The public key is exposed to Higress (jwt-auth plugin jwksFromUrl) and to services via /.well-known/jwks.json.
   signing_key: |
     -----BEGIN PRIVATE KEY-----
     MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDHFfzn5JLlNA4a
@@ -62,20 +62,20 @@ jwt:
     -----END PRIVATE KEY-----
   key_id: devops-system-rs256-1
   issuer: devops
-  access_expire: 2h        # access token 有效期
-  refresh_expire: 168h     # refresh token（会话）有效期
+  access_expire: 2h        # access token validity period
+  refresh_expire: 168h     # refresh token (session) validity period
 
 idclient:
-  endpoint: "nacos:///devops-id"     # 三斜杠标准形式（grpc target 解析：服务名须在 path 位）
+  endpoint: "nacos:///devops-id"     # canonical three-slash form (grpc target parsing: the service name must be in the path position)
 
-# 可观测性：trace 走 OTLP HTTP 发往 compose 内 Jaeger；指标由 Prometheus 抓取 /metrics。
+# Observability: traces go over OTLP HTTP to the Jaeger in compose; metrics are scraped from /metrics by Prometheus.
 observability:
   otlp_endpoint: "http://jaeger:4318"
-  sampler_ratio: 1.0          # dev 全量采样，便于排查
+  sampler_ratio: 1.0          # full sampling in dev for easier troubleshooting
   metrics_enabled: true
 
 apidoc:
-  enabled: true               # dev 开启交互式文档（/apidoc），prod 必须关闭
+  enabled: true               # interactive docs (/apidoc) enabled in dev; must be disabled in prod
   base_path: /apidoc
 
 server:
@@ -83,11 +83,11 @@ server:
     - "172.16.0.0/12"
     - "192.168.0.0/16"
 
-# 流量入口守卫：dev 关闭。
-# 原因：dev 下业务服务以 go run 跑在宿主机（127.0.0.1:9999），本地 curl 直连调试
-# 会被 401，显著拖慢开发。
-# 需要验证守卫行为时改为 require_jwt: true，此时直连必须带有效 Bearer token：
-#   curl -H "Authorization: Bearer $(登录拿到的 access_token)" http://127.0.0.1:9999/system/api/v1/users
-# 经网关访问则由 Higress jwt-auth 插件先行验签，无需本地 token 配置。
+# Traffic-ingress guard: disabled in dev.
+# Reason: in dev the business service runs via go run on the host (127.0.0.1:9999), and local curl
+# debugging would get 401, significantly slowing development.
+# To verify the guard's behavior, change to require_jwt: true; direct connections then must carry a valid Bearer token:
+#   curl -H "Authorization: Bearer $(access_token from login)" http://127.0.0.1:9999/system/api/v1/users
+# Access via the gateway is verified by the Higress jwt-auth plugin first, so no local token config is needed.
 gateway:
   require_jwt: false

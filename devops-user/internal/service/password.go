@@ -6,21 +6,26 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// errPasswordTooLong 口令超过 bcrypt 的 72 字节上限。
+// errPasswordTooLong means the password exceeds bcrypt's 72-byte limit.
 var errPasswordTooLong = errors.New("password too long for bcrypt")
 
-// bcryptCost 口令哈希成本。
+// bcryptCost is the password hash cost.
 //
-// ⚠️ 取值权衡（bcrypt 的 cost 每 +1 计算量翻倍）：
-//   - <10：现代 GPU/ASIC 上抗爆破能力不足，C 端开放注册尤其危险；
-//   - >12：登录接口 P99 显著上升，且登录是高频路径。
+// ⚠️ Value trade-off (bcrypt's compute doubles with every +1 of cost):
+//   - <10: insufficient brute-force resistance on modern GPUs/ASICs,
+//     especially dangerous with open C-side registration;
+//   - >12: login endpoint P99 rises significantly, and login is a
+//     high-frequency path.
 //
-// 10 是当前权衡值。若 C 端有明确的登录失败限流与账号级锁定策略，可上调到 12。
+// 10 is the current trade-off. If the C side has explicit login failure rate
+// limiting and account-level lockout, it can be raised to 12.
 const bcryptCost = bcrypt.DefaultCost
 
-// hashPassword 口令哈希（bcrypt，盐由 bcrypt 内部生成并编入结果）。
+// hashPassword hashes the password (bcrypt; the salt is generated internally
+// by bcrypt and encoded in the result).
 func hashPassword(plain string) (string, error) {
-	// bcrypt 只取前 72 字节，超长口令会被静默截断——先显式拒绝更安全。
+	// bcrypt only takes the first 72 bytes, and over-long passwords are
+	// silently truncated — rejecting explicitly is safer.
 	if len(plain) > 72 {
 		return "", errPasswordTooLong
 	}
@@ -31,9 +36,10 @@ func hashPassword(plain string) (string, error) {
 	return string(h), nil
 }
 
-// checkPassword 校验口令。
+// checkPassword verifies the password.
 //
-// 用 bcrypt 的 CompareHashAndPassword（内部常数时间比较），不自行比对哈希串。
+// Uses bcrypt's CompareHashAndPassword (constant-time comparison internally),
+// rather than comparing hash strings manually.
 func checkPassword(plain, hashed string) bool {
 	if len(plain) > 72 {
 		return false

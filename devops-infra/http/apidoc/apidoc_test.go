@@ -17,21 +17,21 @@ func newEngine() *gin.Engine {
 	return gin.New()
 }
 
-// pingOutput ping 输出。
+// pingOutput is the ping output.
 type pingOutput struct {
 	Body struct {
-		Pong bool `json:"pong" doc:"是否存活"`
+		Pong bool `json:"pong" doc:"whether the service is alive"`
 	}
 }
 
-// registerPing 在文档上注册一个最小操作，用于验证业务注册可见。
+// registerPing registers a minimal operation on the docs to verify business registration is visible.
 func registerPing(t *testing.T, api huma.API) {
 	t.Helper()
 	huma.Register(api, huma.Operation{
 		OperationID: "ping",
 		Method:      http.MethodGet,
 		Path:        "/ping",
-		Summary:     "健康探测",
+		Summary:     "health probe",
 		Tags:        []string{"test"},
 	}, func(ctx context.Context, _ *pingInput) (*pingOutput, error) {
 		out := &pingOutput{}
@@ -40,7 +40,7 @@ func registerPing(t *testing.T, api huma.API) {
 	})
 }
 
-// pingInput ping 输入（无参数）。
+// pingInput is the ping input (no parameters).
 type pingInput struct{}
 
 func TestNew_DefaultPaths(t *testing.T) {
@@ -48,33 +48,33 @@ func TestNew_DefaultPaths(t *testing.T) {
 	api := apidoc.New(r, apidoc.Options{Title: "test API", Version: "v1", Enabled: true})
 	registerPing(t, api)
 
-	// 文档 UI 可达
+	// docs UI is reachable
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/apidoc", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("docs UI: got %d, want 200", w.Code)
 	}
 
-	// openapi.json 可达
+	// openapi.json is reachable
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/apidoc/openapi.json", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("openapi.json: got %d, want 200", w.Code)
 	}
 
-	// 业务注册的操作出现在 OpenAPI 文档中
+	// the registered business operation appears in the OpenAPI document
 	var doc map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
-		t.Fatalf("openapi.json 不是合法 JSON: %v", err)
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
 	}
 	paths, _ := doc["paths"].(map[string]any)
 	if _, ok := paths["/ping"]; !ok {
-		t.Fatalf("openapi.json 缺少已注册操作 /ping，paths=%v", paths)
+		t.Fatalf("openapi.json is missing the registered operation /ping, paths=%v", paths)
 	}
-	// 标题与版本
+	// title and version
 	info, _ := doc["info"].(map[string]any)
 	if info["title"] != "test API" || info["version"] != "v1" {
-		t.Fatalf("info 不符: %v", info)
+		t.Fatalf("info mismatch: %v", info)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestNew_DocJSONAlias(t *testing.T) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
-		t.Fatalf("doc.json 不是合法 JSON: %v", err)
+		t.Fatalf("doc.json is not valid JSON: %v", err)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestNew_BasePathServer(t *testing.T) {
 		t.Fatalf("openapi.json: got %d, want 200", w.Code)
 	}
 	if !strings.Contains(w.Body.String(), "https://ops.example.com") {
-		t.Fatalf("openapi.json servers 未包含 BasePath: %s", w.Body.String())
+		t.Fatalf("openapi.json servers does not contain BasePath: %s", w.Body.String())
 	}
 }
 
@@ -131,7 +131,7 @@ func TestNew_BasePathLegacyServerAlias(t *testing.T) {
 		t.Fatalf("openapi.json: got %d, want 200", w.Code)
 	}
 	if !strings.Contains(w.Body.String(), "https://legacy.example.com") {
-		t.Fatalf("openapi.json servers 未包含兼容 BasePath: %s", w.Body.String())
+		t.Fatalf("openapi.json servers does not contain the compatibility BasePath: %s", w.Body.String())
 	}
 }
 
@@ -150,10 +150,10 @@ func TestNew_BearerAuth(t *testing.T) {
 	}
 	body := w.Body.String()
 	if !strings.Contains(body, "bearerAuth") {
-		t.Fatalf("openapi.json 未声明 bearerAuth 安全方案")
+		t.Fatalf("openapi.json does not declare the bearerAuth security scheme")
 	}
 	if !strings.Contains(body, `"bearerFormat":"JWT"`) && !strings.Contains(body, `"bearerFormat": "JWT"`) {
-		t.Fatalf("openapi.json 未声明 JWT bearerFormat")
+		t.Fatalf("openapi.json does not declare the JWT bearerFormat")
 	}
 }
 
@@ -168,11 +168,12 @@ func TestMount_Deprecated(t *testing.T) {
 	}
 }
 
-// TestNew_Disabled 文档门控（D5）：Enabled=false 时文档端点与 /schemas 全部 404，
-// 但 huma 路由注册照常、OpenAPI 仍可程序化导出（路由注册不再受 Enabled 影响）。
+// TestNew_Disabled docs gating (D5): when Enabled=false the docs endpoints and /schemas
+// all return 404, while huma route registration still works and the OpenAPI can still be
+// exported programmatically (route registration is no longer affected by Enabled).
 func TestNew_Disabled(t *testing.T) {
 	r := newEngine()
-	api := apidoc.New(r, apidoc.Options{}) // Enabled 零值 false
+	api := apidoc.New(r, apidoc.Options{}) // Enabled zero value is false
 	registerPing(t, api)
 
 	for _, path := range []string{"/apidoc", "/apidoc/openapi.json", "/apidoc/doc.json", "/schemas/Ping"} {
@@ -183,24 +184,24 @@ func TestNew_Disabled(t *testing.T) {
 		}
 	}
 
-	// 业务路由仍可经 huma 注册并正常响应
+	// business routes can still be registered via huma and respond normally
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ping", nil))
 	if w.Code != http.StatusOK {
-		t.Fatalf("/ping: got %d, want 200（Enabled=false 不应影响路由注册）", w.Code)
+		t.Fatalf("/ping: got %d, want 200 (Enabled=false must not affect route registration)", w.Code)
 	}
 
-	// 程序化导出仍完整
+	// the programmatic export remains complete
 	paths := api.OpenAPI().Paths
 	if _, ok := paths["/ping"]; !ok {
-		t.Fatalf("程序化导出缺少 /ping，paths=%v", paths)
+		t.Fatalf("the programmatic export is missing /ping, paths=%v", paths)
 	}
 }
 
 func TestDefaults_Fill(t *testing.T) {
 	got := apidoc.Options{}.Defaults()
 	if got.Title != "API" || got.Version != "v1" || got.DocsPath != "/apidoc" {
-		t.Fatalf("Defaults 填充不符: %+v", got)
+		t.Fatalf("Defaults fill mismatch: %+v", got)
 	}
 }
 
@@ -227,13 +228,13 @@ func TestNewTenantHeader(t *testing.T) {
 		} `json:"components"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
-		t.Fatalf("openapi.json 不是合法 JSON: %v", err)
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
 	}
 	scheme, ok := doc.Components.SecuritySchemes["tenantId"]
 	if !ok {
-		t.Fatalf("openapi.json 缺少 tenantId 安全方案: %+v", doc.Components.SecuritySchemes)
+		t.Fatalf("openapi.json is missing the tenantId security scheme: %+v", doc.Components.SecuritySchemes)
 	}
 	if scheme.Type != "apiKey" || scheme.Name != "X-Tenant-ID" || scheme.In != "header" {
-		t.Fatalf("tenantId 安全方案不符: %+v", scheme)
+		t.Fatalf("tenantId security scheme mismatch: %+v", scheme)
 	}
 }

@@ -5,55 +5,62 @@ import (
 	"time"
 )
 
-// Event 领域事件。
+// Event is a domain event.
 //
-// 用途：把「聚合状态已变更」与「外部系统投影需同步」解耦。
+// Purpose: decouple "aggregate state has changed" from "external system projections need syncing".
 //
-// 改造前的痛点：casbin 策略同步是 service 里的同步调用，写失败时只能返回
-// "用户已创建，但角色授权写入失败，请重试更新" 这类补偿式错误——业务行已提交、
-// 授权未生效，客户端无法判断该重试还是该人工介入（3 处：user.Create /
-// user.Update / role.AssignMenus，另加 tenant 的手工 HardDeleteTenant 补偿）。
+// Pain point before the refactor: casbin policy sync was a synchronous call in the service;
+// on write failure it could only return a compensating error like "user created, but role
+// authorization write failed, please retry the update" — the business row was already
+// committed but the authorization was not in effect, so the client could not tell whether to
+// retry or intervene manually (3 places: user.Create / user.Update / role.AssignMenus, plus
+// tenant's manual HardDeleteTenant compensation).
 //
-// 改造后：聚合在事务内记录事件，仓储随业务写同事务落库，投影视图由
-// 投影器消费。授权同步失败不再污染主流程响应，且因为事件已持久化，
-// 失败可重试而不会丢——这正是 CQRS 中「写模型 / 读模型分离」的价值。
+// After the refactor: the aggregate records events within the transaction, the repository
+// persists them in the same transaction as the business write, and projection views are
+// consumed by the projector. Authorization sync failures no longer pollute the main-flow
+// response, and because events are persisted, failures can be retried without loss — this is
+// exactly the value of the "write model / read model separation" in CQRS.
 type Event interface {
-	// EventName 事件名（用作持久化与投影路由的键）。
+	// EventName is the event name (used as the key for persistence and projection routing).
 	EventName() string
-	// OccurredAt 事件发生时间。
+	// OccurredAt is the event occurrence time.
 	OccurredAt() time.Time
 }
 
-// BaseEvent 事件基类型，嵌入后自动实现 Event 接口的 OccurredAt。
+// BaseEvent is the event base type; embedding it automatically implements Event's OccurredAt.
 type BaseEvent struct {
 	Time time.Time
 }
 
-// OccurredAt 实现 Event。
+// OccurredAt implements Event.
 func (e BaseEvent) OccurredAt() time.Time { return e.Time }
 
-// EventStore 事件存储端口（写侧）。
+// EventStore is the event storage port (write side).
 //
-// 事件与业务数据在同一事务内写入，保证「状态变更」与「待同步事实」原子落库。
-// 实现见 infrastructure/persistence/gorm_store。
+// Events and business data are written in the same transaction, guaranteeing that "state change"
+// and "pending sync facts" are persisted atomically.
+// Implementation: infrastructure/persistence/gorm_store.
 type EventStore interface {
-	// Append 在当前事务上下文中追加事件。
+	// Append appends events in the current transaction context.
 	Append(ctx context.Context, events ...Event) error
 }
 
-// EventPublisher 事件分发端口（基础设施侧实现）。
+// EventPublisher is the event dispatch port (implemented on the infrastructure side).
 type EventPublisher interface {
-	// Publish 分发事件给所有匹配的投影处理器。
+	// Publish dispatches events to all matching projection handlers.
 	Publish(ctx context.Context, events ...Event) error
 }
 
-// EventProjector 投影器：订阅某类事件，把写模型变更投影到外部读模型（casbin）。
+// EventProjector is the projector: subscribes to a class of events and projects write-model
+// changes onto an external read model (casbin).
 //
-// 幂等性要求：投影器可能被重复调用（失败重试），故每个 Handle 实现
-// 必须幂等——对 casbin 而言，RebuildXxx 系列函数本身即幂等（先清后建）。
+// Idempotency requirement: projectors may be invoked repeatedly (retry on failure), so every
+// Handle implementation must be idempotent — for casbin, the RebuildXxx family of functions
+// is itself idempotent (clear first, then rebuild).
 type EventProjector interface {
-	// Handles 返回本投影器关心的事件名。
+	// Handles returns the event names this projector cares about.
 	Handles() []string
-	// Handle 处理单个事件。返回错误由分发器按策略重试，不影响主流程响应。
+	// Handle processes a single event. Returned errors are retried by the dispatcher per policy, without affecting the main-flow response.
 	Handle(ctx context.Context, e Event) error
 }

@@ -1,10 +1,10 @@
-# devops-id 容器环境覆盖：挂载为镜像内 /app/config/devops-id-prod.yaml，APP_ENV=prod 生效。
-# 地址为 docker-compose 服务名（同一网络内的服务发现）；
-# K8s 部署时换成对应 Service 名或外部托管服务地址。
+# devops-id container environment override: mounted as /app/config/devops-id-prod.yaml inside the image, effective with APP_ENV=prod.
+# Addresses are docker-compose service names (service discovery within the same network);
+# for K8s deployment, replace them with the corresponding Service names or externally managed service addresses.
 log:
   level: info
   dir: /app/logs
-  console: true       # 容器标准：日志走 stdout，由 docker/k8s 日志驱动收集
+  console: true       # container standard: logs go to stdout, collected by docker/k8s log drivers
   format: json
 
 nacos:
@@ -20,12 +20,12 @@ idgen:
   leaf_name: devops-id
   worker_cache: data
 
-etcd:                 # snowflake worker 协调
+etcd:                 # snowflake worker coordination
   endpoints:
     - "etcd:2379"
 
-# 生产观测口径：采样 0.1 起步；metrics 走独立 HTTP 端口，仅内网抓取。
-# otlp_endpoint 留空 = 本地 span 不上报；接入 Jaeger/Tempo/otel-collector 后填写其 OTLP HTTP 地址。
+# Production observability settings: sampling starts at 0.1; metrics go over a dedicated HTTP port, scraped only on the intranet.
+# An empty otlp_endpoint means local spans are not reported; fill in its OTLP HTTP address after wiring up Jaeger/Tempo/otel-collector.
 observability:
   otlp_endpoint: ""
   sampler_ratio: 0.1

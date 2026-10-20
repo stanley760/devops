@@ -7,19 +7,21 @@ metadata:
     higress.io/canary: "true"
     higress.io/canary-weight: "10"
     higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos
-    # 流量入口身份由 jwt-auth 插件注入的 JWT claims 表达，无需静态身份头注解。
+    # Traffic-ingress identity is expressed by the JWT claims injected by the jwt-auth plugin; no static identity header annotation needed.
     #
-    # 注：jwt-auth 的 matchRules 按 Ingress 资源挂载，canary 路由由 Higress 合并进
-    # 主路由 devops-system，故主路由命中规则即覆盖灰度流量，无需在此重复配置插件。
+    # Note: jwt-auth's matchRules mount per Ingress resource; the canary route is merged into
+    # the main route devops-system by Higress, so the main route's matching rules already cover
+    # gray traffic — no need to repeat the plugin config here.
 spec:
   ingressClassName: higress
   rules:
     - host: api.devops.local
       http:
         paths:
-          # 与 devops-system.yaml 同口径：仅业务 API 与 JWKS，运维端点不经公网网关暴露。
-          # ⚠️ 此前误写为 /api，但后端 huma 路由挂在 /system 前缀下（systemAPIPrefix），
-          # 该前缀匹配到的请求全被后端 404，canary 10% 权重分流实际从未生效。
+          # Same scope as devops-system.yaml: business API and JWKS only; ops endpoints are not exposed via the public gateway.
+          # ⚠️ This was previously miswritten as /api, but the backend huma routes hang under the /system
+          # prefix (systemAPIPrefix) — requests matching that prefix were all 404'd by the backend,
+          # so the canary 10% weight split never actually took effect.
           - path: /system
             pathType: Prefix
             backend:
