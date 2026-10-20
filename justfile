@@ -22,7 +22,7 @@ dev_compose := "docker compose -f deploy/docker-compose-dev.yml"
 # go.work 是多模块工作区，`go build ./...` 在根目录会报
 # "directory prefix . does not contain modules listed in go.work"，
 # 必须逐个模块指定。
-modules := "devops-common devops-id devops-infra devops-system"
+modules := "devops-common devops-id devops-infra devops-system devops-user"
 
 # 列出全部可用命令
 default:
@@ -126,8 +126,19 @@ test-domain:
     {{go}} test ./devops-system/internal/domain/... ./devops-system/internal/application/... ./devops-system/internal/arch/...
 
 # 格式化（gofmt）
+#
+# 不能写成 `{{go}} fmt ./devops-system/... ...`：go fmt 不启用 workspace 模式
+# （cmd/go 的 fmtcmd 未调用 modload InitWorkfile，见 golang/go 源码
+# internal/fmtcmd/fmt.go），在工作区根目录下会把所有模块前缀判为
+# "does not contain main module or its selected dependencies"。
+# 因此逐模块进入目录后执行，go fmt 本身在该模块内工作正常。
 fmt:
-    {{go}} fmt ./devops-system/... ./devops-common/... ./devops-infra/... ./devops-id/...
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for m in {{modules}}; do
+        echo "==> 格式化 $m"
+        (cd "$m" && {{go}} fmt ./...)
+    done
 
 # 编译 + vet + 测试：提交前跑这个
 check: build-local vet test

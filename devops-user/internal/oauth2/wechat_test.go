@@ -83,11 +83,11 @@ func TestWeChatEnabled(t *testing.T) {
 		t.Error("三项齐备时应 Enabled")
 	}
 	for name, cfg := range map[string]Config{
-		"缺 client_id":       {ClientSecret: "b", RedirectURL: "c"},
-		"缺 client_secret":   {ClientID: "a", RedirectURL: "c"},
-		"缺 redirect_url":    {ClientID: "a", ClientSecret: "b"},
+		"缺 client_id":     {ClientSecret: "b", RedirectURL: "c"},
+		"缺 client_secret": {ClientID: "a", RedirectURL: "c"},
+		"缺 redirect_url":  {ClientID: "a", ClientSecret: "b"},
 		"全部为空":            {},
-		"微信不支持自定义scope": {ClientID: "a", ClientSecret: "b", RedirectURL: "c", Scopes: []string{"snsapi_userinfo"}},
+		"微信不支持自定义scope":   {ClientID: "a", ClientSecret: "b", RedirectURL: "c", Scopes: []string{"snsapi_userinfo"}},
 	} {
 		if NewWeChatProvider(cfg).Enabled() != (name == "微信不支持自定义scope") {
 			t.Errorf("%s: Enabled 结果不符预期", name)
@@ -234,7 +234,7 @@ func TestWeChatExchange_EmptyAccessToken(t *testing.T) {
 func TestNormalizeAvatar(t *testing.T) {
 	p := NewWeChatProvider(Config{})
 	cases := map[string]string{
-		"":                              "",
+		"":                               "",
 		"https://thirdwx.qlogo.cn/a/96":  "https://thirdwx.qlogo.cn/a/0",
 		"https://thirdwx.qlogo.cn/a/0":   "https://thirdwx.qlogo.cn/a/0",
 		"https://thirdwx.qlogo.cn/a/46":  "https://thirdwx.qlogo.cn/a/0",

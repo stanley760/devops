@@ -78,11 +78,11 @@ func TestGORSinkWritesRecord(t *testing.T) {
 	sink := NewGORSink(GORSinkConfig[*row]{Executor: gormExecutor{db}, Convert: convert})
 
 	sink.Emit(t.Context(), audit.Record{
-		Module:   "system",
+		Module:    "system",
 		SubModule: "user",
-		Username: "alice",
-		UserIP:   "10.0.0.1",
-		Result:   audit.ResultSuccess,
+		Username:  "alice",
+		UserIP:    "10.0.0.1",
+		Result:    audit.ResultSuccess,
 	})
 
 	var got row
@@ -103,7 +103,7 @@ func TestGORSinkClipsBeforeHittingDatabase(t *testing.T) {
 	spy := &capturingExecutor{inner: gormExecutor{db}}
 	sink := NewGORSink(GORSinkConfig[*row]{Executor: spy, Convert: convert})
 
-// 超长输入必须超过所有列宽上限（MaxIP=50 / MaxModule=50 /
+	// 超长输入必须超过所有列宽上限（MaxIP=50 / MaxModule=50 /
 	// MaxUsername=30 / MaxUserAgent=512 / MaxTraceID=100），否则"不截断"才是正确行为。
 	long := strings.Repeat("超长内容", 200) // 800 字符
 	sink.Emit(t.Context(), audit.Record{

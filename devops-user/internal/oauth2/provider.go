@@ -256,7 +256,7 @@ func (p *GoogleProvider) verifyIDToken(ctx context.Context, accessToken string) 
 //
 // 文档：https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Wechat_Login.html
 //
-//## 与 GitHub / Google 的四点关键差异（照抄标准库必踩）
+// ## 与 GitHub / Google 的四点关键差异（照抄标准库必踩）
 //
 //  1. **授权端点不是标准 OAuth2 端点**：是 `open.weixin.qq.com/connect/qrconnect`，
 //     且 URL 末尾必须带 `#wechat_redirect` fragment——**没有它微信直接报「链接无法访问」**。
@@ -386,6 +386,7 @@ func (p *WeChatProvider) Exchange(ctx context.Context, code string) (*UserInfo, 
 // fetchToken 用 code 换 access_token。
 //
 // 接口：GET /sns/oauth2/access_token
+//
 //	?appid=&secret=&code=&grant_type=authorization_code
 func (p *WeChatProvider) fetchToken(ctx context.Context, code string) (*wechatTokenResp, error) {
 	q := url.Values{}

@@ -1,5 +1,4 @@
 // Package gateway 提供「流量必须经由网关进入」的应用层强制守卫。
-//
 package gateway
 
 import (

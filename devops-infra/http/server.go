@@ -12,8 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/stanley760/devops/devops-infra/config"
 	commonResp "github.com/stanley760/devops/devops-common/response"
+	"github.com/stanley760/devops/devops-infra/config"
 	"github.com/stanley760/devops/devops-infra/errs"
 	"github.com/stanley760/devops/devops-infra/http/middleware"
 	"github.com/stanley760/devops/devops-infra/http/response"
@@ -28,7 +28,7 @@ type ReadinessCheck struct {
 }
 
 func Run(cfg config.ServerConfig, register Register, readiness ...ReadinessCheck) error {
-	return RunWithOptions(cfg, register, nil,nil, readiness...)
+	return RunWithOptions(cfg, register, nil, nil, readiness...)
 }
 
 // GuardHooks 业务侧注入的全局中间件，在运维端点挂载之后、业务路由之前生效。

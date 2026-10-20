@@ -52,7 +52,7 @@ func TestReadyZReportsCheckStatus(t *testing.T) {
 
 func TestRouterDoesNotHandleCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router, err := newRouter(config.ServerConfig{}, nil, nil,nil,nil)
+	router, err := newRouter(config.ServerConfig{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

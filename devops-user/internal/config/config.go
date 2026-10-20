@@ -59,9 +59,9 @@ type OAuthConfig struct {
 
 // ProviderConfig 单个三方提供方配置。
 type ProviderConfig struct {
-	ClientID     string   `mapstructure:"client_id"`
-	ClientSecret string   `mapstructure:"client_secret"`
-	RedirectURL  string   `mapstructure:"redirect_url"`
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURL  string `mapstructure:"redirect_url"`
 	// Scopes 申请的权限范围。
 	//
 	// ⚠️ **微信忽略此项**：网站应用只允许 `snsapi_login`，配别的值也会被

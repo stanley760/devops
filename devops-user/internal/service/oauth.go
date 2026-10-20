@@ -401,4 +401,3 @@ func sanitizeUsername(s string) string {
 	}
 	return res
 }
-
