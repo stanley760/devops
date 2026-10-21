@@ -215,3 +215,108 @@ func TestEmbeddedSQLWellFormed(t *testing.T) {
 		}
 	}
 }
+
+// TestCaptchaSeedContract pins the captcha configuration contract between the seeds and the code
+// that reads them (internal/service/captcha.go):
+//   - the sys.captcha.type configuration value must be one of the sys_captcha_type dictionary values,
+//     otherwise the service would silently fall back to its default on every login;
+//   - the dictionary must offer exactly the three types the captcha package supports.
+//
+// This is a text-level check on the seed files (no DB): the seeds are the contract, and a mismatch
+// would otherwise only show up as "the console shows a type but login always uses click".
+func TestCaptchaSeedContract(t *testing.T) {
+	const dictType = "sys_captcha_type"
+
+	dictTypeSQL := readScript(t, "sql/datas/t_system_dict_type.sql")
+	if !strings.Contains(dictTypeSQL, "'"+dictType+"'") {
+		t.Fatalf("dictionary type %s is not seeded in sql/datas/t_system_dict_type.sql", dictType)
+	}
+
+	dictDataSQL := readScript(t, "sql/datas/t_system_dict_data.sql")
+	// The value column is the 5th tuple element of each dict_data row: (id, tenant_id, creator,
+	// create_time, updater, update_time, dict_type, label, value, ...).
+	seeded := make(map[string]bool)
+	for _, line := range strings.Split(dictDataSQL, "\n") {
+		if !strings.Contains(line, "'"+dictType+"'") {
+			continue
+		}
+		fields := splitTupleFields(line)
+		if len(fields) < 9 {
+			t.Fatalf("malformed dict_data row for %s: %s", dictType, line)
+		}
+		seeded[strings.Trim(fields[8], "'")] = true
+	}
+	for _, want := range []string{"click", "slide", "dragdrop", "rotate"} {
+		if !seeded[want] {
+			t.Errorf("dictionary %s does not offer the %q type", dictType, want)
+		}
+	}
+
+	configSQL := readScript(t, "sql/datas/t_system_config.sql")
+	// Find the sys.captcha.type row and check its value is in the dictionary value set.
+	value := configValueOf(configSQL, "sys.captcha.type")
+	if value == "" {
+		t.Fatal("configuration sys.captcha.type is not seeded")
+	}
+	if !seeded[value] {
+		t.Errorf("sys.captcha.type is seeded as %q, which is not a %s dictionary value", value, dictType)
+	}
+	if !strings.Contains(configSQL, "'sys.captcha.enabled'") {
+		t.Error("configuration sys.captcha.enabled is not seeded")
+	}
+}
+
+// readScript reads one embedded script file (fails the test when unreadable).
+func readScript(t *testing.T, path string) string {
+	t.Helper()
+	b, err := scriptFS.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	return string(b)
+}
+
+// configValueOf returns the config_value of the row whose config_key is key, or "" when absent.
+func configValueOf(sql, key string) string {
+	for _, line := range strings.Split(sql, "\n") {
+		if !strings.Contains(line, "'"+key+"'") {
+			continue
+		}
+		fields := splitTupleFields(line)
+		// (id, tenant_id, creator, create_time, updater, update_time, config_key, config_name, config_value, ...)
+		if len(fields) < 9 {
+			return ""
+		}
+		return strings.Trim(fields[8], "'")
+	}
+	return ""
+}
+
+// splitTupleFields splits the comma-separated fields of a single VALUES tuple, respecting the
+// single-quoted literals (a remark may itself contain a comma).
+func splitTupleFields(line string) []string {
+	open := strings.Index(line, "(")
+	closeIdx := strings.LastIndex(line, ")")
+	if open < 0 || closeIdx <= open {
+		return nil
+	}
+	var (
+		out     []string
+		cur     strings.Builder
+		inQuote bool
+	)
+	for _, r := range line[open+1 : closeIdx] {
+		switch {
+		case r == '\'':
+			inQuote = !inQuote
+			cur.WriteRune(r)
+		case r == ',' && !inQuote:
+			out = append(out, strings.TrimSpace(cur.String()))
+			cur.Reset()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	out = append(out, strings.TrimSpace(cur.String()))
+	return out
+}

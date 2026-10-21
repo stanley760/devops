@@ -46,11 +46,21 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 	}
 
 	huma.Register(api, with(common, huma.Operation{
+		OperationID: "user-captcha",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/auth/captcha",
+		Summary:     "Captcha",
+		Description: "Issue a captcha challenge (click / slide / rotate) of the type selected in the console. Must be called before login / register.",
+		Security:    []map[string][]string{}, // public endpoint: the caller has no token yet
+		Middlewares: ipMw,
+	}), h.Captcha)
+
+	huma.Register(api, with(common, huma.Operation{
 		OperationID: "user-register",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/register",
 		Summary:     "Register",
-		Description: "Create a C-side account and issue an access + refresh token.",
+		Description: "Create a C-side account and issue an access + refresh token. Requires a solved captcha.",
 		Security:    []map[string][]string{}, // public endpoint overrides the global security requirement
 		Middlewares: ipMw,
 	}), h.Register)
@@ -60,7 +70,7 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/login",
 		Summary:     "Log in",
-		Description: "Issue an access + refresh token after verifying the account password. Consecutive failures trigger rate limiting and account lockout.",
+		Description: "Issue an access + refresh token after verifying the captcha and the account password. Consecutive failures trigger rate limiting and account lockout.",
 		Security:    []map[string][]string{},
 		Middlewares: ipMw,
 	}), h.Login)

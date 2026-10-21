@@ -35,8 +35,8 @@ type Modules struct {
 	Configs       ConfigRoutes
 }
 
-func NewAuthRoutes(svc *service.Auth, kit *middleware.Kit) AuthRoutes {
-	h := apiv1.NewAuthHandler(svc)
+func NewAuthRoutes(svc *service.Auth, captchaSvc *service.Captcha, kit *middleware.Kit) AuthRoutes {
+	h := apiv1.NewAuthHandler(svc, captchaSvc)
 	return func(api huma.API) { registerAuth(api, h, kit) }
 }
 

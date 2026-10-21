@@ -5,9 +5,10 @@ import "time"
 
 // LoginReq is the login input. An empty tenant_code falls back to tenant.default_code.
 type LoginReq struct {
-	TenantCode string `json:"tenant_code,omitempty" binding:"omitempty,max=30" maxLength:"30" doc:"tenant code"`
-	Username   string `json:"username" binding:"required,min=2,max=30" minLength:"2" maxLength:"30" doc:"username"`
-	Password   string `json:"password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"password"`
+	TenantCode string        `json:"tenant_code,omitempty" binding:"omitempty,max=30" maxLength:"30" doc:"tenant code"`
+	Username   string        `json:"username" binding:"required,min=2,max=30" minLength:"2" maxLength:"30" doc:"username"`
+	Password   string        `json:"password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"password"`
+	Captcha    CaptchaSubmit `json:"captcha,omitempty" doc:"captcha verification data (required when captcha verification is enabled)"`
 }
 
 // TenantBrief is the tenant summary.

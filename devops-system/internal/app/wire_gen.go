@@ -7,6 +7,7 @@
 package app
 
 import (
+	"github.com/redis/go-redis/v9"
 	"github.com/stanley760/devops/devops-infra/http"
 	"github.com/stanley760/devops/devops-system/internal/auth"
 	"github.com/stanley760/devops/devops-system/internal/config"
@@ -21,10 +22,11 @@ import (
 // Regenerate the injector with: go generate -tags=wireinject ./internal/app
 //
 //go:generate go run github.com/google/wire/cmd/wire
-func InitializeHTTP(cfg config.Config, kit *middleware.Kit, authM *auth.Manager) http.Register {
+func InitializeHTTP(cfg config.Config, kit *middleware.Kit, authM *auth.Manager, rdb *redis.Client) http.Register {
 	apiDocConfig := cfg.APIDoc
-	serviceAuth := service.NewAuth(cfg, authM)
-	authRoutes := router.NewAuthRoutes(serviceAuth, kit)
+	captcha := newCaptchaService(rdb, cfg)
+	serviceAuth := service.NewAuth(cfg, authM, captcha)
+	authRoutes := router.NewAuthRoutes(serviceAuth, captcha, kit)
 	user := newUserService(authM, kit)
 	userRoutes := router.NewUserRoutes(user, kit)
 	role := newRoleService(kit)

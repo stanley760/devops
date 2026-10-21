@@ -17,12 +17,13 @@ import (
 
 // AuthHandler serves the authentication endpoints.
 type AuthHandler struct {
-	svc *service.Auth
+	svc     *service.Auth
+	captcha *service.Captcha
 }
 
 // NewAuthHandler creates the handler.
-func NewAuthHandler(svc *service.Auth) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *service.Auth, captchaSvc *service.Captcha) *AuthHandler {
+	return &AuthHandler{svc: svc, captcha: captchaSvc}
 }
 
 // ---- Input / Output (the structs are the OpenAPI schema) ----
@@ -35,6 +36,32 @@ type LoginInput struct {
 // LoginOutput is the login response envelope.
 type LoginOutput struct {
 	Body commonResp.BaseResponse[types.LoginResp]
+}
+
+// CaptchaInput is GET /system/api/v1/auth/captcha.
+//
+// tenant_code mirrors the login input: omitting it falls back to tenant.default_code, so the
+// frontend can fetch a captcha before it knows (or cares about) the tenant.
+type CaptchaInput struct {
+	TenantCode string `query:"tenant_code" maxLength:"30" doc:"tenant code; omitting it falls back to tenant.default_code"`
+}
+
+// CaptchaOutput is the GET /system/api/v1/auth/captcha response envelope.
+type CaptchaOutput struct {
+	Body commonResp.BaseResponse[types.CaptchaResp]
+}
+
+// Captcha handles GET /system/api/v1/auth/captcha: issues a captcha challenge of the type currently
+// selected in the console (t_system_config + sys_captcha_type dictionary).
+func (h *AuthHandler) Captcha(ctx context.Context, in *CaptchaInput) (*CaptchaOutput, error) {
+	if h.captcha == nil {
+		return nil, errs.New(errs.CodeInternal, "captcha service is not configured")
+	}
+	resp, err := h.captcha.Generate(ctx, in.TenantCode)
+	if err != nil {
+		return nil, errs.ToHumaError(err)
+	}
+	return &CaptchaOutput{Body: response.OKBody(*resp)}, nil
 }
 
 // RefreshInput is POST /system/api/v1/auth/refresh.

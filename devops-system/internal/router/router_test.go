@@ -13,6 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/stanley760/devops/devops-infra/captcha"
 	httpinfra "github.com/stanley760/devops/devops-infra/http"
 	securityjwt "github.com/stanley760/devops/devops-infra/security/jwt"
 	securitysession "github.com/stanley760/devops/devops-infra/security/session"
@@ -36,9 +37,12 @@ func newTestKit(m *auth.Manager) *middleware.Kit {
 	return middleware.NewKit(m, middleware.Deps{})
 }
 
-func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *auth.Manager, svcCfg config.Config) httpinfra.Register {
+func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *auth.Manager, svcCfg config.Config, rdb *goredis.Client) httpinfra.Register {
+	// The captcha store runs against miniredis in the test env (same client as the session store),
+	// so the captcha endpoints are wired exactly as in production.
+	captchaSvc := service.NewCaptcha(captcha.NewRedisStore(rdb, "captcha"), svcCfg.Tenant.DefaultCode)
 	modules := Modules{
-		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM), kit),
+		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM, captchaSvc), captchaSvc, kit),
 		Users:         NewUserRoutes(service.NewUser(authM, func() {}), kit),
 		Roles:         NewRoleRoutes(service.NewRole(func() {}), kit),
 		Menus:         NewMenuRoutes(service.NewMenu(), kit),
@@ -93,7 +97,7 @@ func jwksEnv(t *testing.T) (*auth.Manager, *rsa.PublicKey, *gin.Engine) {
 	m := auth.New(cfg, tokens, securitysession.NewRedisClientStore(client, cfg.RefreshExpire))
 
 	svcCfg := config.Config{}
-	reg := newTestRegister(config.APIDocConfig{Enabled: true, BasePath: "/apidoc"}, newTestKit(m), m, svcCfg)
+	reg := newTestRegister(config.APIDocConfig{Enabled: true, BasePath: "/apidoc"}, newTestKit(m), m, svcCfg, client)
 	r := gin.New()
 	reg(r)
 	return m, pub, r
@@ -278,7 +282,7 @@ func TestRegisterAPIDocDisabled(t *testing.T) {
 	svcCfg := config.Config{}
 
 	r := gin.New()
-	newTestRegister(config.APIDocConfig{}, newTestKit(authMgr), authMgr, svcCfg)(r)
+	newTestRegister(config.APIDocConfig{}, newTestKit(authMgr), authMgr, svcCfg, client)(r)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/apidoc/openapi.json", nil))

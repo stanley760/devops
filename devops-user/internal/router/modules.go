@@ -32,6 +32,9 @@ const (
 	// access token has expired by now, and forcing a JWT would make it
 	// impossible to ever get a new token (same as login).
 	AuthRefreshPath = userAPIPrefix + "/api/v1/auth/refresh"
+	// AuthCaptchaPath is the captcha issuance endpoint (login/register must
+	// present a solved captcha).
+	AuthCaptchaPath = userAPIPrefix + "/api/v1/auth/captcha"
 	// JWKSPath is the verification public key, for other services'
 	// self-verification and manual debugging.
 	JWKSPath = "/.well-known/jwks.json"
@@ -59,8 +62,8 @@ type Modules struct {
 }
 
 // NewAuthRoutes builds the auth routes from a service.
-func NewAuthRoutes(svc *service.Auth, kit *middleware.Kit) AuthRoutes {
-	h := apiv1.NewAuthHandler(svc)
+func NewAuthRoutes(svc *service.Auth, captchaSvc *service.Captcha, kit *middleware.Kit) AuthRoutes {
+	h := apiv1.NewAuthHandler(svc, captchaSvc)
 	return func(api huma.API) { registerAuth(api, h, kit) }
 }
 

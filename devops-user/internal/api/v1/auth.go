@@ -25,12 +25,13 @@ import (
 
 // AuthHandler holds the authentication endpoints.
 type AuthHandler struct {
-	svc *service.Auth
+	svc     *service.Auth
+	captcha *service.Captcha
 }
 
 // NewAuthHandler constructs the auth handler.
-func NewAuthHandler(svc *service.Auth) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *service.Auth, captchaSvc *service.Captcha) *AuthHandler {
+	return &AuthHandler{svc: svc, captcha: captchaSvc}
 }
 
 // registerBody is the registration request body.
@@ -52,7 +53,33 @@ type registerBody struct {
 	Mobile   string `json:"mobile" required:"false" doc:"mobile number"`
 	// Gender 0=unknown 1=male 2=female. The zero value means "unknown", so an
 	// optional field can use a non-pointer to express "not provided".
-	Gender int8 `json:"gender" required:"false" doc:"gender: 0=unknown, 1=male, 2=female" minimum:"0" maximum:"2" example:"1"`
+	Gender  int8                 `json:"gender" required:"false" doc:"gender: 0=unknown, 1=male, 2=female" minimum:"0" maximum:"2" example:"1"`
+	Captcha service.CaptchaInput `json:"captcha" required:"false" doc:"captcha verification data (required when captcha verification is enabled)"`
+}
+
+// captchaOutput is the captcha challenge response body.
+type captchaOutput struct {
+	Body commonResp.BaseResponse[service.CaptchaChallenge]
+}
+
+// Captcha GET /user/api/v1/auth/captcha — issues a captcha challenge of the type
+// currently selected in the console (click / slide / rotate).
+//
+// Must be reachable without a token: the caller needs a captcha precisely
+// because it does not have a session yet.
+func (h *AuthHandler) Captcha(ctx context.Context, _ *struct{}) (*captchaOutput, error) {
+	if h.captcha == nil {
+		return nil, errs.New(errs.CodeInternal, "captcha service is not configured")
+	}
+	challenge, err := h.captcha.Generate(ctx)
+	if err != nil {
+		return nil, errs.ToHumaError(err)
+	}
+	return &captchaOutput{Body: commonResp.BaseResponse[service.CaptchaChallenge]{
+		Code: http.StatusOK,
+		Msg:  "ok",
+		Data: *challenge,
+	}}, nil
 }
 
 // authOutput is the authentication response body.
@@ -72,6 +99,7 @@ func (h *AuthHandler) Register(ctx context.Context, in *struct {
 		Email:    in.Body.Email,
 		Mobile:   in.Body.Mobile,
 		Gender:   in.Body.Gender,
+		Captcha:  in.Body.Captcha,
 	})
 	if err != nil {
 		return nil, errs.ToHumaError(err)
@@ -87,13 +115,15 @@ func (h *AuthHandler) Register(ctx context.Context, in *struct {
 type loginBody struct {
 	Username string `json:"username" doc:"login name" required:"true" example:"alice"`
 	Password string `json:"password" doc:"password" required:"true" example:"S3cret-pass"`
+	// Captcha carries the captcha verification data (required when captcha verification is enabled).
+	Captcha service.CaptchaInput `json:"captcha" required:"false" doc:"captcha verification data (required when captcha verification is enabled)"`
 }
 
 // Login POST /user/api/v1/auth/login — username/password login.
 func (h *AuthHandler) Login(ctx context.Context, in *struct {
 	Body loginBody
 }) (*authOutput, error) {
-	pair, err := h.svc.Login(ctx, ClientIPFrom(ctx), in.Body.Username, in.Body.Password)
+	pair, err := h.svc.Login(ctx, ClientIPFrom(ctx), in.Body.Username, in.Body.Password, in.Body.Captcha)
 	if err != nil {
 		return nil, errs.ToHumaError(err)
 	}

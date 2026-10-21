@@ -216,6 +216,7 @@ Base64 形式的 32 字节随机值通常是 44 个字符，长度满足当前 H
 | 分组 | 路由                                                                                                      | 鉴权                                                           |
 | ---- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | 认证 | `POST /auth/login` `POST /auth/refresh`                                                                   | 公开（login 可带 `tenant_code`，缺省取 `tenant.default_code`） |
+| 认证 | `GET /auth/captcha`                                                                                          | 公开（点选 / 滑动 / 拖拽 / 旋转，类型取自系统配置）              |
 | 认证 | `POST /auth/logout` `GET /auth/info` `GET /auth/routers` `PUT /auth/profile` `PUT /auth/profile/password` | JWT                                                            |
 | 用户 | `GET/POST /users` `GET/PUT/DELETE /users/:id` `PUT /users/:id/password`                                   | JWT + 租户 + `system:user:*`                                   |
 | 角色 | `GET/POST /roles` `GET/PUT/DELETE /roles/:id` `PUT /roles/:id/menus`                                      | JWT + 租户 + `system:role:*`                                   |

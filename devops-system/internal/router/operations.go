@@ -33,6 +33,8 @@ const (
 	AuthLoginPath = systemAPIPrefix + "/api/v1/auth/login"
 	// AuthRefreshPath is the refresh endpoint, the only way out after the access token expires.
 	AuthRefreshPath = systemAPIPrefix + "/api/v1/auth/refresh"
+	// AuthCaptchaPath is the captcha issuance endpoint (login/register must present a solved captcha).
+	AuthCaptchaPath = systemAPIPrefix + "/api/v1/auth/captcha"
 	// JWKSPath is the verification public key, for other services to self-verify and manual troubleshooting.
 	JWKSPath = "/.well-known/jwks.json"
 )
@@ -463,11 +465,21 @@ func registerAuth(api huma.API, h *apiv1.AuthHandler, kit *middleware.Kit) {
 	biz := kit.TenantBiz()
 
 	huma.Register(api, with(common, huma.Operation{
+		OperationID: "auth-captcha",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/auth/captcha",
+		Summary:     "captcha",
+		Description: "issues a captcha challenge (click / slide / rotate) of the type selected in the console. Must be called before login.",
+		Security:    []map[string][]string{}, // public interface: the caller has no token yet
+		Middlewares: huma.Middlewares{withClientMeta},
+	}), h.Captcha)
+
+	huma.Register(api, with(common, huma.Operation{
 		OperationID: "auth-login",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/auth/login",
 		Summary:     "login",
-		Description: "issues an access token and a refresh token after validating the tenant and user.",
+		Description: "issues an access token and a refresh token after validating the captcha, the tenant and the user.",
 		Security:    []map[string][]string{}, // public interface overrides the global security requirement
 		Middlewares: huma.Middlewares{withClientMeta},
 	}), h.Login)

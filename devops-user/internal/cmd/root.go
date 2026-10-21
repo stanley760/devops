@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 
+	"github.com/stanley760/devops/devops-infra/captcha"
 	infracfg "github.com/stanley760/devops/devops-infra/config"
 	grpcinfra "github.com/stanley760/devops/devops-infra/grpc"
 	httpinfra "github.com/stanley760/devops/devops-infra/http"
@@ -283,7 +284,12 @@ var serverCmd = &cobra.Command{
 			UserWindow:   cfg.LoginLock.UserWindow,
 			LockTTL:      cfg.LoginLock.LockTTL,
 		})
-		authSvc := service.NewAuth(authM, limiter)
+		// Captcha: the answer store shares the Redis connection with the session
+		// store. The key prefix is namespaced per side so a captcha issued by the
+		// C-side can never be replayed against the B-side (both share one Redis
+		// and therefore one keyspace).
+		captchaSvc := service.NewCaptcha(captcha.NewRedisStore(store.Get(), refreshKeyPrefix+":captcha"))
+		authSvc := service.NewAuth(authM, limiter, captchaSvc)
 		profileSvc := service.NewProfile(authM, limiter)
 
 		// Third-party login (GitHub / Google / WeChat).
@@ -348,7 +354,7 @@ var serverCmd = &cobra.Command{
 			{Name: "devops-id", Check: idc.Ping},
 		}
 		register := router.NewRegister(cfg.APIDoc, authM, router.Modules{
-			Auth:    router.NewAuthRoutes(authSvc, kit),
+			Auth:    router.NewAuthRoutes(authSvc, captchaSvc, kit),
 			Profile: router.NewProfileRoutes(profileSvc, kit),
 			OAuth:   router.NewOAuthRoutes(oauthSvc, kit),
 		})

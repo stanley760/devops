@@ -123,12 +123,14 @@ func validGender(g int8) bool { return g >= 0 && g <= 2 }
 type Auth struct {
 	authM   *auth.Manager
 	limiter *loginlock.Limiter
+	captcha *Captcha
 }
 
 // NewAuth constructs the authentication use case. When limiter is nil, login is
-// not rate limited (for testing only).
-func NewAuth(authM *auth.Manager, limiter *loginlock.Limiter) *Auth {
-	return &Auth{authM: authM, limiter: limiter}
+// not rate limited (for testing only); when captchaSvc is nil, captcha
+// verification is skipped (also for testing only).
+func NewAuth(authM *auth.Manager, limiter *loginlock.Limiter, captchaSvc *Captcha) *Auth {
+	return &Auth{authM: authM, limiter: limiter, captcha: captchaSvc}
 }
 
 // RegisterInput is the registration input.
@@ -139,6 +141,11 @@ type RegisterInput struct {
 	Email    string
 	Mobile   string
 	Gender   int8
+	// Captcha carries the captcha verification data (required when captcha verification is enabled).
+	//
+	// Open registration is the most script-friendly endpoint there is, so registration is captcha-
+	// gated just like login (a bot that can register freely can build an arbitrary account corpus).
+	Captcha CaptchaInput
 }
 
 // TokenPair is the token pair issuance result (aliases auth.TokenPair to
@@ -157,6 +164,13 @@ func (s *Auth) Register(ctx context.Context, in RegisterInput) (TokenPair, error
 
 // register is the main registration flow.
 func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error) {
+	// Captcha first: it is the cheapest rejection of automated traffic (one Redis round trip, no
+	// bcrypt, no unique-index probe), and registration is the endpoint most attractive to automate.
+	if s.captcha != nil {
+		if err := s.captcha.Verify(ctx, in.Captcha); err != nil {
+			return TokenPair{}, err
+		}
+	}
 	if !usernamePattern.MatchString(in.Username) {
 		return TokenPair{}, errs.New(errs.CodeParam,
 			"username must start with a letter, 3-32 alphanumeric or underscore characters")
@@ -203,13 +217,18 @@ func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error
 	return s.issue(ctx, u.ID, u.Username)
 }
 
-// Login verifies the account password and issues a token pair.
+// Login verifies the captcha and the account password, then issues a token pair.
 //
 // ⚠️ "User not found" and "wrong password" **must return exactly the same
 // message** (including the status code), otherwise attackers could enumerate
 // which usernames exist. dao returns a unified message for nonexistence, and
 // the wrong-password branch here uses the same sentence — the two must be
 // changed in sync.
+//
+// Check order (deliberate): captcha → rate limit → password. The captcha is
+// checked before the rate limiter so that a flood of unsolved captcha attempts
+// never consumes a legitimate user's failure budget (the limiter counts login
+// failures per account, and captcha rejections are not the user's fault).
 //
 // Rate limiting and lockout: check **before** verification, record **after**
 // failure.
@@ -224,14 +243,21 @@ func (s *Auth) register(ctx context.Context, in RegisterInput) (TokenPair, error
 //
 // Business metric: records one auth_login_total{result, code} regardless of
 // outcome; metric failures do not affect login.
-func (s *Auth) Login(ctx context.Context, clientIP, username, password string) (TokenPair, error) {
-	pair, err := s.login(ctx, clientIP, username, password)
+func (s *Auth) Login(ctx context.Context, clientIP, username, password string, captchaIn CaptchaInput) (TokenPair, error) {
+	pair, err := s.login(ctx, clientIP, username, password, captchaIn)
 	authLoginCounter().Add(ctx, 1, metric.WithAttributes(authResultAttr(err), authCodeAttr(err)))
 	return pair, err
 }
 
 // login is the main login flow.
-func (s *Auth) login(ctx context.Context, clientIP, username, password string) (TokenPair, error) {
+func (s *Auth) login(ctx context.Context, clientIP, username, password string, captchaIn CaptchaInput) (TokenPair, error) {
+	// Captcha before the rate limit: the cheapest rejection, and it must not
+	// burn the account's failure budget on someone else's bot traffic.
+	if s.captcha != nil {
+		if err := s.captcha.Verify(ctx, captchaIn); err != nil {
+			return TokenPair{}, err
+		}
+	}
 	if err := s.checkLimit(ctx, clientIP, username); err != nil {
 		return TokenPair{}, err
 	}

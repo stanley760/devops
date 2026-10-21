@@ -23,5 +23,12 @@ VALUES
     (12, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_data_scope', '自定义数据',     '2', 2, 1, '', ''),
     (13, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_data_scope', '本部门数据',     '3', 3, 1, '', ''),
     (14, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_data_scope', '本部门及以下数据', '4', 4, 1, '', ''),
-    (15, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_data_scope', '仅本人数据',     '5', 5, 1, '', '')
+    (15, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_data_scope', '仅本人数据',     '5', 5, 1, '', ''),
+    -- sys_captcha_type: the selectable captcha types. The login captcha type is read from
+    -- t_system_config (sys.captcha.type) and must be one of these values; adding an item here
+    -- makes another type selectable.
+    (16, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_captcha_type', '点选验证码', 'click',    1, 1, '', '按缩略图顺序依次点击图形'),
+    (17, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_captcha_type', '滑动验证码', 'slide',    2, 1, '', '拖动拼图块至缺口（水平滑动）'),
+    (18, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_captcha_type', '拖拽验证码', 'dragdrop', 3, 1, '', '自由拖动拼图块至缺口（二维拖拽）'),
+    (19, 1, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, 'sys_captcha_type', '旋转验证码', 'rotate',   4, 1, '', '旋转缩略图至正确方向')
 ON DUPLICATE KEY UPDATE id = id;

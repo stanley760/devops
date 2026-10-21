@@ -82,13 +82,17 @@ type LoginMeta struct {
 
 // Auth is the authentication service.
 type Auth struct {
-	cfg   config.Config
-	authM *auth.Manager
+	cfg     config.Config
+	authM   *auth.Manager
+	captcha *Captcha
 }
 
 // NewAuth creates the authentication service.
-func NewAuth(cfg config.Config, authM *auth.Manager) *Auth {
-	return &Auth{cfg: cfg, authM: authM}
+//
+// captcha may be nil (captcha verification is then skipped) so that unit tests and probes that
+// build the service without a captcha store keep working.
+func NewAuth(cfg config.Config, authM *auth.Manager, captchaSvc *Captcha) *Auth {
+	return &Auth{cfg: cfg, authM: authM, captcha: captchaSvc}
 }
 
 // Login: tenant validation (exists/disabled/expired) → user validation
@@ -104,6 +108,17 @@ func (s *Auth) Login(ctx context.Context, req types.LoginReq, meta LoginMeta) (*
 // login is the main login flow. A deferred call writes one login audit row
 // (t_system_login_log): the closure captures the tenant-enriched ctx and the
 // final err, covering every exit (including failure paths).
+//
+// Order of checks (deliberate): tenant → captcha → user → password.
+//
+// The tenant is resolved first because it is a single indexed lookup on a global table and the
+// captcha settings are tenant-scoped (TenantPlugin fails closed without a tenant in ctx), so it has
+// to come first anyway.
+//
+// Captcha comes before the password because it is the cheapest rejection of automated traffic: one
+// Redis round trip, no bcrypt. Verifying it after the password would make every brute-force attempt
+// pay a full bcrypt comparison (~100ms of CPU) before being thrown out, which is exactly the
+// amplification a captcha exists to prevent.
 func (s *Auth) login(ctx context.Context, req types.LoginReq, meta LoginMeta) (resp *types.LoginResp, err error) {
 	audit := &model.LoginLog{
 		Username:    req.Username,
@@ -142,6 +157,13 @@ func (s *Auth) login(ctx context.Context, req types.LoginReq, meta LoginMeta) (r
 	// The public route has no Tenant middleware: after resolving the tenant,
 	// inject it into the ctx explicitly for TenantPlugin to use.
 	ctx = infratenant.With(ctx, t.ID, t.Code)
+
+	// Captcha verification (tenant-scoped settings are readable now that ctx carries the tenant).
+	if s.captcha != nil {
+		if err := s.captcha.Verify(ctx, req.Captcha); err != nil {
+			return nil, err
+		}
+	}
 
 	u, err := dao.GetUserByUsername(ctx, req.Username)
 	if err != nil {

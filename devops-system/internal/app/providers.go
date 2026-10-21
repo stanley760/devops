@@ -15,6 +15,8 @@ var serviceSet = wire.NewSet(
 	service.NewAuth,
 	newUserService,
 	newRoleService,
+	newCaptchaStore,
+	newCaptchaService,
 	service.NewMenu,
 	service.NewDept,
 	service.NewPost,

@@ -290,7 +290,7 @@ var serverCmd = &cobra.Command{
 			{Name: "redis", Check: store.Ping},
 			{Name: "devops-id", Check: idc.Ping},
 		}
-		register := app.InitializeHTTP(cfg, kit, authM)
+		register := app.InitializeHTTP(cfg, kit, authM, store.Get())
 
 		// Traffic-entry enforcement (third layer): requests must carry a Bearer JWT
 		// that validates independently.
