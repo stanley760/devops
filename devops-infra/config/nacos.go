@@ -20,6 +20,13 @@ type ConfigCenterConfig struct {
 	Group    string        `mapstructure:"group"`
 	Timeout  time.Duration `mapstructure:"timeout"`
 	Required bool          `mapstructure:"required"`
+	// ServiceName overrides the config-side service name used to derive the dataID
+	// (<name>.yaml / <name>-<env>.yaml). It defaults to nacos.registry.service_name.
+	// The gray instance registers as "devops-system-gray" but still reads the main
+	// instance's business config ("devops-system" / "devops-system-dev.yaml"),
+	// so it must be set explicitly — otherwise the config file name is derived from
+	// the gray name and the instance cannot find any configuration (mysql.host empty).
+	ServiceName string `mapstructure:"service_name"`
 }
 
 type RegistryConfig struct {

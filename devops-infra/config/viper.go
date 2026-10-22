@@ -89,7 +89,7 @@ func MergeEnvConfig() error {
 // mergeEnvConfig loads the service environment config per APP_ENV; file name format: <service>-<env>.yaml.
 func mergeEnvConfig(basePath string) error {
 	env := Env()
-	serviceName := ServiceName()
+	serviceName := ConfigServiceName()
 	if serviceName == "" {
 		return nil
 	}
@@ -114,6 +114,18 @@ func mergeEnvConfig(basePath string) error {
 // configuration names from nacos.registry.service_name.
 func ServiceName() string {
 	return strings.TrimSpace(viper.GetString("nacos.registry.service_name"))
+}
+
+// ConfigServiceName returns the service name used on the config-center side to
+// derive dataIDs and the local environment file name. It defaults to the
+// registry service name, and is overridden by nacos.config.service_name when set.
+// The gray instance registers as "devops-system-gray" but shares the main
+// instance's business config, so it sets this to "devops-system" explicitly.
+func ConfigServiceName() string {
+	if name := strings.TrimSpace(viper.GetString("nacos.config.service_name")); name != "" {
+		return name
+	}
+	return ServiceName()
 }
 
 // Env returns the currently effective environment name, defaulting to dev when unset.
@@ -193,7 +205,7 @@ func RemoteDataIDs(configured []string) []string {
 			dataIDs = append(dataIDs, trimmed)
 		}
 	}
-	serviceName := ServiceName()
+	serviceName := ConfigServiceName()
 	if serviceName == "" {
 		return dataIDs
 	}
@@ -212,7 +224,7 @@ func RemoteDataIDs(configured []string) []string {
 // file. Callers use it to decide whether the remote side hit: merge the local environment override file only on a miss.
 // Returns an empty string when service_name is not configured.
 func ProfileDataID() string {
-	serviceName := ServiceName()
+	serviceName := ConfigServiceName()
 	if serviceName == "" {
 		return ""
 	}

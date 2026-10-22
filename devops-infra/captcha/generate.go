@@ -77,6 +77,24 @@ type Challenge struct {
 	Height int `json:"height"`
 	// Text is the click-mode prompt, e.g. "circle,star" (the click order); empty for other modes.
 	Text string `json:"text,omitempty"`
+
+	// The fields below are the auxiliary image's geometry, needed by the official frontend
+	// components (go-captcha-vue) to render and position the draggable / rotatable piece.
+	//
+	// They are display parameters, not answers: the piece's *initial* position differs from the
+	// cutout position it must be dropped at, so nothing here leaks the expected value.
+	//
+	// ThumbX/ThumbY: the piece's initial top-left position inside the main image
+	// (slide.Block.DX/DY) — for slide it sits on the cutout's row, for drag-drop in a corner.
+	ThumbX int `json:"thumb_x,omitempty"`
+	ThumbY int `json:"thumb_y,omitempty"`
+	// ThumbWidth/ThumbHeight: the piece image's actual pixel size (slide.Block.Width/Height,
+	// randomly 60–70 px) — *not* the asset constant the piece graphics were authored at; the
+	// library scales them to the block size.
+	ThumbWidth  int `json:"thumb_width,omitempty"`
+	ThumbHeight int `json:"thumb_height,omitempty"`
+	// ThumbSize: the rotate thumbnail's edge length in px (rotate.Block.Width, 140–170).
+	ThumbSize int `json:"thumb_size,omitempty"`
 }
 
 // Point is a click coordinate submitted by the frontend.
@@ -305,11 +323,15 @@ func generateDrag(t Type) (*Challenge, Answer, error) {
 	// two are compared within slidePadding.
 	answer := Answer{Type: t, X: block.X, Y: block.Y}
 	return &Challenge{
-		Type:   t,
-		Image:  master,
-		Thumb:  tile,
-		Width:  masterWidth,
-		Height: masterHeight,
+		Type:        t,
+		Image:       master,
+		Thumb:       tile,
+		Width:       masterWidth,
+		Height:      masterHeight,
+		ThumbX:      block.DX,
+		ThumbY:      block.DY,
+		ThumbWidth:  block.Width,
+		ThumbHeight: block.Height,
 	}, answer, nil
 }
 
@@ -340,11 +362,12 @@ func generateRotate() (*Challenge, Answer, error) {
 	// by (360 - block.Angle), and rotate.Validate compares the sum against 360.
 	answer := Answer{Type: TypeRotate, Angle: block.Angle}
 	return &Challenge{
-		Type:   TypeRotate,
-		Image:  master,
-		Thumb:  thumb,
-		Width:  rotateSize,
-		Height: rotateSize,
+		Type:      TypeRotate,
+		Image:     master,
+		Thumb:     thumb,
+		Width:     rotateSize,
+		Height:    rotateSize,
+		ThumbSize: block.Width,
 	}, answer, nil
 }
 

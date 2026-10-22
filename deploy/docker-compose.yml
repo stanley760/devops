@@ -115,6 +115,30 @@ services:
       - edge                 # traffic ingress: same network as the business services so requests can be forwarded to 9999
       - infra                # also needs access to nacos / redis (McpBridge service sources)
 
+  # Unified edge entry: serves the frontend build artifacts and forwards /system and /user
+  # to the Higress gateway.
+  #
+  # Why this layer exists: Higress routes on (host, path), and the B-side and C-side use two
+  # different domains (api.devops.local / user-api.devops.local) — the two /.well-known/jwks.json
+  # would collide on a single host, and longest-prefix matching cannot tell them apart.
+  # A browser can only send one Host header, so the merge has to happen at the edge:
+  # this layer forwards /system with Host: api.devops.local and /user with Host:
+  # user-api.devops.local, so the browser sees a single origin and no CORS is involved.
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["gateway"]
+    ports:
+      - "8081:8081"           # the single externally-facing entry point
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      # The frontend build artifacts; run `npm run build` in devops-frontend first.
+      - ../devops-frontend/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - higress
+    restart: unless-stopped
+    networks:
+      - edge                 # needs to reach higress:8080
+
   # devops-id snowflake worker coordination dependency
   etcd:
     image: quay.io/coreos/etcd:v3.5.17

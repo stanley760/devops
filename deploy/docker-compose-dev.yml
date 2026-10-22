@@ -126,10 +126,7 @@ services:
       resources:
         limits:
           cpus: "2.0"
-        memory: 4g   # 4 JVMs (console/pilot/apiserver/controller ~450MB steady state) + envoy (incl. wasm plugins);
-                     # during the startup storm a transient spike above 1GiB triggers a cgroup OOM kill of
-                     # envoy, and supervisord treats its exit 0 as expected and does not restart it —
-                     # measured on 2026-09-30 that 1g would not come up, so raised to 2g
+          memory: 4g 
 
   # etcd: storage for devops-id snowflake slots (the Higress all-in-one does not depend on it).
   etcd:

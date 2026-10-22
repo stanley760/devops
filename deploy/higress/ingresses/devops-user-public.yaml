@@ -40,6 +40,16 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
+          # Captcha issuance: login/register must present a solved captcha, and the caller has no
+          # token yet — the captcha endpoint must be reachable anonymously, otherwise nobody can
+          # obtain a captcha to log in (the frontend calls it before submitting credentials).
+          - path: /user/api/v1/auth/captcha
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
           # Register: open endpoint; must be anonymous.
           - path: /user/api/v1/auth/register
             pathType: Prefix

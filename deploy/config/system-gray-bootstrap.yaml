@@ -4,5 +4,10 @@ nacos:
     - "nacos:8848"
   namespace: public
   group: DEVOPS_GROUP
+  config:
+    # The gray instance registers as devops-system-gray but shares the main instance's business
+    # config; without this override the config file name would be derived from the gray name
+    # and no configuration file would be found (mysql.host must not be empty).
+    service_name: devops-system
   registry:
     service_name: devops-system-gray

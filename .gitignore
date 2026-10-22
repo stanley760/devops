@@ -20,7 +20,7 @@ logs/
 tmp/
 # Local dev script outputs (dev.sh background service pid/logs, watch state files)
 deploy/.dev-logs/
-
+deploy/*/*-*.md
 # Runtime state (snowflake worker slots / ID watermark cache)
 data/
 

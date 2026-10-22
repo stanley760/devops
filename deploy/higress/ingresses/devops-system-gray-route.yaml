@@ -7,7 +7,10 @@ metadata:
   name: devops-system-gray-route
   namespace: higress-system
   annotations:
-    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos
+    # The port must be written explicitly: when omitted, Envoy parses the target as port 8080,
+    # which is not the port the gray instance listens on (devops-system/config/bootstrap-gray.yaml → 9998),
+    # so the request cannot reach the backend.
+    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos:9998
     # Traffic-ingress identity is expressed by the JWT claims injected by the jwt-auth plugin; no static identity header annotation needed.
     # This ingress is explicitly listed in jwt-auth's matchRules, so gray-targeted traffic is likewise authenticated.
 spec:

@@ -38,6 +38,15 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
+          # Captcha issuance: the login page fetches a captcha challenge before submitting
+          # credentials, and the caller has no token yet — must be anonymous like login.
+          - path: /system/api/v1/auth/captcha
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
           # Refresh: the only way out after access-token expiry; must be anonymous.
           - path: /system/api/v1/auth/refresh
             pathType: Prefix

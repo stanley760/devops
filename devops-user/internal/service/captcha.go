@@ -70,6 +70,23 @@ type CaptchaChallenge struct {
 	Height int `json:"height"`
 	// Text is the click-mode prompt, e.g. "circle,star"; empty for the other modes.
 	Text string `json:"text,omitempty"`
+
+	// The auxiliary image's geometry, required by the official go-captcha-vue components to render
+	// and position the draggable / rotatable piece. Display parameters only — the piece's initial
+	// position is not the answer, so nothing here leaks it. Same contract as the B-side
+	// types.CaptchaResp, so both frontends share one captcha widget.
+	ThumbX      int `json:"thumb_x,omitempty"`
+	ThumbY      int `json:"thumb_y,omitempty"`
+	ThumbWidth  int `json:"thumb_width,omitempty"`
+	ThumbHeight int `json:"thumb_height,omitempty"`
+	ThumbSize   int `json:"thumb_size,omitempty"`
+	// Enabled reports whether captcha verification is switched on.
+	//
+	// Same contract as the B-side types.CaptchaResp, so both frontends can share one captcha
+	// widget. When false the frontend skips the captcha step entirely: Verify is a no-op in that
+	// state, so solving one would be wasted effort. It also lets the frontend tell "captcha is
+	// off" apart from "the request failed", which look identical otherwise.
+	Enabled bool `json:"enabled"`
 }
 
 // CaptchaPoint is one click coordinate (in main-image pixel space).
@@ -143,19 +160,31 @@ func (s *Captcha) typeAllowed(ctx context.Context, t captcha.Type) bool {
 }
 
 // Generate issues a captcha challenge of the currently selected type.
+//
+// When captcha is disabled, no challenge is generated (saves an image render plus a Redis write)
+// and the response carries Enabled=false so the frontend skips the step.
 func (s *Captcha) Generate(ctx context.Context) (*CaptchaChallenge, error) {
+	if !s.Enabled(ctx) {
+		return &CaptchaChallenge{Enabled: false}, nil
+	}
 	ch, err := captcha.Generate(ctx, s.CurrentType(ctx), s.store, CaptchaTTL)
 	if err != nil {
 		return nil, errs.New(errs.CodeInternal, "failed to generate captcha")
 	}
 	return &CaptchaChallenge{
-		ID:     ch.ID,
-		Type:   string(ch.Type),
-		Image:  ch.Image,
-		Thumb:  ch.Thumb,
-		Width:  ch.Width,
-		Height: ch.Height,
-		Text:   ch.Text,
+		ID:          ch.ID,
+		Type:        string(ch.Type),
+		Image:       ch.Image,
+		Thumb:       ch.Thumb,
+		Width:       ch.Width,
+		Height:      ch.Height,
+		Text:        ch.Text,
+		ThumbX:      ch.ThumbX,
+		ThumbY:      ch.ThumbY,
+		ThumbWidth:  ch.ThumbWidth,
+		ThumbHeight: ch.ThumbHeight,
+		ThumbSize:   ch.ThumbSize,
+		Enabled:     true,
 	}, nil
 }
 

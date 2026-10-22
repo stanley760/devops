@@ -370,6 +370,10 @@ var serverCmd = &cobra.Command{
 					"/healthz", "/readyz", "/metrics",
 					router.AuthLoginPath, router.AuthRegisterPath,
 					router.AuthRefreshPath, router.JWKSPath,
+					// Captcha issuance must be anonymous: the login/register form
+					// fetches the challenge before it has any credential. Missing it
+					// makes the captcha endpoint return 401 and the form unusable.
+					router.AuthCaptchaPath,
 				},
 				[]string{cfg.APIDoc.BasePath},
 			),

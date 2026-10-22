@@ -1,0 +1,515 @@
+/* ==========================================================================
+   仪表层 —— 工业运维语汇：读数 / 刻度环 / 铭牌 / 容量带 / 热力格 / 信号条
+   只表达「读数、区间、健康状态」，不作纯装饰；每页至多一个视觉主角。
+   ========================================================================== */
+
+/* ---------------- 等宽读数 ---------------- */
+.readout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: var(--r-l);
+  min-width: 0;
+}
+
+.readout .ro-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.readout .ro-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-display-l);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.readout .ro-unit {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+
+.readout .ro-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.readout.is-hero .ro-value {
+  font-size: var(--fs-display-xl);
+}
+
+.readout.is-plate {
+  background: var(--plate-bg);
+  border: 1px solid var(--plate-line);
+  color: var(--plate-ink);
+}
+
+.readout.is-plate .ro-value {
+  color: var(--plate-ink);
+}
+
+.readout.is-plate .ro-unit,
+.readout.is-plate .ro-sub {
+  color: var(--plate-soft);
+}
+
+/* ---------------- 铭牌（设备标牌 / 只读汇总） ---------------- */
+.spec-plate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: var(--r-l);
+}
+
+.spec-plate .sp-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--plate-soft);
+}
+
+.spec-plate .sp-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.spec-plate .sp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.spec-plate .sp-key {
+  color: var(--plate-soft);
+  min-width: 72px;
+}
+
+.spec-plate .sp-val {
+  color: var(--plate-ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 浅色变体（嵌在玻璃面上的规格块） */
+.spec-plate.is-light {
+  background: var(--groove-bg);
+  border: none;
+  box-shadow: var(--groove-inner);
+}
+
+.spec-plate.is-light .sp-title {
+  color: var(--ink-3);
+}
+
+.spec-plate.is-light .sp-key {
+  color: var(--ink-3);
+}
+
+.spec-plate.is-light .sp-val {
+  color: var(--ink);
+}
+
+/* ---------------- 环比胶囊 ---------------- */
+.delta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(127, 145, 175, 0.14);
+  color: var(--ink-2);
+}
+
+.delta-pill.is-up {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.delta-pill.is-down {
+  background: var(--crit-soft);
+  color: var(--crit-ink);
+}
+
+.delta-pill.is-fresh {
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+}
+
+/* ---------------- 刻度环（仪表盘 / 健康度） ---------------- */
+.gauge {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.gauge svg {
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.gauge .gauge-track {
+  stroke: var(--tick);
+}
+
+.gauge .gauge-fill {
+  stroke-linecap: round;
+  transition: none;
+}
+
+.gauge .gauge-center {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.gauge .gauge-num {
+  font-family: var(--font-mono);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.gauge .gauge-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+/* 外圈刻度：主刻度稍粗 */
+.gauge-ticks line {
+  stroke: var(--tick);
+}
+
+.gauge-ticks line.is-strong {
+  stroke: var(--tick-strong);
+}
+
+/* ---------------- 容量带（斜线区间） ---------------- */
+.cap-bar {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--groove-bg);
+  box-shadow: var(--groove-inner);
+  overflow: hidden;
+}
+
+.cap-bar .cap-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue-2), var(--blue));
+}
+
+.cap-bar .cap-fill.is-ok {
+  background: var(--ok);
+}
+.cap-bar .cap-fill.is-warn {
+  background: var(--warn);
+}
+.cap-bar .cap-fill.is-crit {
+  background: var(--crit);
+}
+
+.cap-bar .cap-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-image: var(--hatch);
+}
+
+/* ---------------- 热力格（7×24 网格） ---------------- */
+.heat-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.heat-cell {
+  aspect-ratio: 1.4;
+  border-radius: 4px;
+  background: rgba(127, 145, 175, 0.12);
+  transition: transform 0.18s var(--ease-premium);
+  cursor: default;
+}
+
+.heat-cell:hover {
+  transform: scale(1.18);
+  z-index: 1;
+}
+
+.heat-cell.lv-1 {
+  background: rgba(10, 132, 255, 0.18);
+}
+.heat-cell.lv-2 {
+  background: rgba(10, 132, 255, 0.36);
+}
+.heat-cell.lv-3 {
+  background: rgba(10, 132, 255, 0.58);
+}
+.heat-cell.lv-4 {
+  background: rgba(10, 132, 255, 0.82);
+}
+
+.heat-cell.is-fail {
+  background-image: var(--hatch-warn);
+  background-color: rgba(255, 159, 10, 0.28);
+}
+
+/* ---------------- 信号条 / 柱状 feed ---------------- */
+.bar-feed {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 72px;
+}
+
+.bar-feed .bar {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(180deg, var(--blue-2), var(--blue));
+  opacity: 0.85;
+  transform-origin: bottom;
+}
+
+.bar-feed .bar.is-warn {
+  background: var(--warn);
+}
+
+.bar-feed .bar.is-crit {
+  background: var(--crit);
+}
+
+/* ---------------- 趋势图（SVG 折线） ---------------- */
+.trend {
+  position: relative;
+  width: 100%;
+}
+
+.trend svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.trend .trend-line {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend .trend-area {
+  fill: var(--blue-soft);
+  stroke: none;
+}
+
+.trend .trend-grid line {
+  stroke: var(--grid-line);
+  stroke-width: 1;
+}
+
+.trend .trend-dot {
+  fill: #fff;
+  stroke: var(--blue);
+  stroke-width: 2;
+}
+
+/* ---------------- 服务健康网格（机房机柜感） ---------------- */
+.svc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.svc-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 14px;
+  border-radius: var(--r-m);
+  border: 1px solid var(--glass-stroke-2);
+  border-top-color: var(--glass-stroke);
+  background: var(--glass-2);
+  box-shadow: var(--glass-inner-soft);
+  text-align: left;
+  transition: transform 0.3s var(--ease-premium), box-shadow 0.3s var(--ease-premium);
+}
+
+.svc-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--glass-inner), var(--e2);
+}
+
+.svc-tile .st-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.svc-tile .st-metric {
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.svc-tile .st-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
+.svc-tile.is-degraded {
+  border-color: rgba(255, 159, 10, 0.4);
+}
+
+.svc-tile.is-down {
+  border-color: rgba(255, 69, 58, 0.45);
+  background: var(--crit-soft);
+}
+
+/* ---------------- 事件流（日志流） ---------------- */
+.event-stream {
+  display: flex;
+  flex-direction: column;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 70px 16px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--glass-stroke-2);
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.event-row:last-child {
+  border-bottom: 0;
+}
+
+.event-row .ev-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-row .ev-text {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-row .ev-tag {
+  justify-self: end;
+}
+
+/* ---------------- 时钟刻度环（登录 / 仪表台角标） ---------------- */
+.dial-ticks line {
+  stroke: var(--tick);
+  stroke-width: 1.2;
+}
+
+.dial-ticks line.is-live {
+  stroke: var(--blue-2);
+  stroke-width: 1.8;
+}
+
+.dial-ticks.is-deep line {
+  stroke: rgba(158, 190, 230, 0.22);
+}
+
+.dial-ticks.is-deep line.is-live {
+  stroke: var(--blue-2);
+}
+
+/* ---------------- 节点拓扑画布容器 ---------------- */
+.topo-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.topo-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.topo-overlay {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* ---------------- 数字滚动占位（Odometer） ---------------- */
+.odo {
+  display: inline-flex;
+  overflow: hidden;
+  height: 1em;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.odo .odo-col {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+/* ---------------- 环比条（占比） ---------------- */
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 12.5px;
+}
+
+.share-row .share-name {
+  min-width: 88px;
+  color: var(--ink-2);
+}
+
+.share-row .share-val {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}

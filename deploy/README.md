@@ -73,7 +73,9 @@ init overwrites these three directories every time — move any route/plugin cha
 
 | Service | URL |
 | --- | --- |
+| Frontend dev server | `http://127.0.0.1:5173/` (admin) · `http://127.0.0.1:5173/portal.html` (C-end portal) |
 | devops-system | `http://localhost:9999/healthz` (local process) |
+| devops-user | `http://localhost:10000/healthz` (local process) |
 | Higress gateway | `http://localhost:8080/healthz` (Host: `api.devops.local`) |
 | Higress console | `http://localhost:8001` |
 | Nacos console | `http://localhost:8848/nacos` |
@@ -81,6 +83,18 @@ init overwrites these three directories every time — move any route/plugin cha
 | Prometheus | `http://localhost:9090` |
 | Alertmanager | `http://localhost:9093` (dev alerts are UI-only; production wires a webhook) |
 | Grafana | `http://localhost:3000` (admin/admin) |
+
+> The frontend no longer connects to the business services directly — every API request goes
+> through the Higress gateway (see [higress/UNIFIED-ENTRY.md](./higress/UNIFIED-ENTRY.md)).
+> Add the following to `C:\Windows\System32\drivers\etc\hosts`:
+> ```
+> 127.0.0.1 api.devops.local
+> 127.0.0.1 user-api.devops.local
+> 127.0.0.1 devops.local
+> ```
+> The gateway can only reach the locally running business services via the **LAN IPv4** of this
+> machine, not `127.0.0.1`; set `NACOS_REGISTER_IP` to that address when starting the services
+> locally, otherwise the gateway resolves to the loopback and every request returns 503.
 
 Alerts: rules live in [prometheus/alerts.yml](./prometheus/alerts.yml) (target down / HTTP 5xx /
 P99 / gRPC error rate / SQL·Redis pool waits, etc.); fired alerts are routed via Alertmanager. The dev receiver

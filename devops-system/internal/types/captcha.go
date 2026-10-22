@@ -24,6 +24,22 @@ type CaptchaResp struct {
 	Height int `json:"height" doc:"main image height (px)"`
 	// Text is the click-mode prompt, e.g. "circle,star" (the click order); empty for other modes.
 	Text string `json:"text,omitempty" doc:"click mode: shapes to click in order, comma-separated"`
+
+	// The auxiliary image's geometry, required by the official go-captcha-vue components to render
+	// and position the draggable / rotatable piece. Display parameters only — the piece's initial
+	// position is not the answer, so nothing here leaks it.
+	ThumbX      int `json:"thumb_x,omitempty" doc:"slide/dragdrop: piece initial x position in the main image (px)"`
+	ThumbY      int `json:"thumb_y,omitempty" doc:"slide/dragdrop: piece initial y position in the main image (px)"`
+	ThumbWidth  int `json:"thumb_width,omitempty" doc:"slide/dragdrop: piece image width (px)"`
+	ThumbHeight int `json:"thumb_height,omitempty" doc:"slide/dragdrop: piece image height (px)"`
+	ThumbSize   int `json:"thumb_size,omitempty" doc:"rotate: thumbnail edge length (px)"`
+	// Enabled reports whether captcha verification is switched on for this tenant.
+	//
+	// The frontend needs this to decide whether to prompt at all. When captcha is off, Verify is a
+	// no-op, so making the user solve one would be wasted effort — the login page reads this flag
+	// and skips the captcha step entirely when it is false. It also lets the frontend tell
+	// "captcha is off" apart from "the request failed", which look identical otherwise.
+	Enabled bool `json:"enabled" doc:"whether captcha verification is required for this tenant"`
 }
 
 // CaptchaPoint is one click coordinate (in main-image pixel space).
@@ -43,8 +59,12 @@ type CaptchaSubmit struct {
 	// Points are the click coordinates in order (click mode).
 	Points []CaptchaPoint `json:"captcha_points,omitempty" doc:"click mode: clicked coordinates, in the order shown in the thumbnail"`
 	// X/Y are the puzzle piece drop coordinates (slide and drag-drop modes).
+	//
+	// They are the piece's final top-left position in the main image's pixel space — the same
+	// coordinate space as the challenge's thumb_x / thumb_y, so no rescaling is needed.
 	X int `json:"captcha_x,omitempty" doc:"slide/dragdrop mode: x coordinate the puzzle piece was dropped at"`
 	Y int `json:"captcha_y,omitempty" doc:"slide/dragdrop mode: y coordinate the puzzle piece was dropped at"`
-	// Angle is the rotation angle in degrees (rotate mode).
+	// Angle is the rotation angle in degrees (rotate mode): the angle the user applied, which the
+	// server adds to the server-side offset and expects to total ~360.
 	Angle int `json:"captcha_angle,omitempty" doc:"rotate mode: rotation angle the user rotated to (degrees)"`
 }

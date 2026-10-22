@@ -155,23 +155,36 @@ func (s *Captcha) typeAllowed(ctx context.Context, t captcha.Type) bool {
 //
 // This is the only entry point that resolves the tenant itself: the captcha endpoint is anonymous,
 // so ctx carries no tenant yet, while the settings tables are tenant-scoped.
+//
+// When captcha is disabled, no challenge is generated: it saves an image render plus a Redis write,
+// and the Enabled=false response tells the frontend to skip the step (a user solving a captcha
+// that Verify would ignore anyway is pure friction).
 func (s *Captcha) Generate(ctx context.Context, tenantCode string) (*types.CaptchaResp, error) {
 	tctx, err := s.tenantCtx(ctx, tenantCode)
 	if err != nil {
 		return nil, err
+	}
+	if !s.Enabled(tctx) {
+		return &types.CaptchaResp{Enabled: false}, nil
 	}
 	ch, err := captcha.Generate(tctx, s.CurrentType(tctx), s.store, CaptchaTTL)
 	if err != nil {
 		return nil, errs.Wrap(err, errs.CodeInternal, "failed to generate captcha")
 	}
 	return &types.CaptchaResp{
-		ID:     ch.ID,
-		Type:   string(ch.Type),
-		Image:  ch.Image,
-		Thumb:  ch.Thumb,
-		Width:  ch.Width,
-		Height: ch.Height,
-		Text:   ch.Text,
+		ID:          ch.ID,
+		Type:        string(ch.Type),
+		Image:       ch.Image,
+		Thumb:       ch.Thumb,
+		Width:       ch.Width,
+		Height:      ch.Height,
+		Text:        ch.Text,
+		ThumbX:      ch.ThumbX,
+		ThumbY:      ch.ThumbY,
+		ThumbWidth:  ch.ThumbWidth,
+		ThumbHeight: ch.ThumbHeight,
+		ThumbSize:   ch.ThumbSize,
+		Enabled:     true,
 	}, nil
 }
 

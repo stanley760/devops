@@ -20,6 +20,11 @@ nacos:
   password: "nacos"
   timeout: 5s
   config:
+    # The gray instance registers as "devops-system-gray" but reads the main instance's
+    # business config; without this override the config file name would be derived from the
+    # gray name (devops-system-gray-dev.yaml), which does not exist, and the instance
+    # would fail to start with "mysql.host must not be empty".
+    service_name: "devops-system"
     data_ids:
       - "devops-system.yaml"   # 与主实例共用同一份业务配置
     group: "DEVOPS_GROUP"

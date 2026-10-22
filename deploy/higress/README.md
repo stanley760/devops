@@ -9,7 +9,7 @@ deployment forms: dev / docker production / K8s.
 deploy/higress/
 ├── mcpbridges/default.yaml          # Service source: Nacos registry integration (devops-nacos)
 ├── ingresses/devops-system.yaml     # Route: api.devops.local -> devops-system
-├── ingresses/devops-system-canary.yaml  # Canary route (10% traffic to the gray instance)
+├── ingresses/devops-system-canary.yaml  # Canary route (gray release, triggered by the x-canary tag)
 ├── ingresses/devops-system-gray-route.yaml  # Dedicated gray domain: gray.devops.local goes 100% direct
 ├── services/higress-gateway.yaml    # all-in-one built-in Service declaration (K8s migration reference)
 ├── wasmplugins/cors-1.0.0.yaml      # CORS: handled centrally at the gateway (console export format)
@@ -87,6 +87,9 @@ sh deploy/dev.sh sync       # or .\deploy\dev.ps1 -Command sync
 | Docker engine 500 / abnormally high CPU | ① Windows bind mount (already switched to a named volume); ② the all-in-one's built-in prometheus/loki/promtail/grafana run in parallel with the external stack; ③ `proxyStatsMatcher.inclusionRegexps: [.*]` in `higress-config` causes Envoy full high-cardinality metrics | Use the named volume; disable the built-in observability components (see "8. Observability"); `sync` already includes this fix (see the row below) |
 | envoy disappears ~1 minute after startup; 8080 TCP connects but returns empty (8001 is fine) | `inclusionRegexps: [.*]` in `higress-config` (**auto-regenerated on every first start of a new volume**, and the file has CRLF line endings) → envoy's stats tables blow up memory and it gets OOM-killed by cgroup; supervisord treats its exit 0 as expected and does not auto-restart it | `sh deploy/dev.sh sync` (stop, delete the config, then start); the dev compose memory limit has been raised to 2g as a backstop |
 | Processes inside all-in-one batch exited | The supervisor shutdown sequence of container stop/restart; logs look like `exited: prometheus (exit status 0; expected)` | First check `docker compose ps` to see whether the container is in a restart loop |
+| Pages intermittently return **503 Service Unavailable** (roughly a fixed percentage of requests) | The canary Ingress uses `higress.io/canary-weight`, and the gray instance has zero instances in Nacos → that cluster does not exist in CDS → Envoy picks no upstream → `response_flags: NC`. `weighted_clusters` has **no** fallback to the baseline cluster, so the hit requests fail directly | Change the canary Ingress to tag-based gray release (`canary-by-header` / `canary-by-cookie`, Higress's `cluster_fallback` plugin degrades gracefully) → see section 5; or start the gray instance to make the cluster exist. Confirm via `curl -s localhost:15000/clusters?format=json` (the gray cluster should appear with the correct port) and `curl -s localhost:15000/stats \| grep no_cluster` |
+| The gray instance reports `mysql.host must not be empty` at startup | The config file name is derived from the service name; the gray instance registers as `devops-system-gray` but should reuse the main instance's config | Declare `nacos.config.service_name: devops-system` in the gray bootstrap (see `devops-system/config/bootstrap-gray.yaml`) |
+| `higress.io/destination` without a port | Envoy parses the target as port 8080, which is not the port the backend actually listens on → the request cannot reach the backend | Write the port explicitly: `...nacos:9999` / `...nacos:9998` |
 
 ---
 
@@ -172,8 +175,12 @@ annotation splits traffic:
 metadata:
   annotations:
     higress.io/canary: "true"
-    higress.io/canary-weight: "10"        # Weight-based gray release: ~10% of traffic
-    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos
+    # Gray is triggered explicitly by a tag; the default 100% stays on the baseline instance
+    higress.io/canary-by-header: "x-canary"           # Header-based gray release
+    higress.io/canary-by-header-value: "true"          # Gray release only on exact value match
+    higress.io/canary-by-cookie: "canary"              # Cookie-based gray release
+    # The port must be written explicitly (the gray instance listens on 9998)
+    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos:9998
 ```
 
 Three splitting methods, with priority **Header > Cookie > Weight**:
@@ -185,9 +192,24 @@ higress.io/canary-by-cookie: "canary"              # Cookie-based gray release
 higress.io/canary-weight: "10"                     # Fallback weight-based gray release
 ```
 
+> ⚠️ **Do not use `higress.io/canary-weight` when the gray instance may not be running.**
+> The weight split is unconditional: a request hitting the gray cluster is sent there even if the
+> gray instance has zero instances in Nacos — that cluster does not exist in CDS, and Envoy has no
+> upstream to pick → `503` + `response_flags: NC` (no cluster). Because the split is random, roughly
+> `weight%` of all page requests fail intermittently, and the failure looks unrelated to the gray
+> release. Measured on this project: 300 requests → 269×200 + **31×503 (10.3%)**, exactly matching
+> `canary-weight: "10"`. Note that Envoy's `weighted_clusters` has **no** fallback to the baseline
+> cluster, whereas Higress's header/cookie canary routes carry the `cluster_fallback` plugin
+> (routing_cluster = gray, fallback_clusters = baseline) — a request carrying the gray tag but no
+> available gray instance transparently falls back to the baseline instead of failing.
+>
+> So the rule is: **use Header/Cookie tags for gray release** (explicit, and degrades gracefully),
+> and only use the weight split when the gray instance is confirmed registered in Nacos.
+
 Procedure: the `gray` instance registers to the same Nacos group under the service name `devops-system-gray` →
-edit the canary yaml weight → `sync` (dev) or apply the manifest (production) → watch Grafana/logs to confirm the
-gray traffic ratio → when fully rolled out, publish the new version under the name `devops-system` and delete the canary route.
+edit the canary yaml (add the tag annotation) → `sync` (dev) or apply the manifest (production) →
+request with the tag header to confirm the gray instance is hit → when fully rolled out, publish the
+new version under the name `devops-system` and delete the canary route.
 
 **Gray instance targeted access** (not weight-random): `ingresses/devops-system-gray-route.yaml` provides
 a dedicated `gray.devops.local` route, 100% direct to the gray instance, for gray version verification. Starting the gray instance locally:
@@ -196,6 +218,12 @@ a dedicated `gray.devops.local` route, 100% direct to the gray instance, for gra
 cd devops-system && go run . server -f config/bootstrap-gray.yaml   # :9998, registers as devops-system-gray
 curl -i -H 'Host: gray.devops.local' http://localhost:8080/api/v1/auth/info   # 401 means it reached the backend
 ```
+
+> The gray instance registers as `devops-system-gray` but reads the main instance's business config.
+> Because the config file name is derived from the config-side service name, the gray bootstrap must
+> declare `nacos.config.service_name: devops-system` (see `devops-system/config/bootstrap-gray.yaml`);
+> otherwise the name is derived from `devops-system-gray`, no config file is found, and the instance
+> fails at startup with `mysql.host must not be empty`.
 
 Note: the console's "route management" does not show canary Ingresses as separate entries (they are merged into the main route's
 split rules); whether gray release is in effect is determined by envoy's actual config/traffic:

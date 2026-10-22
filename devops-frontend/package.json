@@ -1,0 +1,28 @@
+{
+  "name": "devops-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "工业级运维管理平台前端（Vue 3 + Vite + TS + GSAP，钛玻璃主题）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "go-captcha-vue": "^2.0.7",
+    "gsap": "^3.13.0",
+    "three": "^0.169.0",
+    "vue": "^3.5.13",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
+  },
+  "license": "MIT"
+}

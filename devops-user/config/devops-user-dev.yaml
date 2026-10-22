@@ -94,7 +94,7 @@ gateway:
   # 本地进程开发：流量入口守卫默认关闭，便于 curl 直连 127.0.0.1:10000 调试。
   # 验证守卫时置 require_jwt: true，此时直连业务接口必须带有效 Bearer token
   #（登录拿到的 access_token）。
-  require_jwt: false
+  require_jwt: true
 
 # 登录失败限流与账号临时锁定。
 #

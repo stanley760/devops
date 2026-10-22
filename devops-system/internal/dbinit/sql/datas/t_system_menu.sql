@@ -16,7 +16,7 @@ VALUES
     (8,  'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '登录日志', 'system:loginlog:list',   2, 7, 1, 'loginlog', 'ep:document', 'system/loginlog/index', 1, TRUE, TRUE),
     (9,  'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '操作日志', 'system:operationlog:list',   2, 8, 1, 'operationlog', 'ep:document', 'system/operationlog/index', 1, TRUE, TRUE),
     (10, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '字典管理', 'system:dict:list',   2, 9, 1, 'dict',  'ep:collection',           'system/dict/index',  1, TRUE, TRUE),
-    (11, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '参数配置', 'system:config:list', 2, 10, 1, 'config', 'ep:operation',           'system/config/index', 1, TRUE, TRUE),
+    (11, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '系统配置', 'system:config:list', 2, 10, 1, 'config', 'ep:sliders',            'system/config/index', 1, TRUE, TRUE),
     (21, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户查询', 'system:user:query',          3, 1, 2, '', '', '', 1, TRUE, FALSE),
     (22, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户新增', 'system:user:create',         3, 2, 2, '', '', '', 1, TRUE, FALSE),
     (23, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '用户修改', 'system:user:update',         3, 3, 2, '', '', '', 1, TRUE, FALSE),
@@ -51,3 +51,7 @@ VALUES
     (113, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置修改', 'system:config:update',  3, 3, 11, '', '', '', 1, TRUE, FALSE),
     (114, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '配置删除', 'system:config:delete',  3, 4, 11, '', '', '', 1, TRUE, FALSE)
 ON DUPLICATE KEY UPDATE id = id;
+
+-- 菜单重命名：ON DUPLICATE KEY UPDATE id=id 不会更新已有行，
+-- 单独用 UPDATE 让「参数配置 → 系统配置」的改名在存量库上也能生效（按 id 定位，可重复执行）。
+UPDATE t_system_menu SET name = '系统配置', icon = 'ep:sliders' WHERE id = 11;

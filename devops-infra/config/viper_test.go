@@ -89,3 +89,57 @@ func writeTestFile(t *testing.T, path, content string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+// The gray instance registers as "devops-system-gray" but shares the main instance's business
+// config, so nacos.config.service_name overrides the config-side name; without it the config
+// file name is derived from the gray name and the instance cannot find any configuration.
+func TestConfigServiceNameOverridesRegistryName(t *testing.T) {
+	t.Setenv(EnvAppEnv, "dev")
+
+	dir := t.TempDir()
+	bootstrap := filepath.Join(dir, "bootstrap.yaml")
+	writeTestFile(t, bootstrap, "nacos:\n  config:\n    service_name: devops-system\n  registry:\n    service_name: devops-system-gray\n")
+
+	if err := Init(bootstrap); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(viper.Reset)
+
+	if got := ServiceName(); got != "devops-system-gray" {
+		t.Fatalf("ServiceName() = %q, want %q", got, "devops-system-gray")
+	}
+	if got := ConfigServiceName(); got != "devops-system" {
+		t.Fatalf("ConfigServiceName() = %q, want %q", got, "devops-system")
+	}
+	if got := ProfileDataID(); got != "devops-system-dev.yaml" {
+		t.Fatalf("ProfileDataID() = %q, want %q", got, "devops-system-dev.yaml")
+	}
+	want := []string{"devops-system.yaml", "devops-system-dev.yaml"}
+	got := RemoteDataIDs(nil)
+	if len(got) != len(want) {
+		t.Fatalf("RemoteDataIDs() = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("RemoteDataIDs()[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
+// Without the override the config-side name falls back to the registry service name.
+func TestConfigServiceNameFallsBackToRegistryName(t *testing.T) {
+	t.Setenv(EnvAppEnv, "dev")
+
+	dir := t.TempDir()
+	bootstrap := filepath.Join(dir, "bootstrap.yaml")
+	writeTestFile(t, bootstrap, "nacos:\n  registry:\n    service_name: devops-system\n")
+
+	if err := Init(bootstrap); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(viper.Reset)
+
+	if got := ConfigServiceName(); got != "devops-system" {
+		t.Fatalf("ConfigServiceName() = %q, want %q", got, "devops-system")
+	}
+}

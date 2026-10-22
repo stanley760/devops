@@ -64,7 +64,14 @@ spec:
     - DELETE
     - OPTIONS
     allow_origins:
+    # 前端开发服务器（vite dev）
     - http://localhost:5173
+    - http://127.0.0.1:5173
+    # 统一入口边缘（nginx）：前端与 API 同源，通常不会触发 CORS；
+    # 保留是为了将来把前端拆到独立域名时不必立刻回来改。
+    - http://devops.local:8081
+    - http://localhost:8081
+    # Grafana 内嵌面板等既有来源
     - http://localhost:3000
     max_age: 3600
   defaultConfigDisable: false

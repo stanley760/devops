@@ -1,0 +1,155 @@
+/* ==========================================================================
+   材质层 —— 钛玻璃配方：只以模糊 / 不透明度 / 受光描边强弱分级，不换色相
+   m-rail  导航轨（近实色）
+   m-glass 阅读面（卡片 / 表格 / 弹窗主体）
+   m-pill  高亮玻璃块（选中项 / 次级按钮 / 分段滑块）
+   m-float 高层浮层（下拉 / 命令面板 / 提示）
+   m-groove 凹槽（滑道 / 输入底座）
+   m-plate 深色铭牌（仪表读数 / 设备标牌）
+   m-glow  指针光（材质氛围，不表示可点）
+   ========================================================================== */
+
+.m-rail {
+  background: var(--glass-rail);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  backdrop-filter: blur(22px) saturate(1.6);
+  border-right: 1px solid var(--glass-stroke-2);
+}
+
+.m-glass {
+  background: var(--glass-1);
+  border: 1px solid var(--glass-stroke-2);
+  border-top-color: var(--glass-stroke);
+  box-shadow: var(--glass-inner), var(--e1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+}
+
+.m-glass-strong {
+  background: var(--glass-1-strong);
+  border: 1px solid var(--glass-stroke-2);
+  border-top-color: var(--glass-stroke);
+  box-shadow: var(--glass-inner), var(--e1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.45);
+  backdrop-filter: blur(16px) saturate(1.45);
+}
+
+.m-pill {
+  background: var(--glass-2);
+  border: 1px solid var(--glass-stroke-2);
+  border-top-color: var(--glass-stroke);
+  box-shadow: var(--glass-inner), var(--e2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.7);
+  backdrop-filter: blur(20px) saturate(1.7);
+}
+
+.m-float {
+  background: var(--glass-3);
+  border: 1px solid var(--glass-stroke-2);
+  border-top-color: var(--glass-stroke);
+  box-shadow: var(--glass-inner-soft), var(--e3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.75);
+  backdrop-filter: blur(28px) saturate(1.75);
+}
+
+.m-groove {
+  background: var(--groove-bg);
+  box-shadow: var(--groove-inner);
+}
+
+.m-plate {
+  background: var(--plate-bg);
+  color: var(--plate-ink);
+  border: 1px solid var(--plate-line);
+  box-shadow: var(--glass-inner-soft), var(--e2);
+}
+
+.m-plate .plate-soft {
+  color: var(--plate-soft);
+}
+
+/* 指针光：容器内一层径向光斑，仅氛围 */
+.m-glow {
+  position: relative;
+  --px: 50%;
+  --py: 50%;
+}
+
+.m-glow > .glow-layer {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    240px circle at var(--px) var(--py),
+    rgba(255, 255, 255, 0.55),
+    transparent 68%
+  );
+  mix-blend-mode: soft-light;
+  opacity: 0;
+  transition: opacity 0.42s var(--ease-premium);
+}
+
+.m-glow:hover > .glow-layer {
+  opacity: 0.72;
+}
+
+/* 无障碍退化 */
+@media (prefers-reduced-transparency: reduce) {
+  .m-rail,
+  .m-glass,
+  .m-glass-strong,
+  .m-pill,
+  .m-float {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .m-glass,
+  .m-glass-strong {
+    background: var(--glass-1-strong);
+  }
+  .m-pill,
+  .m-float {
+    background: var(--glass-1-strong);
+  }
+}
+
+@media (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .m-glow > .glow-layer {
+    display: none;
+  }
+}
+
+/* 深色画布背景（登录 / 全屏舞台） */
+.deep-stage {
+  background:
+    radial-gradient(1200px 700px at 78% -10%, rgba(255, 255, 255, 0.05), transparent 60%),
+    radial-gradient(900px 620px at 12% 110%, rgba(255, 255, 255, 0.035), transparent 62%),
+    linear-gradient(160deg, var(--canvas-deep-2), var(--canvas-deep) 55%, #1d1e21);
+  color: var(--ink-on-deep);
+}
+
+/* 工业点阵台面（外壳 / 仪表台背景） */
+.grid-plate {
+  background-image:
+    radial-gradient(var(--grid-dot) 1px, transparent 1px),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size:
+    24px 24px,
+    96px 96px,
+    96px 96px;
+  background-position:
+    0 0,
+    -1px -1px,
+    -1px -1px;
+}
+
+/* 斜线容量带：只表示区间 / 当前值带 / 慢操作 */
+.hatch-band {
+  background-image: var(--hatch);
+}
+
+.hatch-warn {
+  background-image: var(--hatch-warn);
+}
