@@ -8,7 +8,7 @@ package domain
 // PageParam is the pagination input (bound from HTTP query/form).
 type PageParam struct {
 	PageNum  int `query:"page_num" form:"page_num" binding:"omitempty,min=1" minimum:"1" default:"1" doc:"page number"`
-	PageSize int `query:"page_size" form:"page_size" binding:"omitempty,min=1,max=100" minimum:"1" maximum:"100" default:"10" doc:"records per page"`
+	PageSize int `query:"page_size" form:"page_size" binding:"omitempty,min=1,max=1000" minimum:"1" maximum:"1000" default:"10" doc:"records per page"`
 }
 
 const (

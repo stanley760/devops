@@ -9,6 +9,7 @@ package types
 
 import (
 	"errors"
+	"time"
 
 	commontypes "github.com/stanley760/devops/devops-common/types"
 	"github.com/stanley760/devops/devops-infra/errs"
@@ -22,6 +23,19 @@ type ParamID = commontypes.ParamID
 
 // InvalidIDError indicates an ID parameter parse failure (defined in devops-common/types).
 type InvalidIDError = commontypes.InvalidIDError
+
+// DateTime is a timestamp serialized as "YYYY-MM-DD HH:mm:ss" (defined in devops-common/types).
+//
+// All **output** timestamps use this type so the wire format is uniform across
+// every endpoint. Query/body timestamps keep using time.Time: they are parsed,
+// not displayed, and RFC3339 remains accepted there for compatibility.
+type DateTime = commontypes.DateTime
+
+// NewDateTime wraps a time.Time into the unified output format.
+func NewDateTime(t time.Time) DateTime { return commontypes.NewDateTime(t) }
+
+// DateTimePtr wraps a *time.Time into the unified output format (nil stays nil).
+func DateTimePtr(t *time.Time) *DateTime { return commontypes.DateTimePtr(t) }
 
 // ParseID parses the ID (string form) in path/query parameters.
 //

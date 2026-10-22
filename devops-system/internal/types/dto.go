@@ -1,8 +1,6 @@
 // Authentication and user info DTOs. IDs are always issued in the types.ID string form.
 package types
 
-import "time"
-
 // LoginReq is the login input. An empty tenant_code falls back to tenant.default_code.
 type LoginReq struct {
 	TenantCode string        `json:"tenant_code,omitempty" binding:"omitempty,max=30" maxLength:"30" doc:"tenant code"`
@@ -44,10 +42,12 @@ type UserDTO struct {
 	Gender    int8      `json:"gender" doc:"gender 0 unknown 1 male 2 female"`
 	Avatar    string    `json:"avatar" doc:"avatar"`
 	DeptID    ID        `json:"deptId" doc:"department id"`
+	DeptName  string    `json:"deptName" doc:"department name, for display"`
 	PostIDs   []ID      `json:"postIds" doc:"associated post ID list"`
 	Remark    string    `json:"remark" doc:"remark"`
+	Status    int8      `json:"status" doc:"account status 0: disabled 1: enabled"`
 	LoginIP   string    `json:"loginIp" doc:"login IP address"`
-	LoginDate time.Time `json:"loginDate" doc:"login time"`
+	LoginDate DateTime `json:"loginDate" doc:"login time"`
 }
 
 // UserInfoResp is the GET /auth/info response.

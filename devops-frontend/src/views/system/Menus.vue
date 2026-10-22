@@ -51,7 +51,7 @@ const typeOptions = [
 ]
 
 const parentOptions = computed(() => {
-  const opts: Array<{ value: string; label: string }> = [{ value: '', label: '顶级菜单' }]
+  const opts: Array<{ value: string; label: string }> = [{ value: '0', label: '顶级菜单' }]
   for (const r of flatRows.value) {
     if (Number(r.type) === 3) continue
     opts.push({ value: r.id, label: `${'　'.repeat(r.depth)}${r.name}` })
@@ -65,12 +65,13 @@ const editingId = ref<string | null>(null)
 
 function emptyForm() {
   return {
-    parentId: '',
+    parentId: '0',
     name: '',
     type: 1,
     path: '',
     icon: '',
     component: '',
+    component_name: '',
     permission: '',
     sort: 0,
     status: true,
@@ -85,19 +86,21 @@ const form = reactive(emptyForm())
 function openCreate(parent?: SysMenu): void {
   editingId.value = null
   Object.assign(form, emptyForm())
-  form.parentId = parent?.id ?? ''
+  // 后端 ID 解析：顶级是 0，空串会 400
+  form.parentId = parent?.id ?? '0'
   dialogOpen.value = true
 }
 
 function openEdit(row: MenuRow): void {
   editingId.value = row.id
   Object.assign(form, {
-    parentId: row.parentId ?? '',
+    parentId: row.parentId && row.parentId !== '0' ? row.parentId : '0',
     name: row.name,
     type: row.type,
     path: row.path ?? '',
     icon: row.icon ?? '',
     component: row.component ?? '',
+    component_name: row.componentName ?? '',
     permission: row.permission ?? '',
     sort: row.sort ?? 0,
     status: row.status !== 0,
@@ -113,22 +116,36 @@ async function submit(): Promise<void> {
     toastError(new Error('请填写菜单名称'))
     return
   }
+  // 目录与菜单需要路由路径，否则动态路由会注册失败
+  if (form.type !== 3 && !form.path.trim()) {
+    toastError(new Error('目录/菜单必须填写路由路径'))
+    return
+  }
+  // 菜单（可点击进入页面）必须给组件路径，目录不需要，按钮不需要
+  if (form.type === 2 && !form.component.trim()) {
+    toastError(new Error('菜单必须填写组件路径，否则无法匹配到页面'))
+    return
+  }
+  if (form.type === 2 && !form.permission.trim()) {
+    toastError(new Error('菜单建议填写权限标识，否则前端无法做按钮级控制'))
+  }
   busy.value = true
   try {
     const body: MenuSave = {
       name: form.name.trim(),
       type: Number(form.type) as MenuType,
       sort: Number(form.sort) || 0,
-      parentId: form.parentId || '',
-      path: form.path,
-      icon: form.icon,
-      component: form.component,
-      permission: form.permission,
+      parentId: form.parentId || '0',
+      path: form.path.trim(),
+      icon: form.icon.trim(),
+      component: form.component.trim(),
+      permission: form.permission.trim(),
       status: form.status ? 1 : 0,
       visible: form.visible,
       keep_alive: form.keep_alive,
       always_show: form.always_show,
     }
+    if (form.component_name.trim()) body.component_name = form.component_name.trim()
     if (editingId.value) await menuApi.update(editingId.value, body)
     else await menuApi.create(body)
     toastOk(editingId.value ? '菜单已更新' : '菜单已创建')
@@ -188,25 +205,28 @@ async function remove(row: MenuRow): Promise<void> {
   </ListPage>
 
   <FormDialog :open="dialogOpen" :title="editingId ? '编辑菜单' : '新增菜单'" :busy="busy" width="wide" @close="dialogOpen = false" @submit="submit">
-    <Field label="上级菜单">
+    <Field label="上级菜单" help="顶级菜单请选「顶级菜单」，不要留空">
       <Select v-model="form.parentId" :options="parentOptions" placeholder="顶级菜单" />
     </Field>
     <Field label="菜单名称" required>
       <TextInput v-model="form.name" placeholder="菜单名称" />
     </Field>
-    <Field label="类型">
+    <Field label="类型" help="目录仅分组；菜单可进入页面；按钮仅做权限标记">
       <Select v-model="form.type" :options="typeOptions" />
     </Field>
-    <Field label="路由路径">
+    <Field label="路由路径" :help="form.type === 3 ? '按钮不需要路由路径' : '目录/菜单必填，如 /system/user'">
       <TextInput v-model="form.path" placeholder="如 /system/user" />
     </Field>
-    <Field label="图标">
+    <Field label="图标" help="留空则用默认图标">
       <TextInput v-model="form.icon" placeholder="如 ep:setting" />
     </Field>
-    <Field label="组件路径">
+    <Field label="组件路径" :help="form.type === 2 ? '菜单必填，需与前端组件路径一致' : '仅菜单需要'">
       <TextInput v-model="form.component" placeholder="如 system/user/index" />
     </Field>
-    <Field label="权限标识">
+    <Field label="组件名称" help="用于 keep-alive 缓存匹配，选填">
+      <TextInput v-model="form.component_name" placeholder="选填" />
+    </Field>
+    <Field label="权限标识" help="按钮必填，如 system:user:create">
       <TextInput v-model="form.permission" placeholder="如 system:user:list" />
     </Field>
     <Field label="排序">

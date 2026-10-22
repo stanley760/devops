@@ -23,12 +23,12 @@ import { PermissionButton } from '@/components/business'
 type MutList = ListPageState<LoginLog> & { afterMutate: (removedCount?: number) => Promise<void> }
 
 const list = useListPage<LoginLog>({
-  query: { username: '', status: '' },
+  query: { username: '', result: '' },
   fetch: (p) => loginLogApi.list(p),
   rowKey: 'id',
 }) as MutList
 
-const query = list.query as { username: string; status: string | number }
+const query = list.query as { username: string; result: string | number }
 const rows = list.rows
 const total = list.total
 const page = list.page
@@ -36,24 +36,23 @@ const pageSize = list.pageSize
 const loading = list.loading
 const selected = list.selected
 
-const okCount = computed(() => rows.value.filter((r) => r.status === 1).length)
-const failCount = computed(() => rows.value.filter((r) => (r.status ?? 0) === 0).length)
+const okCount = computed(() => rows.value.filter((r) => r.result === 0).length)
+const failCount = computed(() => rows.value.filter((r) => r.result === 1).length)
 
 const columns: Column[] = [
   { key: 'username', title: '账号', width: 130 },
   { key: 'ip', title: 'IP', width: 130 },
-  { key: 'location', title: '归属地', width: 130 },
-  { key: 'browser', title: '浏览器', width: 120 },
-  { key: 'os', title: '操作系统', width: 120 },
-  { key: 'status', title: '状态', width: 100 },
-  { key: 'msg', title: '提示' },
-  { key: 'loginTime', title: '登录时间', width: 160 },
+  { key: 'geoCity', title: '归属地', width: 180 },
+  { key: 'userAgent', title: '客户端信息', width: 240 },
+  { key: 'result', title: '状态', width: 100 },
+  { key: 'code', title: '业务码', width: 100 },
+  { key: 'createTime', title: '登录时间', width: 160 },
 ]
 
-const statusOptions = [
+const resultOptions = [
   { value: '', label: '全部' },
-  { value: 1, label: '成功' },
-  { value: 0, label: '失败' },
+  { value: 0, label: '成功' },
+  { value: 1, label: '失败' },
 ]
 
 const busy = ref(false)
@@ -116,7 +115,7 @@ async function cleanAll(): Promise<void> {
           <TextInput v-model="query.username" placeholder="登录账号" icon="ep:user" />
         </Field>
         <Field label="状态">
-          <Select v-model="query.status" :options="statusOptions" placeholder="全部" />
+          <Select v-model="query.result" :options="resultOptions" placeholder="全部" />
         </Field>
         <Button variant="primary" @click="list.search()">查询</Button>
         <Button variant="ghost" @click="list.reset()">重置</Button>
@@ -142,8 +141,14 @@ async function cleanAll(): Promise<void> {
         <template #cell-ip="{ value }">
           <span class="mono">{{ value || '-' }}</span>
         </template>
-        <template #cell-status="{ row }">
-          <StatusTag :kind="row.status === 1 ? 'ok' : 'crit'" :text="row.status === 1 ? '登录成功' : '失败'" />
+        <template #cell-geoCity="{ row }">
+          {{ [row.geoCountry, row.geoProvince, row.geoCity, row.geoIsp].filter(Boolean).join(' / ') || '-' }}
+        </template>
+        <template #cell-userAgent="{ value }">
+          {{ value || '-' }}
+        </template>
+        <template #cell-result="{ row }">
+          <StatusTag :kind="row.result === 0 ? 'ok' : 'crit'" :text="row.result === 0 ? '登录成功' : '失败'" />
         </template>
       </DataTable>
 

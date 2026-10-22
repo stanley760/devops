@@ -54,9 +54,13 @@ func (s *User) List(ctx context.Context, q types.UserPageQuery) (domain.PageResu
 	if err != nil {
 		return domain.PageResult[types.UserDTO]{}, err
 	}
-	return domain.MapPage(page, func(user model.User) types.UserDTO {
+	rows := domain.MapPage(page, func(user model.User) types.UserDTO {
 		return toUserDTO(&user)
-	}), nil
+	})
+	if err := fillUserDeptNames(ctx, rows.List); err != nil {
+		return domain.PageResult[types.UserDTO]{}, err
+	}
+	return rows, nil
 }
 
 // Get returns the user details (basic info + role/post IDs; data permission single choke point).
@@ -76,8 +80,16 @@ func (s *User) Get(ctx context.Context, id types.ID) (*types.UserDetailResp, err
 	for _, rid := range roleIDs {
 		rids = append(rids, types.ID(rid))
 	}
+	dto := toUserDTO(u)
+	if dto.DeptID.Int64() > 0 {
+		names, err := dao.DeptNames(ctx, []int64{dto.DeptID.Int64()})
+		if err != nil {
+			return nil, err
+		}
+		dto.DeptName = names[dto.DeptID.Int64()]
+	}
 	return &types.UserDetailResp{
-		UserDTO: toUserDTO(u),
+		UserDTO: dto,
 		RoleIDs: rids,
 		PostIDs: dao.PostIDsOf(u.PostIDs),
 	}, nil
@@ -120,7 +132,7 @@ func (s *User) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 		Nickname: req.Nickname,
 		DeptID:   req.DeptID.Int64(),
 		PostIDs:  dao.PostIDsJSON(req.PostIDs),
-		Email:    req.Email,
+		Email:    derefString(req.Email),
 		Mobile:   req.Mobile,
 		Gender:   req.Gender,
 		Avatar:   req.Avatar,
@@ -176,7 +188,7 @@ func (s *User) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 		"username": req.Username,
 		"nickname": req.Nickname,
 		"dept_id":  req.DeptID.Int64(),
-		"email":    req.Email,
+		"email":    derefString(req.Email),
 		"gender":   req.Gender,
 		"avatar":   req.Avatar,
 		"remark":   req.Remark,
@@ -273,15 +285,46 @@ func toUserDTO(u *model.User) types.UserDTO {
 		DeptID:   types.ID(u.DeptID),
 		PostIDs:  dao.PostIDsOf(u.PostIDs),
 		Remark:   u.Remark,
+		Status:   u.Status,
 		LoginIP:  u.LoginIP,
 	}
 	if u.Mobile != nil {
 		dto.Mobile = *u.Mobile
 	}
 	if u.LoginDate != nil {
-		dto.LoginDate = *u.LoginDate
+		dto.LoginDate = types.NewDateTime(*u.LoginDate)
 	}
 	return dto
+}
+
+// fillUserDeptNames fills DeptName for display using one batched query.
+// A name that cannot be resolved is left empty rather than faked, so the UI
+// can tell "no department" from "department deleted".
+func fillUserDeptNames(ctx context.Context, rows []types.UserDTO) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(rows))
+	seen := make(map[int64]struct{}, len(rows))
+	for i := range rows {
+		id := rows[i].DeptID.Int64()
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	names, err := dao.DeptNames(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].DeptName = names[rows[i].DeptID.Int64()]
+	}
+	return nil
 }
 
 // idsToInt64 maps []ID → []int64.

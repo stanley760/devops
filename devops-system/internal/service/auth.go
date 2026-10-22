@@ -279,7 +279,7 @@ func (s *Auth) Info(ctx context.Context, claims *auth.AccessClaims) (*types.User
 		LoginIP:  u.LoginIP,
 	}
 	if u.LoginDate != nil {
-		dto.LoginDate = *u.LoginDate
+		dto.LoginDate = types.NewDateTime(*u.LoginDate)
 	}
 
 	return &types.UserInfoResp{

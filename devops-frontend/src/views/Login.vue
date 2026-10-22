@@ -55,8 +55,26 @@
         <p class="login-desc">使用租户内的账号进入控制台</p>
 
         <div class="login-form">
-          <Field label="租户编码">
-            <TextInput v-model="form.tenant_code" placeholder="default" icon="ep:coin" />
+          <Field
+            label="租户"
+            :error="tenantError"
+            :help="tenantHint"
+          >
+            <!-- 租户列表可用时下拉选择；不可用时退回文本输入，保证登录不被堵死 -->
+            <Select
+              v-if="tenants.length"
+              v-model="form.tenant_code"
+              :options="tenantOptions"
+              :disabled="tenantsLoading"
+              placeholder="请选择租户"
+            />
+            <TextInput
+              v-else
+              v-model="form.tenant_code"
+              placeholder="default"
+              icon="ep:coin"
+              :disabled="tenantsLoading"
+            />
           </Field>
           <Field label="账号" :error="errors.username">
             <TextInput v-model="form.username" placeholder="admin" icon="ep:user" />
@@ -149,8 +167,9 @@ import TopoNet from '@/components/TopoNet.vue'
 import Icon from '@/components/Icon.vue'
 import Field from '@/components/ui/Field.vue'
 import TextInput from '@/components/ui/TextInput.vue'
+import Select from '@/components/ui/Select.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
-import { authApi, solveCaptcha, type CaptchaAnswer, type CaptchaChallenge } from '@/api/auth'
+import { authApi, solveCaptcha, type CaptchaAnswer, type CaptchaChallenge, type LoginableTenant } from '@/api/auth'
 import { ApiError } from '@/api/http'
 import { homePath, login } from '@/composables/auth'
 import { gsap, EASE, afterTwoFrames, firstTimeInSession, trackGlow } from '@/composables/motion'
@@ -170,6 +189,68 @@ const errors = reactive({ username: '', password: '' })
 const remember = ref(true)
 const busy = ref(false)
 const done = ref(false)
+
+/* ---------------- 租户选择 ----------------
+ *
+ * 租户以前是一个自由文本框，让用户手打编码。这有几个问题：
+ *   - 编码是后端标识（如 default），用户根本不知道该填什么，只能问管理员或去翻文档；
+ *   - 填错要到提交后才报错（"tenant not found"），白等一次；
+ *   - 用户看不到自己有哪些租户可用。
+ *
+ * 所以改成下拉：进页面就拉一次可登录租户列表（公开接口），用户从里面挑。
+ * 列表只返回 code 与 name —— 够认人，不泄露租户的其他信息。
+ *
+ * 兜底很重要：接口挂了或没有可用租户时，不能把用户堵在登录门外。
+ * 此时退回可自由输入的文本框（配合记住上次选择），至少让老用户还能登录。
+ */
+
+/** 可登录租户列表。 */
+const tenants = ref<LoginableTenant[]>([])
+/** 租户列表是否正在加载。 */
+const tenantsLoading = ref(false)
+/** 租户列表是否加载失败（此时退回文本输入）。 */
+const tenantsFailed = ref(false)
+
+/** 下拉选项：显示租户名，值是租户编码（登录时要提交的就是编码）。 */
+const tenantOptions = computed(() =>
+  tenants.value.map((t) => ({ value: t.code, label: t.name === t.code ? t.code : `${t.name}（${t.code}）` })),
+)
+
+/** 租户字段的错误提示。 */
+const tenantError = ref('')
+
+/** 租户字段的辅助说明。 */
+const tenantHint = computed(() => {
+  if (tenantsLoading.value) return '正在加载租户…'
+  if (tenantsFailed.value) return '租户列表加载失败，可直接填写租户编码'
+  if (!tenants.value.length) return '暂无可用租户，可直接填写租户编码'
+  return undefined
+})
+
+/**
+ * 拉取可登录租户。
+ *
+ * 失败不阻断登录：老用户本地记着上次的租户编码，直接用就行。
+ */
+async function loadTenants(): Promise<void> {
+  tenantsLoading.value = true
+  try {
+    const list = await authApi.tenants()
+    tenants.value = Array.isArray(list) ? list : []
+    tenantsFailed.value = false
+    // 上次记住的租户若还在列表里就保持选中；否则回落到第一个可用租户
+    const remembered = form.tenant_code
+    const stillExists = tenants.value.some((t) => t.code === remembered)
+    if (!stillExists) {
+      form.tenant_code = tenants.value[0]?.code ?? remembered
+    }
+  } catch {
+    tenants.value = []
+    tenantsFailed.value = true
+  } finally {
+    tenantsLoading.value = false
+  }
+}
 
 /* ---------------- 验证码 ----------------
  *
@@ -338,6 +419,12 @@ async function openCaptchaModal(): Promise<void> {
   errors.username = form.username.trim() ? '' : '请输入账号'
   errors.password = form.password ? '' : '请输入密码'
   if (errors.username || errors.password) return
+  if (!form.tenant_code.trim()) {
+    tenantError.value = '请选择租户'
+    loginError.value = '请选择租户后再登录'
+    return
+  }
+  tenantError.value = ''
 
   busy.value = true
   captchaModalError.value = ''
@@ -468,8 +555,8 @@ function captchaErrorMessage(e: unknown): string {
 const LOGIN_ERROR_TEXT: Array<[RegExp, string]> = [
   [/incorrect username or password/i, '账号或密码错误'],
   [/user does not exist/i, '账号不存在或已被删除'],
-  [/tenant not found/i, '租户不存在'],
-  [/tenant is disabled/i, '租户已被禁用'],
+  [/tenant not found/i, '所选租户不存在，可能已被停用，请重新选择'],
+  [/tenant is disabled/i, '所选租户已被禁用，请联系管理员'],
   [/too many|rate limit/i, '操作过于频繁，请稍后再试'],
 ]
 
@@ -581,6 +668,9 @@ function onKeydown(e: KeyboardEvent): void {
 onMounted(() => {
   tickClock()
   clockTimer = window.setInterval(tickClock, 1000)
+
+  // 拉取可登录租户（公开接口，失败不阻断登录）
+  void loadTenants()
 
   const card = cardRef.value
   if (card) {

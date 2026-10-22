@@ -237,7 +237,7 @@ func toMenuDTO(m *model.Menu) types.MenuDTO {
 		Sort: m.Sort, ParentID: types.ID(m.ParentID), Path: m.Path, Icon: m.Icon,
 		Component: m.Component, ComponentName: m.ComponentName, Status: m.Status,
 		Visible: m.Visible, KeepAlive: m.KeepAlive, AlwaysShow: m.AlwaysShow,
-		CreateTime: m.CreateTime,
+		CreateTime: types.NewDateTime(m.CreateTime),
 	}
 }
 

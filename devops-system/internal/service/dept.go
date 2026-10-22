@@ -30,7 +30,51 @@ func (s *Dept) List(ctx context.Context, status *int8) ([]types.DeptTreeResp, er
 	if err != nil {
 		return nil, err
 	}
-	return buildDeptTree(depts), nil
+	tree, err := fillDeptLeaderNames(ctx, buildDeptTree(depts))
+	if err != nil {
+		return nil, err
+	}
+	return tree, nil
+}
+
+// fillDeptLeaderNames fills LeaderName for display using one batched query,
+// walking the whole tree. An unresolvable leader leaves the name empty
+// (e.g. leaderUserId = 0 means no leader), never a fabricated value.
+func fillDeptLeaderNames(ctx context.Context, nodes []types.DeptTreeResp) ([]types.DeptTreeResp, error) {
+	ids := make([]int64, 0, len(nodes))
+	seen := make(map[int64]struct{}, len(nodes))
+	var walk func(items []types.DeptTreeResp)
+	walk = func(items []types.DeptTreeResp) {
+		for i := range items {
+			id := items[i].LeaderUserID.Int64()
+			if id > 0 {
+				if _, ok := seen[id]; !ok {
+					seen[id] = struct{}{}
+					ids = append(ids, id)
+				}
+			}
+			if len(items[i].Children) > 0 {
+				walk(items[i].Children)
+			}
+		}
+	}
+	walk(nodes)
+
+	names, err := dao.UserNicknames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	var fill func(items []types.DeptTreeResp)
+	fill = func(items []types.DeptTreeResp) {
+		for i := range items {
+			items[i].LeaderName = names[items[i].LeaderUserID.Int64()]
+			if len(items[i].Children) > 0 {
+				fill(items[i].Children)
+			}
+		}
+	}
+	fill(nodes)
+	return nodes, nil
 }
 
 // Get returns the department details.
@@ -40,6 +84,13 @@ func (s *Dept) Get(ctx context.Context, id types.ID) (*types.DeptDTO, error) {
 		return nil, err
 	}
 	dto := toDeptDTO(d)
+	if dto.LeaderUserID.Int64() > 0 {
+		names, err := dao.UserNicknames(ctx, []int64{dto.LeaderUserID.Int64()})
+		if err != nil {
+			return nil, err
+		}
+		dto.LeaderName = names[dto.LeaderUserID.Int64()]
+	}
 	return &dto, nil
 }
 
@@ -59,7 +110,7 @@ func (s *Dept) Create(ctx context.Context, claims *auth.AccessClaims, req types.
 		Sort:         req.Sort,
 		LeaderUserID: req.LeaderUserID.Int64(),
 		Phone:        req.Phone,
-		Email:        req.Email,
+		Email:        derefString(req.Email),
 		Status:       req.Status,
 	}
 	return dao.CreateDept(ctx, d)
@@ -100,7 +151,7 @@ func (s *Dept) Update(ctx context.Context, claims *auth.AccessClaims, id types.I
 		"sort":           req.Sort,
 		"leader_user_id": req.LeaderUserID.Int64(),
 		"phone":          req.Phone,
-		"email":          req.Email,
+		"email":          derefString(req.Email),
 		"status":         req.Status,
 		"updater":        claims.Username,
 	})
@@ -179,7 +230,7 @@ func toDeptDTO(d *model.Dept) types.DeptDTO {
 		Phone:        d.Phone,
 		Email:        d.Email,
 		Status:       d.Status,
-		CreateTime:   d.CreateTime,
+		CreateTime:   types.NewDateTime(d.CreateTime),
 	}
 }
 
@@ -275,6 +326,6 @@ func toPostDTO(p *model.Post) types.PostDTO {
 		Sort:       p.Sort,
 		Status:     p.Status,
 		Remark:     p.Remark,
-		CreateTime: p.CreateTime,
+		CreateTime: types.NewDateTime(p.CreateTime),
 	}
 }

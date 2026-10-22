@@ -199,7 +199,7 @@ func toDictTypeDTO(t *model.DictType) types.DictTypeDTO {
 		Type:       t.Type,
 		Status:     t.Status,
 		Remark:     t.Remark,
-		CreateTime: t.CreateTime,
+		CreateTime: types.NewDateTime(t.CreateTime),
 	}
 }
 
@@ -214,6 +214,6 @@ func toDictDataDTO(d *model.DictData) types.DictDataDTO {
 		Status:     d.Status,
 		CSSClass:   d.CSSClass,
 		Remark:     d.Remark,
-		CreateTime: d.CreateTime,
+		CreateTime: types.NewDateTime(d.CreateTime),
 	}
 }

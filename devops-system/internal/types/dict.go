@@ -2,7 +2,6 @@
 package types
 
 import (
-	"time"
 
 	"github.com/stanley760/devops/devops-common/domain"
 )
@@ -32,7 +31,7 @@ type DictTypeDTO struct {
 	Type       string    `json:"type" doc:"dictionary type code"`
 	Status     int8      `json:"status" doc:"dictionary type status 0: disabled 1: enabled"`
 	Remark     string    `json:"remark" doc:"remark"`
-	CreateTime time.Time `json:"createTime" doc:"creation date"`
+	CreateTime DateTime `json:"createTime" doc:"creation date"`
 }
 
 // ---- Dictionary data ----
@@ -67,5 +66,5 @@ type DictDataDTO struct {
 	Status     int8      `json:"status" doc:"dictionary item status 0: disabled 1: enabled"`
 	CSSClass   string    `json:"cssClass" doc:"frontend style class"`
 	Remark     string    `json:"remark" doc:"remark"`
-	CreateTime time.Time `json:"createTime" doc:"creation date"`
+	CreateTime DateTime `json:"createTime" doc:"creation date"`
 }

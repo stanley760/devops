@@ -19,11 +19,12 @@ import (
 type AuthHandler struct {
 	svc     *service.Auth
 	captcha *service.Captcha
+	tenants *service.Tenant
 }
 
 // NewAuthHandler creates the handler.
-func NewAuthHandler(svc *service.Auth, captchaSvc *service.Captcha) *AuthHandler {
-	return &AuthHandler{svc: svc, captcha: captchaSvc}
+func NewAuthHandler(svc *service.Auth, captchaSvc *service.Captcha, tenantSvc *service.Tenant) *AuthHandler {
+	return &AuthHandler{svc: svc, captcha: captchaSvc, tenants: tenantSvc}
 }
 
 // ---- Input / Output (the structs are the OpenAPI schema) ----
@@ -62,6 +63,29 @@ func (h *AuthHandler) Captcha(ctx context.Context, in *CaptchaInput) (*CaptchaOu
 		return nil, errs.ToHumaError(err)
 	}
 	return &CaptchaOutput{Body: response.OKBody(*resp)}, nil
+}
+
+// ListTenantsInput is GET /system/api/v1/auth/tenants (no parameters).
+type ListTenantsInput struct{}
+
+// ListTenantsOutput is the GET /system/api/v1/auth/tenants response envelope.
+type ListTenantsOutput struct {
+	Body commonResp.BaseResponse[[]types.TenantBrief]
+}
+
+// ListTenants handles GET /system/api/v1/auth/tenants: the loginable tenants.
+//
+// This is a public interface (no token): the login page needs to offer a tenant
+// picker before anyone has signed in. Only the code and the name are exposed.
+func (h *AuthHandler) ListTenants(ctx context.Context, _ *ListTenantsInput) (*ListTenantsOutput, error) {
+	if h.tenants == nil {
+		return nil, errs.New(errs.CodeInternal, "tenant service is not configured")
+	}
+	list, err := h.tenants.ListLoginable(ctx)
+	if err != nil {
+		return nil, errs.ToHumaError(err)
+	}
+	return &ListTenantsOutput{Body: response.OKBody(list)}, nil
 }
 
 // RefreshInput is POST /system/api/v1/auth/refresh.

@@ -47,6 +47,15 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
+          # Tenant list: the login page offers a tenant picker, so it must read the
+          # available tenants before anyone has signed in — anonymous like login.
+          - path: /system/api/v1/auth/tenants
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
           # Refresh: the only way out after access-token expiry; must be anonymous.
           - path: /system/api/v1/auth/refresh
             pathType: Prefix

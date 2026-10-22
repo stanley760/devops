@@ -119,6 +119,6 @@ func toConfigDTO(c *model.Config) types.ConfigDTO {
 		Type:        c.Type,
 		Visible:     c.Visible,
 		Remark:      c.Remark,
-		CreateTime:  c.CreateTime,
+		CreateTime:  types.NewDateTime(c.CreateTime),
 	}
 }

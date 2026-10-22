@@ -322,6 +322,9 @@ var serverCmd = &cobra.Command{
 					// anonymous set as login/refresh. Missing it makes the captcha
 					// endpoint return 401 and the whole login page unusable.
 					router.AuthCaptchaPath,
+					// The tenant list backs the login page's tenant picker, so it must be
+					// readable before anyone has a token — same anonymous set as login.
+					router.AuthTenantsPath,
 				},
 				[]string{cfg.APIDoc.BasePath},
 			),

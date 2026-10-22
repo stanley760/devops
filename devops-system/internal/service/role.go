@@ -217,6 +217,6 @@ func toRoleDTO(r *model.Role) types.RoleDTO {
 		Status:           r.Status,
 		Type:             r.Type,
 		Remark:           r.Remark,
-		CreateTime:       r.CreateTime,
+		CreateTime:       types.NewDateTime(r.CreateTime),
 	}
 }

@@ -13,7 +13,7 @@
         <span class="tag tag-violet">角色 × {{ roles.length || 1 }}</span>
         <span class="tag tag-ok">权限点 {{ permissions.length }}</span>
         <span v-if="currentUser?.loginDate" class="tag">
-          上次登录 {{ formatDate(currentUser.loginDate) }}
+          上次登录 {{ formatDateTime(currentUser.loginDate) }}
         </span>
       </div>
     </section>
@@ -46,13 +46,13 @@
           <div>
             <div v-for="row in loginRows" :key="row.id" class="wb-log-row">
               <StatusTag
-                :kind="row.status === 1 ? 'ok' : 'crit'"
-                :text="row.status === 1 ? '成功' : '失败'"
+                :kind="row.result === 0 ? 'ok' : 'crit'"
+                :text="row.result === 0 ? '成功' : '失败'"
                 :led="false"
               />
               <span class="log-main mono">{{ row.username }}</span>
-              <span class="log-main" style="flex: 1">{{ row.ip || '—' }} · {{ row.location || '内网' }}</span>
-              <span class="log-time">{{ formatTime(row.loginTime) }}</span>
+              <span class="log-main" style="flex: 1">{{ row.ip || '—' }} · {{ formatLoginLocation(row) }}</span>
+              <span class="log-time">{{ formatTimeOfDay(row.createTime) }}</span>
             </div>
             <div v-if="!loginRows.length" class="empty">
               <div class="empty-icon"><Icon name="ep:document" :size="22" /></div>
@@ -103,7 +103,7 @@
           <div>
             <div v-for="row in operRows" :key="row.id" class="wb-log-row">
               <span class="log-main">{{ row.title || row.action || '操作' }}</span>
-              <span class="log-time">{{ formatTime(row.operTime) }}</span>
+              <span class="log-time">{{ formatTimeOfDay(row.operTime) }}</span>
             </div>
             <div v-if="!operRows.length" class="empty">
               <div class="empty-icon"><Icon name="ep:document" :size="22" /></div>
@@ -130,6 +130,7 @@ import StatusTag from '@/components/ui/StatusTag.vue'
 import Icon from '@/components/Icon.vue'
 import { currentUser, currentTenant, hasPermission, navGroups, permissions, roles } from '@/composables/auth'
 import { countUp, revealCascade } from '@/composables/motion'
+import { formatDateTime, formatTimeOfDay } from '@/composables/datetime'
 import { loginLogApi, operationLogApi, type LoginLog, type OperationLog } from '@/api/system'
 
 const router = useRouter()
@@ -181,13 +182,10 @@ function go(path: string): void {
   void router.push(path)
 }
 
-function formatDate(v?: string): string {
-  return v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—'
-}
-
-function formatTime(v?: string): string {
-  if (!v) return '—'
-  return new Date(v).toLocaleTimeString('zh-CN', { hour12: false })
+function formatLoginLocation(row: LoginLog): string {
+  return (
+    [row.geoCountry, row.geoProvince, row.geoCity, row.geoIsp].filter(Boolean).join(' / ') || '内网'
+  )
 }
 
 onMounted(() => {

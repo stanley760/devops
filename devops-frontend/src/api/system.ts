@@ -2,9 +2,11 @@
  * devops-system 系统管理接口：用户 / 角色 / 菜单 / 部门 / 岗位 / 租户 /
  * 字典 / 参数 / 登录日志 / 操作日志。
  *
- * 命名约定（与后端 DTO 一致）：
- *   查询与读出多为 camelCase；写入体为 camelCase，少数历史字段 snake_case
- *   （config_key、dict_type、css_class、keep_alive、always_show、expire_time…）。
+ * 命名约定（与后端 DTO 严格一致，改动前请先核对 Go 侧 types 包）：
+ *   - **读**接口（DTO）统一 camelCase：deptName / leaderName / dataScope / configKey…
+ *   - **写**接口（Save/Req）统一 snake_case：config_key、dict_type、css_class、
+ *     keep_alive、always_show、data_scope、leader_user_id、contact_name、expire_time…
+ * 改任何字段前务必对照 devops-system/internal/types/*.go。
  * 权限码 system:<模块>:<动作>，403 时 UI 隐藏对应动作（后端仍强制校验）。
  */
 import { http, type PageResult, type Query } from './http'
@@ -21,6 +23,11 @@ export interface PageQuery extends Query {
 
 /* ---------------- 用户 ---------------- */
 
+/**
+ * 用户读模型。
+ * 注意字段来自两个不同的后端响应：列表行（GET /users）不含 roleIds / deptName，
+ * 详情（GET /users/{id}）含 roleIds；deptName 现已由后端一并返回。
+ */
 export interface SysUser {
   id: string
   username: string
@@ -32,14 +39,15 @@ export interface SysUser {
   deptId?: string
   deptName?: string
   postIds?: string[]
+  /** 仅详情接口返回 */
   roleIds?: string[]
-  status?: number
   remark?: string
+  status?: number
   loginIp?: string
   loginDate?: string
-  createTime?: string
 }
 
+/** 写接口：deptId 必填（后端 required + ID 解析），空串会返回 400。 */
 export interface UserSave {
   username: string
   nickname: string
@@ -73,6 +81,7 @@ export interface SysRole {
   code: string
   sort: number
   dataScope?: number
+  /** JSON 数组字符串（如 '["101"]'），用 parseDeptIDsJson 解析 */
   dataScopeDeptIds?: string
   status: number
   type?: number
@@ -81,6 +90,36 @@ export interface SysRole {
   createTime?: string
 }
 
+/**
+ * 解析 dataScopeDeptIds（JSON 数组字符串）为 id 数组。
+ * 后端也可能写入裸数字字符串（脏数据），这里一并兼容，避免解析失败让编辑表单崩掉。
+ */
+export function parseDeptIDsJson(raw?: string): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
+  } catch {
+    // 非 JSON：按逗号分隔兜底
+    return raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+/** 把 id 数组编码为后端期望的 JSON 数组字符串。 */
+export function encodeDeptIDsJson(ids: string[]): string {
+  return JSON.stringify(ids.map(Number).filter((n) => Number.isFinite(n) && n > 0))
+}
+
+/**
+ * 写接口：
+ *  - data_scope_dept_ids 是 **JSON 数组字符串**（如 '["101"]'），不是逗号分隔；
+ *    与 post_ids 同一种存储格式，传错会被后端判为"未提供部门集合"（400）。
+ *  - 该字段在读取侧同样是 JSON 数组字符串，需要 JSON.parse 才能拿到 id 列表。
+ */
 export interface RoleSave {
   name: string
   code?: string
@@ -160,10 +199,11 @@ export interface SysDept {
   phone?: string
   email?: string
   status: number
-  remark?: string
+  createTime?: string
   children?: SysDept[]
 }
 
+/** 写接口：无 remark 字段（后端 DeptSaveReq 未提供），顶级部门 parentId 传 '0' 而非空串。 */
 export interface DeptSave {
   name: string
   parentId?: string
@@ -172,7 +212,6 @@ export interface DeptSave {
   phone?: string
   email?: string
   status?: number
-  remark?: string
 }
 
 export const deptApi = {
@@ -225,12 +264,16 @@ export interface SysTenant {
   createTime?: string
 }
 
+/**
+ * 写接口：expire_time 需为 RFC3339；编辑时传 null 显式清空（永不过期），
+ * 不能靠省略字段——后端用 *time.Time 区分「清空」与「不修改」。
+ */
 export interface TenantSave {
   name: string
   code?: string
   contact_name?: string
   contact_mobile?: string
-  expire_time?: string
+  expire_time?: string | null
   remark?: string
   admin_username?: string
   admin_password?: string
@@ -286,6 +329,14 @@ export interface DictDataSave {
   remark?: string
 }
 
+/**
+ * 字典类型编码约定（与后端常量保持一致）：
+ *   sys_captcha_type — 验证码类型，sys.captcha.type 的取值域
+ *   sys_status       — 通用启用/停用状态
+ */
+export const DICT_CAPTCHA_TYPE = 'sys_captcha_type'
+export const DICT_STATUS = 'sys_status'
+
 export const dictApi = {
   type: {
     list: (params: PageQuery) => http.get<PageResult<DictType>>(`${V1}/dict-types`, params),
@@ -340,13 +391,16 @@ export const configApi = {
 export interface LoginLog {
   id: string
   username: string
-  ip?: string
-  location?: string
-  browser?: string
-  os?: string
-  status?: number
-  msg?: string
-  loginTime?: string
+  userId: string
+  ip: string
+  userAgent: string
+  geoCountry: string
+  geoProvince: string
+  geoCity: string
+  geoIsp: string
+  result: number
+  code: number
+  createTime: string
 }
 
 export interface OperationLog {

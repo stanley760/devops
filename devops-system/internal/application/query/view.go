@@ -54,7 +54,7 @@ func UserDTO(u *iam.User) types.UserDTO {
 		LoginIP:  u.LoginIP,
 	}
 	if u.LoginDate != nil {
-		dto.LoginDate = *u.LoginDate
+		dto.LoginDate = types.NewDateTime(*u.LoginDate)
 	}
 	return dto
 }
@@ -83,7 +83,7 @@ func RoleDTO(r *iam.Role) types.RoleDTO {
 		Status:           r.Status,
 		Type:             r.Type,
 		Remark:           r.Remark,
-		CreateTime:       r.CreateTime,
+		CreateTime:       types.NewDateTime(r.CreateTime),
 	}
 }
 
@@ -114,7 +114,7 @@ func MenuDTO(m *iam.Menu) types.MenuDTO {
 		Visible:       m.Visible,
 		KeepAlive:     m.KeepAlive,
 		AlwaysShow:    m.AlwaysShow,
-		CreateTime:    m.CreateTime,
+		CreateTime:    types.NewDateTime(m.CreateTime),
 	}
 }
 
@@ -143,7 +143,7 @@ func DeptDTO(d *iam.Dept) types.DeptDTO {
 		Phone:        d.Phone,
 		Email:        d.Email,
 		Status:       d.Status,
-		CreateTime:   d.CreateTime,
+		CreateTime:   types.NewDateTime(d.CreateTime),
 	}
 }
 
@@ -170,7 +170,7 @@ func PostDTO(p *iam.Post) types.PostDTO {
 		Sort:       p.Sort,
 		Status:     p.Status,
 		Remark:     p.Remark,
-		CreateTime: p.CreateTime,
+		CreateTime: types.NewDateTime(p.CreateTime),
 	}
 }
 
@@ -185,9 +185,9 @@ func TenantDTO(t *iam.Tenant) types.TenantDTO {
 		ContactName:   t.ContactName,
 		ContactMobile: t.ContactMobile,
 		Status:        t.Status,
-		ExpireTime:    t.ExpireTime,
+		ExpireTime:    types.DateTimePtr(t.ExpireTime),
 		Remark:        t.Remark,
-		CreateTime:    t.CreateTime,
+		CreateTime:    types.NewDateTime(t.CreateTime),
 	}
 }
 
@@ -212,7 +212,7 @@ func LoginLogDTO(l *auditlog.LoginLog) types.LoginLogDTO {
 		GeoIsp:      l.GeoISP,
 		Result:      l.Result,
 		Code:        l.Code,
-		CreateTime:  l.CreateTime,
+		CreateTime:  types.NewDateTime(l.CreateTime),
 	}
 }
 
@@ -240,7 +240,7 @@ func OperationLogDTO(l *auditlog.OperationLog) types.OperationLogDTO {
 		GeoIsp:        l.GeoISP,
 		Result:        l.Result,
 		Code:          l.Code,
-		CreateTime:    l.CreateTime,
+		CreateTime:    types.NewDateTime(l.CreateTime),
 	}
 }
 

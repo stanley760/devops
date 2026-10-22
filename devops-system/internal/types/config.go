@@ -2,7 +2,6 @@
 package types
 
 import (
-	"time"
 
 	"github.com/stanley760/devops/devops-common/domain"
 )
@@ -35,5 +34,5 @@ type ConfigDTO struct {
 	Type        int8      `json:"type" doc:"configuration type 1: built-in 2: custom"`
 	Visible     bool      `json:"visible" doc:"whether the frontend shows it"`
 	Remark      string    `json:"remark" doc:"remark"`
-	CreateTime  time.Time `json:"createTime" doc:"creation date"`
+	CreateTime  DateTime `json:"createTime" doc:"creation date"`
 }

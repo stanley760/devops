@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { tenantApi, type SysTenant, type TenantSave } from '@/api/system'
 import { useListPage, type ListPageState } from '@/composables/list'
+import { formatDate } from '@/composables/datetime'
 import { confirmAction } from '@/composables/confirm'
 import { toastOk, toastError } from '@/composables/toast'
 import type { Column } from '@/components/ui/types'
@@ -63,7 +64,7 @@ async function openEdit(row: SysTenant): Promise<void> {
       code: t.code,
       contact_name: t.contactName ?? '',
       contact_mobile: t.contactMobile ?? '',
-      expire_time: t.expireTime ?? '',
+      expire_time: toDateInput(t.expireTime),
       remark: t.remark ?? '',
       admin_username: '',
       admin_password: '',
@@ -76,9 +77,43 @@ async function openEdit(row: SysTenant): Promise<void> {
   }
 }
 
+/**
+ * 后端字段是 *time.Time，JSON 反序列化要求 RFC 3339（形如 2026-12-31T00:00:00+08:00），
+ * 直接传 2026-12-31 会 400。这里做一次规范化；留空表示永不过期。
+ */
+function toRfc3339(dateStr: string): string | undefined {
+  const v = dateStr.trim()
+  if (!v) return undefined
+  // 已带时间位则原样透传，避免重复转换
+  if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return v
+  const d = new Date(`${v}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return undefined
+  return d.toISOString()
+}
+
+/**
+ * 回填到 date 输入框：只取日期部分。
+ *
+ * 后端统一输出 "YYYY-MM-DD HH:mm:ss"，直接截前 10 位即可。
+ * 不用 new Date() 解析 —— 那样会引入时区偏移，可能把日期整体挪一天。
+ */
+function toDateInput(v?: string | null): string {
+  return formatDate(v, '')
+}
+
+const expireError = computed(() => {
+  const v = form.expire_time.trim()
+  if (!v) return ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) || /^\d{4}-\d{2}-\d{2}T/.test(v) ? '' : '日期格式不正确'
+})
+
 async function submit(): Promise<void> {
   if (!form.name.trim()) {
     toastError(new Error('请填写租户名称'))
+    return
+  }
+  if (expireError.value) {
+    toastError(new Error(expireError.value))
     return
   }
   if (!editingId.value) {
@@ -90,21 +125,27 @@ async function submit(): Promise<void> {
       toastError(new Error('请填写管理员账号与密码'))
       return
     }
+    if (form.admin_password.length < 6 || form.admin_password.length > 32) {
+      toastError(new Error('管理员密码长度需为 6–32 位'))
+      return
+    }
   }
   busy.value = true
   try {
     const body: TenantSave = { name: form.name.trim() }
+    const expire = toRfc3339(form.expire_time)
     if (editingId.value) {
-      if (form.contact_name) body.contact_name = form.contact_name
-      if (form.contact_mobile) body.contact_mobile = form.contact_mobile
-      if (form.expire_time) body.expire_time = form.expire_time
+      if (form.contact_name.trim()) body.contact_name = form.contact_name.trim()
+      if (form.contact_mobile.trim()) body.contact_mobile = form.contact_mobile.trim()
+      // 显式传 null 表示「永不过期」，不能靠省略字段（后端注释已说明）
+      body.expire_time = expire ?? (null as unknown as string)
       body.remark = form.remark
       await tenantApi.update(editingId.value, body)
     } else {
       body.code = form.code.trim()
-      if (form.contact_name) body.contact_name = form.contact_name
-      if (form.contact_mobile) body.contact_mobile = form.contact_mobile
-      if (form.expire_time) body.expire_time = form.expire_time
+      if (form.contact_name.trim()) body.contact_name = form.contact_name.trim()
+      if (form.contact_mobile.trim()) body.contact_mobile = form.contact_mobile.trim()
+      if (expire) body.expire_time = expire
       body.remark = form.remark
       body.admin_username = form.admin_username.trim()
       body.admin_password = form.admin_password
@@ -209,14 +250,14 @@ async function remove(row: SysTenant): Promise<void> {
     <Field label="联系电话">
       <TextInput v-model="form.contact_mobile" placeholder="联系电话" />
     </Field>
-    <Field label="到期时间" help="格式 YYYY-MM-DD，留空为永久">
-      <TextInput v-model="form.expire_time" placeholder="YYYY-MM-DD 可空" />
+    <Field label="到期时间" :error="expireError" help="格式 YYYY-MM-DD，留空为永久">
+      <TextInput v-model="form.expire_time" type="date" placeholder="YYYY-MM-DD 可空" />
     </Field>
     <template v-if="!editingId">
       <Field label="管理员账号" required>
         <TextInput v-model="form.admin_username" placeholder="初始管理员登录名" />
       </Field>
-      <Field label="管理员密码" required>
+      <Field label="管理员密码" required help="6–32 位">
         <TextInput v-model="form.admin_password" type="password" placeholder="初始管理员密码" />
       </Field>
     </template>

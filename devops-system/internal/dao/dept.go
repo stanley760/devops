@@ -44,6 +44,30 @@ func GetDeptByID(ctx context.Context, deptID int64) (*model.Dept, error) {
 	return &d, nil
 }
 
+// DeptNames batch-fetches department names by ID for display (e.g. the dept column
+// in the user list). One query fetches all names, avoiding per-row N+1; unknown IDs
+// are simply absent from the result.
+func DeptNames(ctx context.Context, deptIDs []int64) (map[int64]string, error) {
+	if len(deptIDs) == 0 {
+		return nil, nil
+	}
+	type row struct {
+		ID   int64
+		Name string
+	}
+	var rows []row
+	err := tenantdb.DB(ctx).Model(&model.Dept{}).
+		Where("id IN ?", deptIDs).Select("id, name").Find(&rows).Error
+	if err != nil {
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query department names")
+	}
+	out := make(map[int64]string, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.Name
+	}
+	return out, nil
+}
+
 // CreateDept creates a department (primary key is assigned).
 func CreateDept(ctx context.Context, d *model.Dept) error {
 	if err := tenantdb.DB(ctx).Create(d).Error; err != nil {

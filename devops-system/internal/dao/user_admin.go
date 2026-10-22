@@ -78,6 +78,29 @@ func MobileExists(ctx context.Context, mobile string, excludeID int64) (bool, er
 	return cnt > 0, nil
 }
 
+// UserNicknames batch-fetches user nicknames by ID for display (e.g. the department
+// leader column). One query fetches all names, avoiding per-row N+1.
+func UserNicknames(ctx context.Context, userIDs []int64) (map[int64]string, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	type row struct {
+		ID       int64
+		Nickname string
+	}
+	var rows []row
+	err := tenantdb.DB(ctx).Model(&model.User{}).
+		Where("id IN ?", userIDs).Select("id, nickname").Find(&rows).Error
+	if err != nil {
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query user nicknames")
+	}
+	out := make(map[int64]string, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.Nickname
+	}
+	return out, nil
+}
+
 // CreateUser creates a user (primary key is assigned via BeforeCreate).
 func CreateUser(ctx context.Context, u *model.User) error {
 	if err := tenantdb.DB(ctx).Create(u).Error; err != nil {

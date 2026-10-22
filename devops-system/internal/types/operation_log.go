@@ -44,5 +44,5 @@ type OperationLogDTO struct {
 	GeoIsp        string               `json:"geoIsp" doc:"ISP (injected by the higress geo-ip plugin header)"`
 	Result        int8                 `json:"result" doc:"execution result 0: success 1: failure"`
 	Code          int                  `json:"code" doc:"HTTP status code, consistent with the response envelope"`
-	CreateTime    time.Time            `json:"createTime" doc:"operation time"`
+	CreateTime    DateTime            `json:"createTime" doc:"operation time"`
 }

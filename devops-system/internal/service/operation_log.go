@@ -50,7 +50,7 @@ func (s *OperationLog) List(ctx context.Context, q types.OperationLogPageQuery) 
 			GeoIsp:        log.GeoISP,
 			Result:        log.Result,
 			Code:          log.Code,
-			CreateTime:    log.CreateTime,
+			CreateTime:    types.NewDateTime(log.CreateTime),
 		}
 	}), nil
 }

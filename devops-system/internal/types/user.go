@@ -13,6 +13,10 @@ type UserPageQuery struct {
 }
 
 // UserCreateReq is the POST /users input (role assignment g row linkage).
+//
+// Note on optional fields: format validators in the request layer run on whatever is
+// present, and an empty string still fails them ("" is not a valid email / ID). So an
+// optional value must be **omitted** from the payload rather than sent as "".
 type UserCreateReq struct {
 	Username string  `json:"username" binding:"required,min=2,max=30" minLength:"2" maxLength:"30" doc:"user real name"`
 	Password string  `json:"password" binding:"required,min=6,max=64" minLength:"6" maxLength:"64" doc:"user password"`
@@ -20,8 +24,8 @@ type UserCreateReq struct {
 	DeptID   ID      `json:"deptId" binding:"required" doc:"associated department id"`
 	PostIDs  []ID    `json:"postIds,omitempty" doc:"associated post ID list"`
 	RoleIDs  []ID    `json:"roleIds,omitempty" doc:"associated role ID list"`
-	Email    string  `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email address"`
-	Mobile   *string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"mobile number"`
+	Email    *string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email address; omit when empty"`
+	Mobile   *string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"mobile number; omit when empty"`
 	Gender   int8    `json:"gender,omitempty" binding:"omitempty,min=0,max=2" minimum:"0" maximum:"2" doc:"gender 0 unknown 1 male 2 female"`
 	Avatar   string  `json:"avatar,omitempty" binding:"omitempty,max=512" maxLength:"512" doc:"avatar"`
 	Remark   string  `json:"remark,omitempty" binding:"omitempty,max=500" maxLength:"500" doc:"remark"`
@@ -35,8 +39,8 @@ type UserUpdateReq struct {
 	DeptID   ID      `json:"deptId" binding:"required" doc:"associated department id"`
 	PostIDs  []ID    `json:"postIds,omitempty" doc:"associated post ID list"`
 	RoleIDs  []ID    `json:"roleIds,omitempty" doc:"associated role ID list"`
-	Email    string  `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email address"`
-	Mobile   *string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"mobile number"`
+	Email    *string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email address; omit when empty"`
+	Mobile   *string `json:"mobile,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"mobile number; omit when empty"`
 	Gender   int8    `json:"gender,omitempty" binding:"omitempty,min=0,max=2" minimum:"0" maximum:"2" doc:"gender 0 unknown 1 male 2 female"`
 	Avatar   string  `json:"avatar,omitempty" binding:"omitempty,max=512" maxLength:"512" doc:"avatar"`
 	Remark   string  `json:"remark,omitempty" binding:"omitempty,max=500" maxLength:"500" doc:"remark"`

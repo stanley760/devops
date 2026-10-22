@@ -43,13 +43,13 @@ type TenantStatusReq struct {
 
 // TenantDTO is the tenant info.
 type TenantDTO struct {
-	ID            ID         `json:"id" doc:"tenant id"`
-	Name          string     `json:"name" doc:"tenant name"`
-	Code          string     `json:"code" doc:"tenant code"`
-	ContactName   string     `json:"contactName" doc:"contact name"`
-	ContactMobile string     `json:"contactMobile" doc:"contact mobile"`
-	Status        int8       `json:"status" doc:"tenant status 0: disabled 1: enabled"`
-	ExpireTime    *time.Time `json:"expireTime" doc:"expiry time; empty means never expires"`
-	Remark        string     `json:"remark" doc:"remark"`
-	CreateTime    time.Time  `json:"createTime" doc:"creation date"`
+	ID            ID        `json:"id" doc:"tenant id"`
+	Name          string    `json:"name" doc:"tenant name"`
+	Code          string    `json:"code" doc:"tenant code"`
+	ContactName   string    `json:"contactName" doc:"contact name"`
+	ContactMobile string    `json:"contactMobile" doc:"contact mobile"`
+	Status        int8      `json:"status" doc:"tenant status 0: disabled 1: enabled"`
+	ExpireTime    *DateTime `json:"expireTime" doc:"expiry time; empty means never expires"`
+	Remark        string    `json:"remark" doc:"remark"`
+	CreateTime    DateTime  `json:"createTime" doc:"creation date"`
 }

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { deptApi, type SysDept, type DeptSave } from '@/api/system'
+import { deptApi, userApi, type SysDept, type DeptSave } from '@/api/system'
 import { useTreeListPage, type ListPageState } from '@/composables/list'
 import { confirmAction } from '@/composables/confirm'
 import { toastOk, toastError } from '@/composables/toast'
-import type { Column } from '@/components/ui/types'
+import type { Column, SelectOption } from '@/components/ui/types'
 import { Field, TextInput, Select, Switch, StatusTag } from '@/components/ui'
 import { ListPage, FormDialog, PermissionButton } from '@/components/business'
 
@@ -44,20 +44,35 @@ const columns: Column[] = [
   { key: 'actions', title: '操作', width: 180, className: 'col-actions' },
 ]
 
-const parentOptions = computed(() => {
-  const opts: Array<{ value: string; label: string }> = [{ value: '', label: '顶级部门' }]
-  for (const r of flatRows.value) opts.push({ value: r.id, label: `${'　'.repeat(r.depth)}${r.name}` })
-  return opts
-})
-
 const dialogOpen = ref(false)
 const busy = ref(false)
 const editingId = ref<string | null>(null)
 
+/** 负责人候选：远程搜索用户（用户量大，不整表拉取）。 */
+const leaderOptions = ref<SelectOption[]>([])
+const leaderLoading = ref(false)
+
+async function searchLeader(kw: string): Promise<void> {
+  leaderLoading.value = true
+  try {
+    const res = await userApi.list({ page_num: 1, page_size: 20, username: kw.trim() })
+    leaderOptions.value = (res?.list ?? []).map((u) => ({
+      value: u.id,
+      label: `${u.nickname || u.username}`,
+    }))
+  } catch (e) {
+    // 无 user:list 权限或网络失败：留空并提示，不阻断表单其余字段
+    leaderOptions.value = []
+    toastError(e, '加载负责人候选失败')
+  } finally {
+    leaderLoading.value = false
+  }
+}
+
 function emptyForm() {
   return {
     name: '',
-    parentId: '',
+    parentId: '0',
     sort: 0,
     leader_user_id: '',
     phone: '',
@@ -68,10 +83,17 @@ function emptyForm() {
 
 const form = reactive(emptyForm())
 
+const emailError = computed(() => {
+  const v = form.email.trim()
+  if (!v) return ''
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? '' : '邮箱格式不正确'
+})
+
 function openCreate(parent?: DeptRow): void {
   editingId.value = null
   Object.assign(form, emptyForm())
-  form.parentId = parent?.id ?? ''
+  form.parentId = parent?.id ?? '0'
+  void searchLeader('')
   dialogOpen.value = true
 }
 
@@ -79,32 +101,84 @@ function openEdit(row: DeptRow): void {
   editingId.value = row.id
   Object.assign(form, {
     name: row.name,
-    parentId: row.parentId ?? '',
+    // 后端 ID 解析：顶级是 0，不是空串（空串会 400）
+    parentId: row.parentId && row.parentId !== '0' ? row.parentId : '0',
     sort: row.sort ?? 0,
-    leader_user_id: row.leaderUserId ?? '',
+    leader_user_id: row.leaderUserId && row.leaderUserId !== '0' ? row.leaderUserId : '',
     phone: row.phone ?? '',
     email: row.email ?? '',
     status: row.status !== 0,
   })
+  // 已有负责人时补一个候选项，否则 Select 显示成空白
+  leaderOptions.value = row.leaderUserId && row.leaderUserId !== '0'
+    ? [{ value: row.leaderUserId, label: row.leaderName || row.leaderUserId }]
+    : []
+  void searchLeader('')
   dialogOpen.value = true
 }
+
+/**
+ * 父部门选项排除自身及其子树，否则可以把自己挂到自己下面形成环
+ * （后端不校验环，树会递归到栈溢出）。
+ */
+const parentOptions = computed<SelectOption[]>(() => {
+  const excluded = new Set<string>()
+  const editing = editingId.value
+  if (editing) {
+    excluded.add(editing)
+    // 自身及其子树：从原始树里找（扁平行里 children 已被剥掉）
+    const markSubtree = (nodes: SysDept[]): boolean => {
+      for (const n of nodes) {
+        if (n.id === editing) {
+          const walk = (subs: SysDept[]): void => {
+            for (const s of subs) {
+              excluded.add(s.id)
+              if (s.children?.length) walk(s.children)
+            }
+          }
+          walk(n.children ?? [])
+          return true
+        }
+        if (n.children?.length && markSubtree(n.children)) return true
+      }
+      return false
+    }
+    markSubtree(treeList.rows.value)
+  }
+  const opts: SelectOption[] = [{ value: '0', label: '顶级部门' }]
+  for (const r of flatRows.value) {
+    if (excluded.has(r.id)) continue
+    opts.push({ value: r.id, label: `${'　'.repeat(r.depth)}${r.name}` })
+  }
+  return opts
+})
 
 async function submit(): Promise<void> {
   if (!form.name.trim()) {
     toastError(new Error('请填写部门名称'))
     return
   }
+  if (form.parentId && form.parentId === editingId.value) {
+    toastError(new Error('上级部门不能选择自身'))
+    return
+  }
+  if (emailError.value) {
+    toastError(new Error(emailError.value))
+    return
+  }
   busy.value = true
   try {
     const body: DeptSave = {
       name: form.name.trim(),
-      parentId: form.parentId || '',
+      // 顶级传 '0'；空串会被后端 ID 解析拒绝
+      parentId: form.parentId || '0',
       sort: Number(form.sort) || 0,
       status: form.status ? 1 : 0,
     }
     if (form.leader_user_id) body.leader_user_id = form.leader_user_id
-    if (form.phone) body.phone = form.phone
-    if (form.email) body.email = form.email
+    if (form.phone.trim()) body.phone = form.phone.trim()
+    // 邮箱必须省略而非传空串：后端 format 校验器对 "" 也会执行（400）
+    if (form.email.trim()) body.email = form.email.trim()
     if (editingId.value) await deptApi.update(editingId.value, body)
     else await deptApi.create(body)
     toastOk(editingId.value ? '部门已更新' : '部门已创建')
@@ -142,7 +216,13 @@ async function remove(row: DeptRow): Promise<void> {
     <template #cell-name="{ row }">
       <span :style="{ paddingLeft: `${((row as DeptRow).depth ?? 0) * 16}px` }">{{ row.name }}</span>
     </template>
+    <template #cell-leaderName="{ value }">
+      <span>{{ value || '-' }}</span>
+    </template>
     <template #cell-phone="{ value }">
+      <span class="mono">{{ value || '-' }}</span>
+    </template>
+    <template #cell-email="{ value }">
       <span class="mono">{{ value || '-' }}</span>
     </template>
     <template #cell-status="{ row }">
@@ -159,17 +239,17 @@ async function remove(row: DeptRow): Promise<void> {
     <Field label="部门名称" required>
       <TextInput v-model="form.name" placeholder="部门名称" />
     </Field>
-    <Field label="上级部门">
+    <Field label="上级部门" help="顶级部门请选「顶级部门」，不要留空">
       <Select v-model="form.parentId" :options="parentOptions" placeholder="顶级部门" />
     </Field>
-    <Field label="负责人 ID">
-      <TextInput v-model="form.leader_user_id" placeholder="负责人用户 ID" />
+    <Field label="负责人" :help="leaderLoading ? '加载中…' : '输入关键字可搜索用户，选填'">
+      <Select v-model="form.leader_user_id" :options="leaderOptions" placeholder="不设负责人" />
     </Field>
     <Field label="联系电话">
       <TextInput v-model="form.phone" placeholder="联系电话" />
     </Field>
-    <Field label="邮箱">
-      <TextInput v-model="form.email" placeholder="邮箱" />
+    <Field label="邮箱" :error="emailError">
+      <TextInput v-model="form.email" placeholder="选填，格式 name@example.com" />
     </Field>
     <Field label="排序">
       <TextInput v-model="form.sort" type="number" placeholder="排序" />

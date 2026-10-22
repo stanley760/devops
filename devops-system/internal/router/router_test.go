@@ -42,7 +42,7 @@ func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *aut
 	// so the captcha endpoints are wired exactly as in production.
 	captchaSvc := service.NewCaptcha(captcha.NewRedisStore(rdb, "captcha"), svcCfg.Tenant.DefaultCode)
 	modules := Modules{
-		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM, captchaSvc), captchaSvc, kit),
+		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM, captchaSvc), captchaSvc, service.NewTenant(authM), kit),
 		Users:         NewUserRoutes(service.NewUser(authM, func() {}), kit),
 		Roles:         NewRoleRoutes(service.NewRole(func() {}), kit),
 		Menus:         NewMenuRoutes(service.NewMenu(), kit),

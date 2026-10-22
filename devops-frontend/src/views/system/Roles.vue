@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import { roleApi, menuApi, type SysRole, type RoleSave, type SysMenu } from '@/api/system'
+import { computed, reactive, ref, watch } from 'vue'
+import { roleApi, menuApi, parseDeptIDsJson, encodeDeptIDsJson, type SysRole, type RoleSave, type SysMenu } from '@/api/system'
 import { useListPage, type ListPageState } from '@/composables/list'
+import { useDeptOptions } from '@/composables/options'
 import { confirmAction } from '@/composables/confirm'
 import { toastOk, toastError } from '@/composables/toast'
 import type { Column } from '@/components/ui/types'
-import { Field, TextInput, Select, Switch, Tag, StatusTag, Modal } from '@/components/ui'
+import { Field, TextInput, Select, MultiSelect, Switch, Tag, StatusTag, Modal } from '@/components/ui'
 import { ListPage, FormDialog, PermissionButton } from '@/components/business'
 import MenuCheckTree from './parts/MenuCheckTree.vue'
 
@@ -35,6 +36,9 @@ const statusOptions = [
   { value: 0, label: '停用' },
 ]
 
+/** 数据范围 = 2（自定义）时必须给部门集合，否则后端返回 400。 */
+const DATA_SCOPE_CUSTOM = 2
+
 const scopeOptions = [
   { value: 1, label: '全部' },
   { value: 2, label: '自定义' },
@@ -51,15 +55,20 @@ const scopeLabel: Record<number, string> = {
   5: '仅本人',
 }
 
+const deptOptions = useDeptOptions()
+
 const dialogOpen = ref(false)
 const busy = ref(false)
 const editingId = ref<string | null>(null)
 
 function emptyForm() {
-  return { name: '', code: '', sort: 0, data_scope: 1, remark: '', status: true }
+  return { name: '', code: '', sort: 0, data_scope: 1, data_scope_dept_ids: [] as string[], remark: '', status: true }
 }
 
 const form = reactive(emptyForm())
+
+/** 仅在自定义范围下展示部门多选；其他范围不应携带部门集合。 */
+const isCustomScope = computed(() => Number(form.data_scope) === DATA_SCOPE_CUSTOM)
 
 function openCreate(): void {
   editingId.value = null
@@ -77,6 +86,8 @@ async function openEdit(row: SysRole): Promise<void> {
       code: r.code,
       sort: r.sort ?? 0,
       data_scope: r.dataScope ?? 1,
+      // 后端存的是 JSON 数组字符串（如 '["101"]'），解析成数组供多选使用
+      data_scope_dept_ids: parseDeptIDsJson(r.dataScopeDeptIds),
       remark: r.remark ?? '',
       status: r.status !== 0,
     })
@@ -97,6 +108,10 @@ async function submit(): Promise<void> {
     toastError(new Error('请填写角色编码'))
     return
   }
+  if (isCustomScope.value && form.data_scope_dept_ids.length === 0) {
+    toastError(new Error('数据范围为「自定义」时必须至少选择一个部门'))
+    return
+  }
   busy.value = true
   try {
     const body: RoleSave = {
@@ -106,6 +121,11 @@ async function submit(): Promise<void> {
       status: form.status ? 1 : 0,
       remark: form.remark,
     }
+// 部门集合编码为 JSON 数组字符串（后端存储格式）；非自定义范围显式清空，
+// 避免上一次编辑遗留的部门集合继续生效
+body.data_scope_dept_ids = isCustomScope.value
+      ? encodeDeptIDsJson(form.data_scope_dept_ids)
+      : ''
     if (editingId.value) {
       await roleApi.update(editingId.value, body)
     } else {
@@ -225,7 +245,7 @@ async function submitAssign(): Promise<void> {
     </template>
   </ListPage>
 
-  <FormDialog :open="dialogOpen" :title="editingId ? '编辑角色' : '新增角色'" :busy="busy" @close="dialogOpen = false" @submit="submit">
+  <FormDialog :open="dialogOpen" :title="editingId ? '编辑角色' : '新增角色'" :busy="busy" width="wide" @close="dialogOpen = false" @submit="submit">
     <Field label="角色名称" required>
       <TextInput v-model="form.name" placeholder="角色名称" />
     </Field>
@@ -235,8 +255,11 @@ async function submitAssign(): Promise<void> {
     <Field label="排序">
       <TextInput v-model="form.sort" type="number" placeholder="排序" />
     </Field>
-    <Field label="数据范围">
+    <Field label="数据范围" help="「自定义」需在下方指定可见部门">
       <Select v-model="form.data_scope" :options="scopeOptions" />
+    </Field>
+    <Field v-if="isCustomScope" label="可见部门" required help="仅可查看所选部门及其下级的数据">
+      <MultiSelect v-model="form.data_scope_dept_ids" :options="deptOptions" placeholder="未加载到部门，请确认拥有部门列表权限" />
     </Field>
     <Field label="备注">
       <TextInput v-model="form.remark" placeholder="备注" />

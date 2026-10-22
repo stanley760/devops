@@ -41,7 +41,7 @@ func (s *LoginLog) List(ctx context.Context, q types.LoginLogPageQuery) (domain.
 			GeoIsp:      log.GeoIsp,
 			Result:      log.Result,
 			Code:        log.Code,
-			CreateTime:  log.CreateTime,
+			CreateTime:  types.NewDateTime(log.CreateTime),
 		}
 	}), nil
 }

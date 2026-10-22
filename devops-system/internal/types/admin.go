@@ -2,7 +2,6 @@
 package types
 
 import (
-	"time"
 
 	"github.com/stanley760/devops/devops-common/domain"
 )
@@ -44,7 +43,7 @@ type RoleDTO struct {
 	Status           int8      `json:"status" doc:"role status 0: disabled 1: enabled"`
 	Type             int8      `json:"type" doc:"role type 1: builtin 2: custom"`
 	Remark           string    `json:"remark" doc:"remark"`
-	CreateTime       time.Time `json:"createTime" doc:"creation date"`
+	CreateTime       DateTime `json:"createTime" doc:"creation date"`
 }
 
 // RoleDetailResp is the GET /roles/:id response: role + assigned menu IDs.
@@ -88,7 +87,7 @@ type MenuDTO struct {
 	Visible       bool      `json:"visible" doc:"visible"`
 	KeepAlive     bool      `json:"keepAlive" doc:"keep alive"`
 	AlwaysShow    bool      `json:"alwaysShow" doc:"always show"`
-	CreateTime    time.Time `json:"createTime" doc:"creation date"`
+	CreateTime    DateTime `json:"createTime" doc:"creation date"`
 }
 
 // MenuTreeResp is a menu tree node.
@@ -101,13 +100,15 @@ type MenuTreeResp struct {
 
 // DeptSaveReq is the POST/PUT /depts input.
 type DeptSaveReq struct {
-	Name         string `json:"name" binding:"required,min=1,max=30" minLength:"1" maxLength:"30" doc:"department name"`
-	ParentID     ID     `json:"parentId,omitempty" doc:"parent department ID, 0 for top level"`
-	Sort         int    `json:"sort,omitempty" doc:"sort order"`
-	LeaderUserID ID     `json:"leader_user_id,omitempty" doc:"leader user ID"`
-	Phone        string `json:"phone,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"contact phone"`
-	Email        string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email"`
-	Status       int8   `json:"status,omitempty" binding:"omitempty,min=0,max=1" default:"1"  doc:"department status 0: disabled 1: enabled"`
+	Name         string  `json:"name" binding:"required,min=1,max=30" minLength:"1" maxLength:"30" doc:"department name"`
+	ParentID     ID      `json:"parentId,omitempty" doc:"parent department ID, 0 for top level"`
+	Sort         int     `json:"sort,omitempty" doc:"sort order"`
+	LeaderUserID ID      `json:"leader_user_id,omitempty" doc:"leader user ID"`
+	Phone        string  `json:"phone,omitempty" binding:"omitempty,max=20" maxLength:"20" doc:"contact phone"`
+	// Email is a pointer so an empty value is accepted: format validators run before
+	// omitempty, so a plain string would turn an optional field into a required one.
+	Email  *string `json:"email,omitempty" binding:"omitempty,email,max=50" format:"email" maxLength:"50" doc:"email"`
+	Status int8    `json:"status,omitempty" binding:"omitempty,min=0,max=1" default:"1"  doc:"department status 0: disabled 1: enabled"`
 }
 
 // DeptDTO is the department info.
@@ -117,10 +118,11 @@ type DeptDTO struct {
 	ParentID     ID        `json:"parentId" doc:"parent department ID, 0 for top level"`
 	Sort         int       `json:"sort" doc:"sort order"`
 	LeaderUserID ID        `json:"leaderUserId" doc:"leader user ID"`
+	LeaderName   string    `json:"leaderName" doc:"leader name, for display"`
 	Phone        string    `json:"phone" doc:"contact phone"`
 	Email        string    `json:"email" doc:"email"`
 	Status       int8      `json:"status" doc:"department status 0: disabled 1: enabled"`
-	CreateTime   time.Time `json:"createTime" doc:"creation date"`
+	CreateTime   DateTime `json:"createTime" doc:"creation date"`
 }
 
 // DeptTreeResp is a department tree node (assembled in memory).
@@ -156,5 +158,5 @@ type PostDTO struct {
 	Sort       int       `json:"sort" doc:"sort order"`
 	Status     int8      `json:"status" doc:"post status 0: disabled 1: enabled"`
 	Remark     string    `json:"remark" doc:"remark"`
-	CreateTime time.Time `json:"createTime" doc:"creation date"`
+	CreateTime DateTime `json:"createTime" doc:"creation date"`
 }

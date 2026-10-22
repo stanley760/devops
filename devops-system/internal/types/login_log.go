@@ -30,5 +30,5 @@ type LoginLogDTO struct {
 	GeoIsp      string    `json:"geoIsp" doc:"ISP (injected by the higress geo-ip plugin header)"`
 	Result      int8      `json:"result" doc:"login result 0: success 1: failure"`
 	Code        int       `json:"code" doc:"business code, same as the auth_login metric code label"`
-	CreateTime  time.Time `json:"createTime" doc:"login time"`
+	CreateTime  DateTime `json:"createTime" doc:"login time"`
 }

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { operationLogApi, type OperationLog } from '@/api/system'
 import { useListPage, type ListPageState } from '@/composables/list'
+import { formatDateTime } from '@/composables/datetime'
 import { confirmAction } from '@/composables/confirm'
 import { toastOk, toastError } from '@/composables/toast'
 import type { Column, SpecRow } from '@/components/ui/types'
@@ -78,7 +79,7 @@ const detailRows = computed<SpecRow[]>(() => {
     { key: 'IP', val: d.ip ?? '-' },
     { key: '状态', val: (d.status ?? 0) === 0 ? '成功' : '失败' },
     { key: '耗时', val: `${d.costMs ?? 0} ms` },
-    { key: '操作时间', val: d.operTime ?? '-' },
+    { key: '操作时间', val: formatDateTime(d.operTime) },
     { key: '错误信息', val: d.errorMsg ?? '-' },
   ]
 })
