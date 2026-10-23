@@ -284,27 +284,37 @@ func RenderPublicIngress(name string, cfg ExposeConfig) ([]byte, error) {
 	b.WriteString(`apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ` + name + `-public
+  name: `)
+	b.WriteString(name)
+	b.WriteString(`-public
   namespace: higress-system
   annotations:
     # 匿名端点：凭据校验由登录接口自身处理，静态身份头机制已移除，无需任何身份注解。
-    higress.io/destination: ` + cfg.Destination + `
+    higress.io/destination: `)
+	b.WriteString(cfg.Destination)
+	b.WriteString(`
   labels:
     higress.io/resource-definer: higress
 spec:
   ingressClassName: higress
   rules:
-    - host: ` + cfg.Host + `
+    - host: `)
+	b.WriteString(cfg.Host)
+	b.WriteString(`
       http:
         paths:
 `)
 	writePath := func(path, reason string) {
 		if reason != "" {
 			for _, line := range strings.Split(strings.TrimRight(reason, "\n"), "\n") {
-				b.WriteString("          # " + line + "\n")
+				b.WriteString("          # ")
+				b.WriteString(line)
+				b.WriteString("\n")
 			}
 		}
-		b.WriteString(`          - path: ` + path + `
+		b.WriteString(`          - path: `)
+		b.WriteString(path)
+		b.WriteString(`
             pathType: Prefix
             backend:
               resource:

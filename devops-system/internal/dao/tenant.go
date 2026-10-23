@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -127,8 +128,12 @@ func HardDeleteTenant(ctx context.Context, tenantID int64) error {
 	return tenantdb.DB(ctx).Unscoped().Delete(&model.Tenant{}, tenantID).Error
 }
 
-// SeedTenantAdmin creates the initial super admin for a new tenant (super_admin role + user + association, single transaction).
+// SeedTenantAdmin creates the initial super admin for a new tenant (super_admin role + user +
+// user_role + the role's menu grants, single transaction).
 // ctx must be the new tenant's ctx, used to populate tenant_id.
+// The super admin is seeded with the full global menu catalog minus the platform-only subtree:
+// menus whose component lives under "platform/" and their buttons belong to platform routes and
+// must not appear in a tenant admin's sidebar (the platform gate would 403 them anyway).
 func SeedTenantAdmin(ctx context.Context, role *model.Role, admin *model.User) error {
 	return WithTx(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(role).Error; err != nil {
@@ -137,6 +142,57 @@ func SeedTenantAdmin(ctx context.Context, role *model.Role, admin *model.User) e
 		if err := tx.Create(admin).Error; err != nil {
 			return errs.Wrap(err, errs.CodeInternal, "failed to create tenant super admin user")
 		}
-		return tx.Create(&model.UserRole{UserID: admin.ID, RoleID: role.ID}).Error
+		if err := tx.Create(&model.UserRole{UserID: admin.ID, RoleID: role.ID}).Error; err != nil {
+			return errs.Wrap(err, errs.CodeInternal, "failed to bind tenant super admin role")
+		}
+		menuIDs, err := seedableMenuIDs(tx)
+		if err != nil {
+			return err
+		}
+		if len(menuIDs) == 0 {
+			return nil
+		}
+		rows := make([]model.RoleMenu, 0, len(menuIDs))
+		for _, id := range menuIDs {
+			rows = append(rows, model.RoleMenu{RoleID: role.ID, MenuID: id})
+		}
+		// TenantPlugin fills tenant_id from ctx on create, scoping the grants to the new tenant.
+		if err := tx.Create(&rows).Error; err != nil {
+			return errs.Wrap(err, errs.CodeInternal, "failed to seed tenant super admin menus")
+		}
+		return nil
 	})
+}
+
+// seedableMenuIDs returns the menu IDs a new tenant's super admin starts with: the full global
+// catalog (t_system_menu is a global table, the query is tenant-agnostic) minus the platform-only
+// subtree — menus whose component lives under "platform/" and all their descendants.
+func seedableMenuIDs(tx *gorm.DB) ([]int64, error) {
+	var menus []model.Menu
+	if err := tx.Find(&menus).Error; err != nil {
+		return nil, errs.Wrap(err, errs.CodeInternal, "failed to list menus")
+	}
+	excluded := make(map[int64]bool)
+	for _, m := range menus {
+		if strings.HasPrefix(m.Component, "platform/") {
+			excluded[m.ID] = true
+		}
+	}
+	// propagate the exclusion down the tree (buttons of a platform menu)
+	for grew := true; grew; {
+		grew = false
+		for _, m := range menus {
+			if !excluded[m.ID] && excluded[m.ParentID] {
+				excluded[m.ID] = true
+				grew = true
+			}
+		}
+	}
+	ids := make([]int64, 0, len(menus))
+	for _, m := range menus {
+		if !excluded[m.ID] {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids, nil
 }

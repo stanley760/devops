@@ -1,4 +1,4 @@
--- t_system_menu initial data (global table): the full menu master set, 44 rows.
+-- t_system_menu initial data (global table): the full menu master set, 49 rows.
 -- Directories/menus 1-9, buttons = parent menu ID*10 + sequence number; buttons have always_show=FALSE.
 -- Explicit ID, no ID issuance. ON DUPLICATE KEY UPDATE id = id makes repeated runs side-effect free.
 INSERT INTO t_system_menu
@@ -26,6 +26,7 @@ VALUES
     (32, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '角色新增', 'system:role:create',        3, 2, 3, '', '', '', 1, TRUE, FALSE),
     (33, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '角色修改', 'system:role:update',         3, 3, 3, '', '', '', 1, TRUE, FALSE),
     (34, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '角色删除', 'system:role:delete',         3, 4, 3, '', '', '', 1, TRUE, FALSE),
+    (35, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '分配菜单', 'system:role:assign',        3, 5, 3, '', '', '', 1, TRUE, FALSE),
     (41, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '菜单查询', 'system:menu:query',          3, 1, 4, '', '', '', 1, TRUE, FALSE),
     (42, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '菜单新增', 'system:menu:create',         3, 2, 4, '', '', '', 1, TRUE, FALSE),
     (43, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '菜单修改', 'system:menu:update',         3, 3, 4, '', '', '', 1, TRUE, FALSE),
@@ -38,6 +39,10 @@ VALUES
     (62, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '岗位新增', 'system:post:create',         3, 2, 6, '', '', '', 1, TRUE, FALSE),
     (63, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '岗位修改', 'system:post:update',         3, 3, 6, '', '', '', 1, TRUE, FALSE),
     (64, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '岗位删除', 'system:post:delete',         3, 4, 6, '', '', '', 1, TRUE, FALSE),
+    (71, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '租户查询', 'platform:tenant:query',   3, 1, 7, '', '', '', 1, TRUE, FALSE),
+    (72, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '租户新增', 'platform:tenant:create',  3, 2, 7, '', '', '', 1, TRUE, FALSE),
+    (73, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '租户修改', 'platform:tenant:update',  3, 3, 7, '', '', '', 1, TRUE, FALSE),
+    (74, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '租户删除', 'platform:tenant:delete',  3, 4, 7, '', '', '', 1, TRUE, FALSE),
     (81, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志删除', 'system:loginlog:delete', 3, 1, 8, '', '', '', 1, TRUE, FALSE),
     (82, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志清空', 'system:loginlog:clean',  3, 2, 8, '', '', '', 1, TRUE, FALSE),
     (91, 'seed', CURRENT_TIMESTAMP, 'seed', CURRENT_TIMESTAMP, '日志删除', 'system:operationlog:delete', 3, 1, 9, '', '', '', 1, TRUE, FALSE),

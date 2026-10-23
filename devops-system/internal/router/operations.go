@@ -147,7 +147,7 @@ func registerRoles(api huma.API, h *apiv1.RoleHandler, kit *middleware.Kit) {
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-assign-menus", Method: http.MethodPut, Path: "/api/v1/roles/{id}/menus",
 		Summary: "assign role menus", Description: "rebuilds the role_menu and the role's p row snapshot.",
-		Middlewares: kit.Biz("system:role:update"),
+		Middlewares: kit.Biz("system:role:assign"),
 	}), h.AssignMenus)
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "role-delete", Method: http.MethodDelete, Path: "/api/v1/roles/{id}",

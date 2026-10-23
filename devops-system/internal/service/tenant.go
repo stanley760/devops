@@ -58,7 +58,8 @@ func (s *Tenant) Get(ctx context.Context, id types.ID) (*types.TenantDTO, error)
 	return &dto, nil
 }
 
-// Create creates a tenant + the tenant's initial super admin (super_admin role + casbin domain-wide allow-all p/g rows).
+// Create creates a tenant + the tenant's initial super admin (super_admin role + menu grants +
+// casbin domain-wide allow-all p/g rows).
 func (s *Tenant) Create(ctx context.Context, claims *auth.AccessClaims, req types.TenantCreateReq) (*types.TenantDTO, error) {
 	exists, err := dao.TenantCodeExists(ctx, req.Code, 0)
 	if err != nil {
