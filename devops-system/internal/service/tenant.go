@@ -37,27 +37,6 @@ func NewTenant(authM *auth.Manager) *Tenant {
 	return &Tenant{authM: authM}
 }
 
-// ListLoginable returns the tenants available for login (public: no token required).
-//
-// It backs the tenant picker on the login page. Only the code and the name are
-// returned — enough to pick a tenant, without exposing contact details or
-// expiry to an unauthenticated caller.
-func (s *Tenant) ListLoginable(ctx context.Context) ([]types.TenantBrief, error) {
-	tenants, err := dao.ListLoginableTenants(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]types.TenantBrief, 0, len(tenants))
-	for i := range tenants {
-		out = append(out, types.TenantBrief{
-			ID:   types.ID(tenants[i].ID),
-			Name: tenants[i].Name,
-			Code: tenants[i].Code,
-		})
-	}
-	return out, nil
-}
-
 // List returns a paginated query.
 func (s *Tenant) List(ctx context.Context, q types.TenantPageQuery) (domain.PageResult[types.TenantDTO], error) {
 	page, err := dao.ListTenants(ctx, q)

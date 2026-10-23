@@ -4,6 +4,7 @@
  */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { setUnauthorizedHandler } from '@/api/http'
+import { session } from '@/api/session'
 import {
   authed,
   clearSession,
@@ -14,6 +15,7 @@ import {
   setSessionRouteReset,
 } from '@/composables/auth'
 import { pushToast } from '@/composables/toast'
+import { resolveTenantEntry } from '@/composables/tenantEntry'
 
 const AppShell = () => import('@/components/layout/AppShell.vue')
 
@@ -21,6 +23,14 @@ const staticRoutes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
+    component: () => import('@/views/Login.vue'),
+    meta: { public: true, title: '登录' },
+  },
+  {
+    // 路径带租户的登录入口：/t/{tenant_code}/login。租户由 URL 指定，登录框只剩账号密码。
+    // 与 /login 共用组件，参数经路由注入（见 Login.vue 的 tenantEntry 解析）。
+    path: '/t/:tenantCode/login',
+    name: 'login-tenant',
     component: () => import('@/views/Login.vue'),
     meta: { public: true, title: '登录' },
   },
@@ -105,11 +115,23 @@ async function ensureRoutes(): Promise<void> {
 
 router.beforeEach(async (to) => {
   if (to.meta.public) {
-    if (authed.value && to.name === 'login') return { path: homePath() }
+    // login 与 login-tenant（/t/:tenantCode/login）都是登录页：已登录就别再看登录框
+    if (authed.value && (to.name === 'login' || to.name === 'login-tenant')) return { path: homePath() }
     return true
   }
   if (!authed.value) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+    // 未登录一律回登录页，并按兜底链带上租户编码：直接访问 / 时就是
+    // /login?tenantCode=default（上次登过别的租户则带那个编码）。
+    // 登录页只从地址解析租户、页面不提供租户输入；换租户 = 改地址栏 tenantCode 的值。
+    const entry = resolveTenantEntry()
+    return {
+      name: 'login',
+      query: {
+        tenantCode: entry.code,
+        // 首页不带 redirect：登录后本来就回工作台，带了反而多个无意义参数
+        ...(to.fullPath === '/' ? {} : { redirect: to.fullPath }),
+      },
+    }
   }
   if (!routesReady.value) {
     try {
@@ -117,7 +139,10 @@ router.beforeEach(async (to) => {
     } catch {
       clearSession()
       pushToast('会话已失效，请重新登录', 'warn')
-      return { name: 'login', query: { redirect: to.fullPath } }
+      return {
+        name: 'login',
+        query: { tenantCode: resolveTenantEntry().code, redirect: to.fullPath },
+      }
     }
     // 重新按 path 匹配一次，让新注册的业务路由生效。
     //
@@ -145,11 +170,17 @@ let redirecting = false
 setUnauthorizedHandler(() => {
   if (redirecting) return
   redirecting = true
+  // 先取出租户再清会话：会话失效回登录页时尽量保住入口租户上下文，
+  // 统一回 /login?tenantCode=xxx（登录页从地址解析租户，页面无租户输入）。
+  const tenantCode = session.tenantCode
   clearSession()
   pushToast('会话已失效，请重新登录', 'warn')
   const current = router.currentRoute.value
   router
-    .replace({ name: 'login', query: { redirect: current.fullPath } })
+    .replace({
+      name: 'login',
+      query: { tenantCode: tenantCode || 'default', redirect: current.fullPath },
+    })
     .finally(() => {
       redirecting = false
     })

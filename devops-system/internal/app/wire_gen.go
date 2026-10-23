@@ -27,7 +27,7 @@ func InitializeHTTP(cfg config.Config, kit *middleware.Kit, authM *auth.Manager,
 	captcha := newCaptchaService(rdb, cfg)
 	serviceAuth := service.NewAuth(cfg, authM, captcha)
 	tenant := service.NewTenant(authM)
-	authRoutes := router.NewAuthRoutes(serviceAuth, captcha, tenant, kit)
+	authRoutes := router.NewAuthRoutes(serviceAuth, captcha, kit)
 	user := newUserService(authM, kit)
 	userRoutes := router.NewUserRoutes(user, kit)
 	role := newRoleService(kit)

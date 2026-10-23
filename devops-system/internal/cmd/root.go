@@ -314,18 +314,14 @@ var serverCmd = &cobra.Command{
 		//     apidoc.enabled).
 		guard := &httpinfra.GuardHooks{Guards: []gin.HandlerFunc{
 			gateway.EnforceFromConfig(cfg.Gateway, authM,
-				[]string{
+				append([]string{
 					"/healthz", "/readyz", "/metrics",
-					router.AuthLoginPath, router.AuthRefreshPath, router.JWKSPath,
-					// Captcha issuance must be anonymous: the login page fetches the
-					// challenge before it has any credential, so it sits in the same
-					// anonymous set as login/refresh. Missing it makes the captcha
-					// endpoint return 401 and the whole login page unusable.
-					router.AuthCaptchaPath,
-					// The tenant list backs the login page's tenant picker, so it must be
-					// readable before anyone has a token — same anonymous set as login.
-					router.AuthTenantsPath,
-				},
+					router.JWKSPath,
+					// login / refresh / captcha: the caller has no token yet, so they sit
+					// in the anonymous set (single source of truth: router.AnonymousAuthPaths).
+					// The tenant list endpoint is gone entirely (it backed the login page's
+					// tenant picker); the login page resolves the tenant from the URL.
+				}, router.AnonymousAuthPaths()...),
 				[]string{cfg.APIDoc.BasePath},
 			),
 		}}

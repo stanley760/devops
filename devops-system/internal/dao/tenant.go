@@ -55,29 +55,6 @@ func GetTenantByCode(ctx context.Context, code string) (*model.Tenant, error) {
 	return &t, nil
 }
 
-// ListLoginableTenants returns the tenants that can currently be logged into.
-//
-// This backs the public tenant picker on the login page, so it deliberately
-// returns only what a user needs to pick a tenant: the code (the credential
-// they type) and the display name. No contact details, no expiry, no remark.
-//
-// Only enabled, unexpired tenants are listed — a disabled or expired tenant
-// cannot be logged into, so offering it in the picker would only produce a
-// confusing failure after the user commits to it.
-func ListLoginableTenants(ctx context.Context) ([]model.Tenant, error) {
-	var tenants []model.Tenant
-	now := time.Now()
-	err := tenantdb.DB(ctx).Model(&model.Tenant{}).
-		Where("status = ?", 1).
-		Where("expire_time IS NULL OR expire_time > ?", now).
-		Order("id ASC").
-		Find(&tenants).Error
-	if err != nil {
-		return nil, errs.Wrap(err, errs.CodeInternal, "failed to query loginable tenants")
-	}
-	return tenants, nil
-}
-
 // GetTenantByID fetches a tenant by ID.
 func GetTenantByID(ctx context.Context, tenantID int64) (*model.Tenant, error) {
 	var t model.Tenant

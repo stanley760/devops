@@ -49,17 +49,6 @@ export interface LoginPayload {
   captcha?: CaptchaAnswer
 }
 
-/**
- * 可登录的租户（登录页下拉用）。
- *
- * 后端只返回 code 与 name —— 够用户认出租户，不泄露联系人等租户信息。
- */
-export interface LoginableTenant {
-  id: string
-  name: string
-  code: string
-}
-
 export interface LoginResult extends TokenPair {
   tenant: TenantBrief
 }
@@ -101,15 +90,6 @@ export interface RouterNode {
 }
 
 export const authApi = {
-  /**
-   * 可登录租户列表（公开接口，无需令牌）。
-   *
-   * 登录页用它渲染租户下拉：让用户从列表里挑，而不是去记编码 —— 编码是后端标识，
-   * 让用户手打既容易错，也没法让他知道自己有哪些租户可用。
-   */
-  tenants(): Promise<LoginableTenant[]> {
-    return http.get<LoginableTenant[]>(`${BASE}/tenants`, undefined, { auth: false })
-  },
   captcha(tenantCode?: string): Promise<CaptchaChallenge> {
     return http.get<CaptchaChallenge>(`${BASE}/captcha`, { tenant_code: tenantCode } as Query, { auth: false })
   },

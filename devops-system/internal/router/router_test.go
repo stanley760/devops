@@ -42,7 +42,7 @@ func newTestRegister(docCfg config.APIDocConfig, kit *middleware.Kit, authM *aut
 	// so the captcha endpoints are wired exactly as in production.
 	captchaSvc := service.NewCaptcha(captcha.NewRedisStore(rdb, "captcha"), svcCfg.Tenant.DefaultCode)
 	modules := Modules{
-		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM, captchaSvc), captchaSvc, service.NewTenant(authM), kit),
+		Auth:          NewAuthRoutes(service.NewAuth(svcCfg, authM, captchaSvc), captchaSvc, kit),
 		Users:         NewUserRoutes(service.NewUser(authM, func() {}), kit),
 		Roles:         NewRoleRoutes(service.NewRole(func() {}), kit),
 		Menus:         NewMenuRoutes(service.NewMenu(), kit),
@@ -207,6 +207,21 @@ func TestRegisterAPIDoc(t *testing.T) {
 	tenant, ok := doc.Components.SecuritySchemes["tenantId"]
 	if !ok || tenant.Type != "apiKey" || tenant.Name != "X-Tenant-ID" || tenant.In != "header" {
 		t.Fatalf("tenantId scheme missing or invalid: %+v", doc.Components.SecuritySchemes)
+	}
+}
+
+// TestAnonymousAuthPaths regression: the anonymous set is the security boundary
+// shared by the application-layer guard (cmd/root.go) and the Higress public
+// ingress — both exempt exactly these paths from JWT verification.
+//
+// GET /auth/tenants used to sit in this set (it backed the login page's tenant
+// picker); that endpoint has been removed entirely — the tenant now comes from
+// the URL — so the set is exactly login / refresh / captcha.
+func TestAnonymousAuthPaths(t *testing.T) {
+	paths := AnonymousAuthPaths()
+	want := []string{AuthLoginPath, AuthRefreshPath, AuthCaptchaPath}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("anonymous set = %v, want exactly %v", paths, want)
 	}
 }
 

@@ -1,4 +1,4 @@
-# Dedicated route for anonymous endpoints: carries the three endpoints exempted from the jwt-auth plugin.
+# Dedicated route for anonymous endpoints: carries the endpoints exempted from the jwt-auth plugin.
 #
 # Why it must be a separate ingress: jwt-auth's matchRules support only the ingress / domain /
 # service fields and **do not support URL path matching**. The main route devops-system hangs under
@@ -7,7 +7,7 @@
 # and since access-token expiry is the premise of refresh, blocking refresh too would mean never
 # getting a new token (system self-lockout).
 #
-# Solution: split the three anonymous endpoints into a separate ingress; Higress matches it via
+# Solution: split the anonymous endpoints into a separate ingress; Higress matches it via
 # **longest prefix matching**, thereby bypassing the jwt-auth mounted on devops-system.
 #
 # Paths must be written in full: under prefix matching /system/api/v1/auth/login hits this route,
@@ -41,15 +41,6 @@ spec:
           # Captcha issuance: the login page fetches a captcha challenge before submitting
           # credentials, and the caller has no token yet — must be anonymous like login.
           - path: /system/api/v1/auth/captcha
-            pathType: Prefix
-            backend:
-              resource:
-                apiGroup: networking.higress.io
-                kind: McpBridge
-                name: default
-          # Tenant list: the login page offers a tenant picker, so it must read the
-          # available tenants before anyone has signed in — anonymous like login.
-          - path: /system/api/v1/auth/tenants
             pathType: Prefix
             backend:
               resource:
