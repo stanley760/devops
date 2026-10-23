@@ -83,11 +83,9 @@ server:
     - "172.16.0.0/12"
     - "192.168.0.0/16"
 
-# Traffic-ingress guard: disabled in dev.
-# Reason: in dev the business service runs via go run on the host (127.0.0.1:9999), and local curl
-# debugging would get 401, significantly slowing development.
-# To verify the guard's behavior, change to require_jwt: true; direct connections then must carry a valid Bearer token:
-#   curl -H "Authorization: Bearer $(access_token from login)" http://127.0.0.1:9999/system/api/v1/users
-# Access via the gateway is verified by the Higress jwt-auth plugin first, so no local token config is needed.
-gateway:
-  require_jwt: false
+# 身份来源与网关暴露白名单在服务自己的 config/bootstrap.yaml 的 gateway 段
+#（容器里的基础配置来自镜像，宿主环境由本文件挂载为环境配置，两者叠加后生效）。
+#
+# dev 也必须走网关：
+#   curl -H "Host: api.devops.local" http://127.0.0.1:8080/system/api/v1/auth/login
+# 没经过网关的直连请求没有身份，会被 401 拒绝。

@@ -71,6 +71,10 @@ spec:
             header: X-Jwt-Uid
           - claim: username
             header: X-Jwt-Username
+          # sid is required: without it the backend cannot check the Redis session state, and
+          # "kick offline" would only take effect once the access token expires (2h).
+          - claim: sid
+            header: X-Jwt-Sid
           - claim: tid
             header: X-Tenant-ID
           - claim: tcode

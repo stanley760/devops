@@ -10,7 +10,7 @@
       <header class="login-brand reveal">
         <span class="brand-mark"><Icon name="ep:compass" :size="22" /></span>
         <span class="brand-text">
-          <span class="brand-name">DevOps 钛玻璃控制台</span>
+          <span class="brand-name">DevOps 管理控制台</span>
           <span class="brand-sub">TITANIUM GLASS · OPS CONSOLE</span>
         </span>
       </header>
@@ -42,7 +42,7 @@
       </footer>
     </section>
 
-    <!-- 右：钛玻璃登录卡 -->
+    <!-- 右：玻璃登录卡 -->
     <section class="login-side">
       <form
         ref="cardRef"

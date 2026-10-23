@@ -53,7 +53,10 @@ and vice versa — this is the real effect of issuer isolation. Never set either
 cd devops-user
 cp config/.env.example config/.env   # or write it by hand, see below
 go run . server
-# Open http://127.0.0.1:10000/apidoc to view the interactive API docs
+# Local requests must go through the gateway: JWT is verified only at the gateway, and the
+# backend only trusts the identity headers injected by the gateway.
+#   curl -H "Host: user-api.devops.local" http://127.0.0.1:8080/user/api/v1/oauth/providers
+# The API docs can be viewed through the gateway as well: http://127.0.0.1:8080/user/apidoc
 ```
 
 `config/.env` needs `NACOS_REGISTER_IP` set (the gateway uses it to call back to this process):

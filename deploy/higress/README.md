@@ -430,37 +430,95 @@ docker compose -f deploy/docker-compose-dev.yml exec higress \
 Or look at the response shape of a token-less request: **plain text** `Jwt is missing` = the plugin is in effect;
 envelope format `{"code":401,"msg":"Not logged in or session expired"}` = the application layer; the plugin is not in effect.
 
-### 7.4 Third Layer: Application Guard
+### 7.4 Where the caller's identity comes from (single verification)
 
-The middleware lives in `devops-infra/security/gateway` and requires requests to carry a **independently verifiable**
-Bearer JWT (signature + Redis session state), failing uniformly with 401 and not distinguishing "missing credentials" from
-"invalid credentials" (anti-probing). It is mounted in `devops-infra/http/server.go`: after the ops endpoints and
-before the business routes, otherwise `/healthz` `/readyz` `/metrics` would be blocked.
+**The JWT is verified exactly once — at the gateway.** The plugin verifies the signature (RS256, `iss`/`exp`/`kid`),
+and then passes the **verified** claims down to the backend in headers
+(`X-Jwt-Uid` / `X-Jwt-Username` / `X-Jwt-Sid` / `X-Tenant-ID` / `X-Tenant-Code`; `override: true` means a
+client-forged header with the same name is overwritten).
 
-**Why the application layer must verify again even though the gateway already did**:
+The backend takes the identity from those headers and **does not verify the signature again** — that was the old
+"two-layer JWT verification", and verifying twice cost a second signature verification plus a Redis session lookup
+on every request, while the trust decision was made in the same place anyway.
 
-- jwt-auth mounts at Ingress-resource granularity and cannot express the fine-grained policy "only these paths need authentication";
-  this layer provides the fine-grained containment;
-- the compose form has no NetworkPolicy, so bypassing the gateway goes through no plugin at all;
-- in the K8s form this layer degrades to defense-in-depth, still valuable.
+What the backend still does:
+
+- checks the **session state** (one Redis lookup by the injected `sid`) — so a kicked-out user is rejected
+  immediately, not when the access token expires (2h by default). This is why the plugin must inject `sid`;
+- the route middlewares still require an identity, so a request without one is 401.
+
+**The premise is network isolation**: the backend must be reachable only from the gateway — K8s NetworkPolicy, or
+the dedicated compose network. On top of that, the backend only trusts the identity headers from peers listed in
+`server.trusted_proxies` (the direct peer address, not the `X-Forwarded-For` value, which is client-controlled).
+A request that did not come through the gateway therefore carries no identity and is rejected with 401.
 
 Config item (`deploy/config/system-prod.yaml`):
 
 ```yaml
 gateway:
-  require_jwt: true
-  exempt_paths: []   # /healthz /readyz /metrics, login/refresh/jwks, apidoc are already allowed in code
+  identity_source: gateway   # the gateway is the only JWT verifier
 ```
 
-**When `require_jwt: false` the guard passes through directly**, zero changes for unenabled environments. Deliberately disabled in dev: business services run
-via `go run` on the host at `127.0.0.1:9999`, and local curl debugging would be significantly slowed by 401s.
+`identity_source: jwt` is the legacy path: the service verifies the Bearer JWT itself (for environments where the
+gateway is not in front). It is not the default — a service that is not explicitly told otherwise must not verify
+signatures itself, because the point is that the JWT is verified exactly once.
 
-**The fail-closed invariant**: when `require_jwt: true` but no JWT verifier is assembled, **deny** rather than allow,
-otherwise it amounts to site-wide access with ineffective containment and no alerting.
+**Local development goes through the gateway too** (same rule as production):
 
-The anonymous endpoint paths in the exemption list come from the same source as huma registration (the `AuthLoginPath` / `AuthRefreshPath` / `JWKSPath` exported by
-`devops-system/internal/router/operations.go`), avoiding a separate copy of the strings in
-`devops-system-public.yaml` that could silently drift — the consequence of drift is login being locked out.
+```bash
+# login (whitelist path, no token needed)
+curl -H "Host: api.devops.local" -H "Content-Type: application/json" \
+  -d '{"tenant_code":"default","username":"admin","password":"<pwd>"}' \
+  http://127.0.0.1:8080/system/api/v1/auth/login
+
+# business endpoint (the token is verified by the gateway; the identity arrives as headers)
+curl -H "Host: api.devops.local" -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/system/api/v1/users
+```
+
+A direct call to `http://127.0.0.1:9999/system/api/v1/users` is answered with 401 even when a valid token is
+attached — the token was never verified by anyone the backend trusts, so there is no identity to act on.
+
+**Where the whitelist lives**: the anonymous endpoints (login / refresh / captcha / jwks.json) are **not** written in
+this README, nor in a separate copy inside `devops-system-public.yaml` — each service declares its own list in
+**its own `config/bootstrap.yaml`**, under `gateway.expose`:
+
+```yaml
+# devops-system/config/bootstrap.yaml
+gateway:
+  identity_source: gateway
+  expose:
+    prefix: /system
+    host: api.devops.local
+    destination: devops-system.DEVOPS-GROUP.public.nacos:9999
+    endpoints:
+      - path: /api/v1/auth/login
+        reason: 登录：签发 access + refresh 令牌
+      - path: /.well-known/jwks.json
+        absolute: true          # 主机级端点，不拼服务前缀
+        reason: 验证公钥（JWKS），供其他服务自验与人工排障
+```
+
+That single declaration feeds two consumers:
+
+- `devops-system-public.yaml` / `devops-user-public.yaml` are **rendered from it** (`just gen-ingress`);
+- each service's router test compares it against the actually registered endpoints, so the list cannot drift
+  away from the API surface.
+
+The list lives in the service's base config (bootstrap.yaml) rather than in a shared file because that is where
+the rest of the service's contract lives, and because bootstrap is **environment independent** — the same file
+backs local runs and the container (the deployment config only overrides the environment-specific parts, e.g.
+`server.trusted_proxies`). Keeping the whitelist in per-environment files would have meant N copies per service,
+which is exactly how the two sides drifted before: the symptom was a request the gateway lets through and the
+application layer answers 401 (which is how the OAuth callback on devops-user fell out of sync).
+
+The business config deliberately has **no** exemption entry point: the whitelist is not configurable. An exemption
+that exists only in the application layer does not expose any new endpoint (the gateway still requires a JWT
+there) — it only means "the gateway already verified the token, skip the second verification in the application
+layer". That is a performance / defense-in-depth trade, not an access-control switch, and such a path goes naked
+whenever a container is reached directly bypassing the gateway (the compose form has no NetworkPolicy). To add an
+exemption, add it to the policy file — it then goes through code review like any other change to which endpoints
+are anonymous.
 
 ### 7.5 Verification Commands
 
@@ -473,7 +531,7 @@ docker compose -f deploy/docker-compose-dev.yml exec higress \
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: api.devops.local' \
   http://localhost:8080/system/api/v1/auth/login
 
-# 3) Business endpoint with no token: should be 401 (double containment at plugin and application layers)
+# 3) Business endpoint with no token: should be 401 (rejected by the gateway plugin)
 curl -s -H 'Host: api.devops.local' \
   http://localhost:8080/system/api/v1/users
 
@@ -482,13 +540,13 @@ TOKEN=$(curl -s -X POST -H 'Host: api.devops.local' -H 'Content-Type: applicatio
   -d '{"username":"admin","password":"<pwd>"}' \
   http://localhost:8080/system/api/v1/auth/login | jq -r .data.access_token)
 
-# 5) With token: should be 200
+# 5) With token: should be 200 (the gateway verified it and passed the identity down as headers)
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: api.devops.local' \
   -H "Authorization: Bearer $TOKEN" http://localhost:8080/system/api/v1/users
 
-# 6) Direct container connection bypassing the gateway: should be 401 (Layer-3 guard in effect)
-docker compose -f deploy/docker-compose.yml exec devops-system \
-  wget -qO- --header='Host: x' http://127.0.0.1:9999/system/api/v1/users
+# 6) Direct connection to the backend bypassing the gateway: should be 401
+#    (no gateway identity → no identity to act on, even with a valid token attached)
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9999/system/api/v1/users
 
 # 7) K8s: confirm NetworkPolicy is really enforced by the CNI (see the warning at the top of networkpolicy.yaml)
 kubectl -n devops get networkpolicy

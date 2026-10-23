@@ -61,7 +61,7 @@ watch(
         <Icon name="ep:compass" :size="18" />
       </div>
       <div class="brand-text">
-        <div class="brand-name">DevOps 钛玻璃</div>
+        <div class="brand-name">DevOps 管理平台</div>
         <div class="brand-sub">OPS CONSOLE</div>
       </div>
     </div>

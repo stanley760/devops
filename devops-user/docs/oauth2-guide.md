@@ -231,7 +231,9 @@ APP_ENV=dev go run ./cmd/devops-user -f config/bootstrap.yaml
 ### 4.3 第一步：确认凭据已被识别
 
 ```bash
-curl -s http://127.0.0.1:10000/user/api/v1/oauth/providers | jq
+# Local requests must go through the gateway: JWT is verified only at the gateway, and the
+# backend only trusts the identity headers injected by the gateway.
+curl -s -H "Host: user-api.devops.local" http://127.0.0.1:8080/user/api/v1/oauth/providers | jq
 ```
 
 期望：`github.enabled = true`，且 `authorize_url` 里带 `client_id` 和一串随机 `state`：
@@ -294,7 +296,7 @@ SELECT id, user_id, provider, provider_user_id, nickname FROM t_user_oauth;
 ### 4.6 第四步：用 access token 访问受保护接口
 
 ```bash
-curl -s http://127.0.0.1:10000/user/api/v1/profile \
+curl -s -H "Host: user-api.devops.local" http://127.0.0.1:8080/user/api/v1/profile \
   -H "Authorization: Bearer <access_token>" | jq
 ```
 
@@ -341,13 +343,14 @@ cd devops-user && go test ./internal/oauth2/ -v
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BASE=http://127.0.0.1:10000
+BASE=http://127.0.0.1:8080
+HOST="Host: user-api.devops.local"
 
 echo "== 1. 提供方状态 =="
-curl -s "$BASE/user/api/v1/oauth/providers" | jq '.data[] | {name, enabled}'
+curl -s -H "$HOST" "$BASE/user/api/v1/oauth/providers" | jq '.data[] | {name, enabled}'
 
 echo "== 2. 取 github 授权地址（有效期 10 分钟）=="
-AUTH_URL=$(curl -s "$BASE/user/api/v1/oauth/providers" \
+AUTH_URL=$(curl -s -H "$HOST" "$BASE/user/api/v1/oauth/providers" \
   | jq -r '.data[] | select(.name=="github" and .enabled==true) | .authorize_url')
 [ -n "$AUTH_URL" ] && [ "$AUTH_URL" != null ] || { echo "github 未启用"; exit 1; }
 echo "$AUTH_URL"
@@ -358,11 +361,11 @@ CODE=$(sed -n 's/.*[?&]code=\([^&]*\).*/\1/p' <<<"$CB")
 STATE=$(sed -n 's/.*[?&]state=\([^&]*\).*/\1/p' <<<"$CB")
 
 echo "== 4. 重放同一个 state（必须失败，证明 state 一次性）=="
-curl -s "$BASE/user/api/v1/oauth/github/callback?code=$CODE&state=$STATE" | jq -c '{code,msg}'
+curl -s -H "$HOST" "$BASE/user/api/v1/oauth/github/callback?code=$CODE&state=$STATE" | jq -c '{code,msg}'
 
 echo "== 5. 重新走一遍拿真实结果 =="
 # ... 同上，重新取 authorize_url 并授权，然后：
-# curl -s "$BASE/user/api/v1/oauth/github/callback?code=$CODE2&state=$STATE2" | jq
+# curl -s -H "$HOST" "$BASE/user/api/v1/oauth/github/callback?code=$CODE2&state=$STATE2" | jq
 ```
 
 第 4 步是重点：用同一个 `code`+`state` 再打一次，必须返回 `state 校验失败`。

@@ -62,8 +62,10 @@ server:
 #
 # The old config require_token / token (static X-Gateway-Token) has been removed: that credential expressed no identity,
 # had no expiry and no revocation, and was scattered in plaintext; a leak meant unlimited replay. See .workbuddy/memory/2026-10-16.md for the change.
-gateway:
-  require_jwt: true
-  # Additional exemption entries (relative paths): /healthz /readyz /metrics, login / refresh /
-  # jwks.json and apidoc.base_path are already uniformly allowed in code; only extra business endpoints go here.
-  exempt_paths: []
+# 身份来源与网关暴露白名单在服务自己的 config/bootstrap.yaml 的 gateway 段
+#（容器里的基础配置来自镜像，本文件是环境配置，两者叠加后生效）。
+#
+# 网关是唯一的 JWT 校验方：它验签后把已验证的声明放进请求头传下来，本服务从请求头取
+# 身份，不再自己验签（仍然查一次 Redis 会话存活，所以「踢下线」依然立即生效）。
+# 前提是网络隔离：后端只能被网关访问（K8s NetworkPolicy / 独立的 compose 网络），
+# 否则能直连后端的人可以伪造身份头。

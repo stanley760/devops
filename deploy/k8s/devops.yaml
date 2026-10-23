@@ -94,9 +94,11 @@ stringData:
     # the application layer verifies once more as defense in depth. Under K8s a NetworkPolicy additionally
     # enforces that only the gateway can reach 9999.
     # The old static X-Gateway-Token (require_token / token) has been removed.
-    gateway:
-      require_jwt: true
-      exempt_paths: []
+    # The identity source and the gateway exposure whitelist live in the service's own
+    # config/bootstrap.yaml (gateway section) — one place per service, environment
+    # independent. The gateway is the only JWT verifier there; the NetworkPolicy below is
+    # the premise — only the gateway may reach the pod, so the identity headers it injects
+    # cannot be forged.
     server:
       trusted_proxies: ["10.0.0.0/8"]   # adjust to the actual ingress/LB CIDRs; use [] for direct connections
 ---

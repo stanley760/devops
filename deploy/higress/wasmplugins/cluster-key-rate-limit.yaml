@@ -13,7 +13,11 @@ spec:
       service_name: devops-redis.dns
       service_port: 6379
       password: "123456"
-  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/cluster-key-rate-limit:1.0.0
+  # ⚠️ all-in-one（dev）形态下 url 必须指向本地 plugin-server：官方文档给的
+  # oci://... 需要容器去远端仓库拉取，拉不到时 ECDS 配置下发被拒，
+  # Envoy 拿不到任何有效配置 → 监听端口根本不会打开（整个网关不可用，
+  # 而不只是这个插件失效）。其余插件同理，都指向 localhost:8002。
+  url: http://localhost:8002/plugins/cluster-key-rate-limit/1.0.0/plugin.wasm
   matchRules:
     - ingress:
         - devops-system

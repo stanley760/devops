@@ -248,7 +248,25 @@ var serverCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize shared JWT manager: %w", err)
 		}
 		sessionStore := securitysession.NewRedisClientStore(store.Get(), cfg.JWT.RefreshExpire)
-		authM := auth.New(cfg.JWT, tokenMgr, sessionStore)
+
+		// 身份来源。默认是网关模式：JWT 只在网关验一次——网关验签后把已验证的声明
+		// 放进请求头传下来，本服务不再验签，只查会话是否仍然有效（所以「踢下线」
+		// 依然立即生效）。jwt 模式是旧路径，供前面没有网关的环境使用。
+		var authM *auth.Manager
+		var guards []gin.HandlerFunc
+		switch gateway.ResolveIdentitySource(cfg.Gateway) {
+		case gateway.IdentitySourceGateway:
+			authM = auth.NewGatewayIdentity(cfg.JWT, tokenMgr, sessionStore)
+			// 只有来自可信网关的请求才带身份；其余请求没有身份，认证环节直接 401。
+			guards = []gin.HandlerFunc{gateway.IdentityMiddleware(cfg.Server.TrustedProxies)}
+		default:
+			authM = auth.New(cfg.JWT, tokenMgr, sessionStore)
+			if cfg.Gateway.RequireJWT {
+				guards = []gin.HandlerFunc{gateway.EnforceFromConfig(
+					cfg.Gateway, authM, gateway.ExemptPathsFor(cfg.Gateway), []string{cfg.APIDoc.BasePath},
+				)}
+			}
+		}
 		conn, err := grpcinfra.Dial(cmd.Context(), cfg.IDClient.Endpoint, cfg.IDClient.DialTimeout)
 		if err != nil {
 			return err
@@ -303,28 +321,17 @@ var serverCmd = &cobra.Command{
 		// once more. jwt-auth is mounted per Ingress resource and cannot express
 		// per-path policies, so this layer takes on fine-grained enforcement.
 		//
-		// Endpoints on the allowlist bypass the gateway and can still be reached
-		// directly:
-		//   - Health checks and metrics: container orchestration probes and
-		//     Prometheus scraping;
-		//   - login / refresh / jwks.json: anonymous endpoints, where the user has
-		//     no token yet (kept in line with devops-system-public.yaml, otherwise
-		//     nobody could log in);
-		//   - apidoc mount point: enabled in dev/test only (controlled by
-		//     apidoc.enabled).
-		guard := &httpinfra.GuardHooks{Guards: []gin.HandlerFunc{
-			gateway.EnforceFromConfig(cfg.Gateway, authM,
-				append([]string{
-					"/healthz", "/readyz", "/metrics",
-					router.JWKSPath,
-					// login / refresh / captcha: the caller has no token yet, so they sit
-					// in the anonymous set (single source of truth: router.AnonymousAuthPaths).
-					// The tenant list endpoint is gone entirely (it backed the login page's
-					// tenant picker); the login page resolves the tenant from the URL.
-				}, router.AnonymousAuthPaths()...),
-				[]string{cfg.APIDoc.BasePath},
-			),
-		}}
+		// 流量入口守卫。两种模式：
+		//   - 网关模式（默认）：JWT 只在网关验一次——网关验签后把已验证的声明放进请求头
+		//     传下来，本服务从请求头取身份，不再自己验签（应用层只查会话存活，所以
+		//     「踢下线」仍然立即生效）。这里的守卫只负责提取身份，且只对来自可信网关
+		//     的请求生效；没经过网关的请求没有身份，认证环节直接 401。
+		//   - jwt 模式（旧路径）：本服务自己验 Bearer JWT；require_jwt 决定是否再叠一层
+		//     粗粒度守卫，拦掉绕过网关的直连请求。
+		// 豁免清单（login / refresh / captcha / jwks.json）来自 infra 的暴露端点策略
+		// （devops-infra/security/gateway）——同一份策略也用来生成 Higress 的 public
+		// ingress，两边不可能再各改一半。
+		guard := &httpinfra.GuardHooks{Guards: guards}
 		return httpinfra.RunWithOptions(cfg.Server, register, obsRuntime, guard, readiness...)
 	},
 }

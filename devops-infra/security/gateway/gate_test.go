@@ -181,14 +181,18 @@ func TestEnforceFromConfig_Disabled(t *testing.T) {
 	}
 }
 
-// EnforceFromConfig: takes effect once enabled, and the exempt_paths appended by config take effect too.
+// EnforceFromConfig: takes effect once enabled, and the exempt list passed in by the
+// caller (the exposure endpoint policy) takes effect too.
+//
+// The config carries only require_jwt on purpose: the exempt list is not configurable —
+// see gateway.Config for the reasoning.
 func TestEnforceFromConfig_EnabledWithExempt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	authn := &stubAuthenticator{validToken: validToken}
 	r.Use(gateway.EnforceFromConfig(
-		gateway.Config{RequireJWT: true, ExemptPaths: []string{"/healthz"}},
-		authn, []string{"/readyz"}, nil,
+		gateway.Config{RequireJWT: true},
+		authn, []string{"/healthz", "/readyz"}, nil,
 	))
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	r.GET("/readyz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })

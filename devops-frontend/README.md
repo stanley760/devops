@@ -1,7 +1,7 @@
 # devops-frontend
 
 工业级运维管理平台前端 —— Vue 3 + TypeScript + Vite + Vue Router + GSAP，
-**钛玻璃主题**（Apple 材质玻璃 × 工业仪表），对接 devops-system（用户权限系统）。
+**Apple 材质玻璃主题**（Apple 材质玻璃 × 工业仪表），对接 devops-system（用户权限系统）。
 
 页面集合与菜单完全对齐 `GET /system/api/v1/auth/routers` 返回的真实菜单
 （系统管理：用户 / 角色 / 菜单 / 部门 / 岗位 / 租户 / 字典 / 参数；日志：登录 / 操作）
@@ -24,9 +24,11 @@ cd devops-system && go run . migrate   # 建表 + 种子
 cd devops-system && go run . server    # HTTP :9999
 ```
 
-开发代理：`/system` → `http://127.0.0.1:9999`（devops-system）、
-`/user` → `http://127.0.0.1:10000`（devops-user）；
-可用 `VITE_API_PROXY_TARGET` / `VITE_USER_PROXY_TARGET` 覆盖。
+开发代理：**默认经网关**——`/system/api` → `http://127.0.0.1:8080`（Host `api.devops.local`）、
+`/user/api` → `http://127.0.0.1:8080`（Host `user-api.devops.local`）。
+JWT 只在网关验一次，业务服务只认网关注入的身份头，所以开发流量也必须经网关
+（可用 `VITE_GATEWAY_TARGET` / `VITE_GATEWAY_SYSTEM_HOST` / `VITE_GATEWAY_USER_HOST` 覆盖）；
+`VITE_DIRECT_SERVICE=1` 直连仅在业务服务以 jwt 模式运行时可用。
 
 种子账号：租户 `default` · `admin / Admin@123`。验证码以登录页显示为准。
 
@@ -42,7 +44,7 @@ cd devops-system && go run . server    # HTTP :9999
 | `src/components/layout` | AppShell、Sidebar、Topbar、CommandPalette、外观 / 密码弹窗 |
 | `src/styles` | 令牌 → 基础 → 材质 → 控件 → 仪表 → 布局 → 页面 七层样式 |
 | `src/views` | 登录、工作台、系统管理页（用户/角色/菜单/部门/岗位/字典/参数/租户）、日志页、异常页 |
-| `DESIGN.md` | 钛玻璃设计规范（令牌 / 材质 / 版式 / 动效语态） |
+| `DESIGN.md` | 玻璃设计规范（令牌 / 材质 / 版式 / 动效语态） |
 
 ## 关键约定
 

@@ -113,7 +113,7 @@
 | L3 | 登录 IP 限流依赖 `clientIP` | `service.go:246` | 若 `X-Forwarded-For` 被信任且可伪造，IP 维度限流可能被绕过；账户维度仍有效。确认 `trusted_proxies` 仅含真实网关节点 |
 | L4 | OAuth 回调 / 密码重置端点限流 | `devops-user/internal/router` | 登录已覆盖双维度限流，需确认回调与找回密码端点同样限流 |
 | L5 | 注册邮箱/手机可选且未强制校验 | `service.go:208-213` | 若找回密码依赖邮箱，未验证邮箱=可绑定他人邮箱；需核对找回密码流程是否校验 verified |
-| L6 | `exempt_paths`/匿名端点 | `deploy/higress/ingresses/*-public.yaml` | 已正确区分匿名与受保护路由，建议补充自动化测试断言「业务端点无 token → 401」 |
+| L6 | 匿名端点/白名单 | 各服务 `config/bootstrap.yaml` 的 `gateway.expose` 段 | **已整改（2026-10-23）**：白名单下沉到每个服务自己的 bootstrap.yaml（环境无关，本地与容器共用同一份，不会按环境分裂成多份），Higress public ingress 由它渲染（just gen-ingress），各服务 router 测试与实际注册接口双向比对（自动化断言已补上）。业务配置里的豁免入口**已彻底移除**（`exempt_paths` → `extra_exempt_paths` → 删除）：只存在于应用层的豁免不会让接口对外多暴露（网关那层仍要 JWT），只等于「跳过应用层二次校验」，且直连容器绕过网关时该路径裸奔。整改期间发现并修复两处真实漂移：devops-user 的 `oauth-providers` 缺匿名声明、OAuth 回调不在应用层豁免清单（生产 `require_jwt: true` 下会 401，OAuth 登录实际不可用） |
 
 ---
 

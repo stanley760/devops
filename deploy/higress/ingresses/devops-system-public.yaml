@@ -1,26 +1,28 @@
-# Dedicated route for anonymous endpoints: carries the endpoints exempted from the jwt-auth plugin.
+# 由业务服务的 bootstrap.yaml 渲染，请勿手工编辑。
+# 白名单来源：devops-system/config/bootstrap.yaml 的 gateway.expose 段
+# 重新生成：just gen-ingress
 #
-# Why it must be a separate ingress: jwt-auth's matchRules support only the ingress / domain /
-# service fields and **do not support URL path matching**. The main route devops-system hangs under
-# the /system prefix, and the login endpoint /system/api/v1/auth/login falls inside that prefix.
-# Mounting the plugin on the main route would force JWT verification on login → nobody could log in;
-# and since access-token expiry is the premise of refresh, blocking refresh too would mean never
-# getting a new token (system self-lockout).
+# 匿名端点专用路由：承载所有豁免 jwt-auth 插件的端点。
 #
-# Solution: split the anonymous endpoints into a separate ingress; Higress matches it via
-# **longest prefix matching**, thereby bypassing the jwt-auth mounted on devops-system.
+# 为什么必须单独一条 ingress：jwt-auth 的 matchRules 只支持 ingress / domain /
+# service 三个维度，**不支持按 URL 路径匹配**。主路由 devops-system 挂在
+# /system 前缀下，而登录接口 /system/api/v1/auth/login 正好落在这个前缀里——
+# 把插件挂在主路由上就会强制校验登录令牌，而此时调用方还没有令牌，
+# 结果是没人能登录。
 #
-# Paths must be written in full: under prefix matching /system/api/v1/auth/login hits this route,
-# and /system/api/v1/auth/refresh likewise. The two cannot be merged into /system/api/v1/auth,
-# otherwise other endpoints under that prefix (e.g. change-password) would be exempted too.
+# 解法：把匿名端点拆到独立 ingress；Higress 按**最长前缀匹配**路由，
+# 从而绕开挂在主路由上的 jwt-auth 插件。
+#
+# 路径必须写全：前缀匹配下 /system/api/v1/auth/login 命中本路由；
+# 但不能合并成 /system/api/v1/auth，否则该前缀下其他接口（如修改密码）
+# 也会被一并放行。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: devops-system-public
   namespace: higress-system
   annotations:
-    # Same destination as the main route. Traffic-ingress identity: anonymous endpoint; credential verification is handled by the login endpoint itself.
-    # The old annotation "deliberately do not inject X-Gateway-Token" is now moot — the static identity header mechanism was removed entirely.
+    # 匿名端点：凭据校验由登录接口自身处理，静态身份头机制已移除，无需任何身份注解。
     higress.io/destination: devops-system.DEVOPS-GROUP.public.nacos:9999
   labels:
     higress.io/resource-definer: higress
@@ -30,7 +32,7 @@ spec:
     - host: api.devops.local
       http:
         paths:
-          # Login: issues access + refresh tokens; must be anonymous.
+          # 登录：签发 access + refresh 令牌
           - path: /system/api/v1/auth/login
             pathType: Prefix
             backend:
@@ -38,16 +40,7 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          # Captcha issuance: the login page fetches a captcha challenge before submitting
-          # credentials, and the caller has no token yet — must be anonymous like login.
-          - path: /system/api/v1/auth/captcha
-            pathType: Prefix
-            backend:
-              resource:
-                apiGroup: networking.higress.io
-                kind: McpBridge
-                name: default
-          # Refresh: the only way out after access-token expiry; must be anonymous.
+          # 刷新：access 过期后唯一的出路，必须与 login 同样匿名
           - path: /system/api/v1/auth/refresh
             pathType: Prefix
             backend:
@@ -55,7 +48,15 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          # Verification public key: for other services' self-verification and manual troubleshooting, not business traffic.
+          # 验证码：登录前取题，此时调用方还没有任何凭据
+          - path: /system/api/v1/auth/captcha
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
+          # 验证公钥（JWKS），供其他服务自验与人工排障，非业务流量
           - path: /.well-known/jwks.json
             pathType: Prefix
             backend:

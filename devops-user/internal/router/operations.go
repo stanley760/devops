@@ -153,11 +153,16 @@ func registerOAuth(api huma.API, h *apiv1.OAuthHandler, kit *middleware.Kit) {
 
 	// List available providers (each with its authorize URL and a one-time
 	// state).
+	//
+	// Must be anonymous: the user is just picking a login method and has no local
+	// token yet. It used to be missing that declaration — the gateway let it
+	// through while the application layer answered 401.
 	huma.Register(api, with(common, huma.Operation{
 		OperationID: "oauth-providers",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/oauth/providers",
 		Summary:     "List available third-party login methods",
+		Security:    []map[string][]string{}, // public interface: the user has no local token yet, just picking a login method
 		Middlewares: ipMw,
 	}), h.ListProviders)
 

@@ -2,7 +2,7 @@
   "name": "devops-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "工业级运维管理平台前端（Vue 3 + Vite + TS + GSAP，钛玻璃主题）",
+  "description": "工业级运维管理平台前端（Vue 3 + Vite + TS + GSAP，玻璃主题）",
   "type": "module",
   "scripts": {
     "dev": "vite",

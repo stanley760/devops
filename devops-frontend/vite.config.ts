@@ -18,7 +18,10 @@ import { fileURLToPath, URL } from 'node:url'
 //   VITE_GATEWAY_TARGET           网关地址（默认 http://127.0.0.1:8080）
 //   VITE_GATEWAY_SYSTEM_HOST      B 端 Host（默认 api.devops.local）
 //   VITE_GATEWAY_USER_HOST        C 端 Host（默认 user-api.devops.local）
-//   VITE_DIRECT_SERVICE=1         临时直连业务服务（排障用，不建议长期开启）
+//
+// ⚠️ 直连业务服务（VITE_DIRECT_SERVICE=1）只在业务服务以 jwt 模式运行时可用
+//（gateway.identity_source=jwt）。默认的网关模式下，JWT 只在网关验一次，
+// 业务服务只认网关注入的身份头——直连的请求没有身份，会被 401 拒绝。
 const gatewayTarget = process.env.VITE_GATEWAY_TARGET || 'http://127.0.0.1:8080'
 const systemHost = process.env.VITE_GATEWAY_SYSTEM_HOST || 'api.devops.local'
 const userHost = process.env.VITE_GATEWAY_USER_HOST || 'user-api.devops.local'

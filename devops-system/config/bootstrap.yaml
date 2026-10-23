@@ -1,5 +1,33 @@
 # devops-system 用户权限系统基础配置
 
+# 网关暴露（免 JWT）端点白名单 —— 本服务的唯一声明。
+#
+# 一次声明，两处消费：
+#   1. 网关侧：Higress 的 public ingress 由本段渲染（just gen-ingress），
+#      所以「网关放行的路径」不会和「应用层豁免的路径」各写一份而漂移；
+#   2. 应用层：jwt 模式（前面没有网关的环境）下，它就是粗粒度守卫的豁免表。
+# 各服务的路由测试还会拿它和实际注册的接口比对，防止白名单与 API 面脱节。
+#
+# 改白名单只改这里，不要改代码或 ingress YAML。
+gateway:
+  # 身份来源：gateway = JWT 只在网关验一次（业务服务不验签，只取网关注入的身份头）。
+  identity_source: gateway
+  expose:
+    prefix: /system
+    host: api.devops.local
+    destination: devops-system.DEVOPS-GROUP.public.nacos:9999
+    endpoints:
+      - path: /api/v1/auth/login
+        reason: 登录：签发 access + refresh 令牌
+      - path: /api/v1/auth/refresh
+        reason: 刷新：access 过期后唯一的出路，必须与 login 同样匿名
+      - path: /api/v1/auth/captcha
+        reason: 验证码：登录前取题，此时调用方还没有任何凭据
+      # 主机级端点：挂在服务自己的域名上，与 /system 前缀无关。
+      - path: /.well-known/jwks.json
+        absolute: true
+        reason: 验证公钥（JWKS），供其他服务自验与人工排障，非业务流量
+
 server:
   port: 9999
   read_timeout: 10s

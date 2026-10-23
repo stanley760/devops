@@ -81,17 +81,41 @@ type Manager struct {
 	cfg        config.JWTConfig
 	tokens     *securityjwt.Manager
 	sessions   securitysession.Store
-	authn      *securitymiddleware.Authenticator
+	authn      securitymiddleware.BearerAuthenticator
 	refreshTTL time.Duration
 }
 
 // New creates the manager: injects the shared JWT manager and session store (wiring is in cmd/root.go).
+//
+// This is the legacy path: the caller presents a Bearer JWT and this service verifies the
+// signature itself.
 func New(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securitysession.Store) *Manager {
 	return &Manager{
 		cfg:        cfg,
 		tokens:     tokens,
 		sessions:   sessions,
 		authn:      securitymiddleware.NewAuthenticator(tokens, sessions),
+		refreshTTL: cfg.RefreshExpire,
+	}
+}
+
+// NewGatewayIdentity creates a manager that takes the caller's identity from the headers the
+// gateway injected after verifying the JWT.
+//
+// The signature is not verified here — that is the gateway's job, and doing it twice is exactly
+// the "two-layer JWT verification" this mode removes. What is still checked is the session
+// state, so a kicked-out user is rejected immediately instead of staying valid until the access
+// token expires.
+//
+// The premise is network isolation: the backend must be reachable only from the gateway
+// (K8s NetworkPolicy, or the dedicated compose network). Requests that did not come through
+// the gateway carry no identity and are rejected with 401.
+func NewGatewayIdentity(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securitysession.Store) *Manager {
+	return &Manager{
+		cfg:        cfg,
+		tokens:     tokens,
+		sessions:   sessions,
+		authn:      securitymiddleware.NewGatewayIdentityAuthenticator(sessions),
 		refreshTTL: cfg.RefreshExpire,
 	}
 }

@@ -160,7 +160,7 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   const title = (to.meta?.title as string) || ''
-  document.title = title ? `${title} · DevOps 钛玻璃` : 'DevOps 钛玻璃控制台'
+  document.title = title ? `${title} · DevOps 管理` : 'DevOps 管理控制台'
 })
 
 /* ---- 401 统一跳转 ---- */

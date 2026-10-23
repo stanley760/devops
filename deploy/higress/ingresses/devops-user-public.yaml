@@ -1,28 +1,28 @@
-# Route for C-side anonymous endpoints: carries the endpoints exempted from the jwt-auth-user plugin.
+# 由业务服务的 bootstrap.yaml 渲染，请勿手工编辑。
+# 白名单来源：devops-user/config/bootstrap.yaml 的 gateway.expose 段
+# 重新生成：just gen-ingress
 #
-# Why it must be a separate ingress: jwt-auth's matchRules support only ingress / domain /
-# service and **do not support URL path matching**. The main route devops-user hangs under
-# the /user prefix, and login /user/api/v1/auth/login falls inside that prefix. Mounting the
-# plugin on the main route would force JWT verification on login → the user has no token yet →
-# nobody could register/log in (system self-lockout).
+# 匿名端点专用路由：承载所有豁免 jwt-auth 插件的端点。
 #
-# Solution: split the anonymous endpoints into a separate ingress; Higress matches it via
-# **longest prefix matching**, thereby bypassing the jwt-auth mounted on devops-user.
+# 为什么必须单独一条 ingress：jwt-auth 的 matchRules 只支持 ingress / domain /
+# service 三个维度，**不支持按 URL 路径匹配**。主路由 devops-user 挂在
+# /user 前缀下，而登录接口 /user/api/v1/auth/login 正好落在这个前缀里——
+# 把插件挂在主路由上就会强制校验登录令牌，而此时调用方还没有令牌，
+# 结果是没人能登录。
 #
-# Paths must be written in full and cannot be merged:
-#   - Merging into /user/api/v1/auth would exempt logout as well (logout should require auth,
-#     otherwise anyone could kick others offline);
-#   - Merging into /user/api/v1 would exempt profile as well (severe privilege escalation).
+# 解法：把匿名端点拆到独立 ingress；Higress 按**最长前缀匹配**路由，
+# 从而绕开挂在主路由上的 jwt-auth 插件。
 #
-# The host is distinct from the B-side api.devops.local: both services serve /.well-known/jwks.json,
-# and under the same host longest-prefix matching cannot tell them apart — one would be hit at random.
+# 路径必须写全：前缀匹配下 /user/api/v1/auth/login 命中本路由；
+# 但不能合并成 /user/api/v1/auth，否则该前缀下其他接口（如修改密码）
+# 也会被一并放行。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: devops-user-public
   namespace: higress-system
   annotations:
-    # Anonymous endpoint; credential verification is handled by the login endpoint itself.
+    # 匿名端点：凭据校验由登录接口自身处理，静态身份头机制已移除，无需任何身份注解。
     higress.io/destination: devops-user.DEVOPS-GROUP.public.nacos:10000
   labels:
     higress.io/resource-definer: higress
@@ -32,7 +32,7 @@ spec:
     - host: user-api.devops.local
       http:
         paths:
-          # Login: issues access token; must be anonymous.
+          # 登录：签发 access + refresh 令牌
           - path: /user/api/v1/auth/login
             pathType: Prefix
             backend:
@@ -40,17 +40,7 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          # Captcha issuance: login/register must present a solved captcha, and the caller has no
-          # token yet — the captcha endpoint must be reachable anonymously, otherwise nobody can
-          # obtain a captcha to log in (the frontend calls it before submitting credentials).
-          - path: /user/api/v1/auth/captcha
-            pathType: Prefix
-            backend:
-              resource:
-                apiGroup: networking.higress.io
-                kind: McpBridge
-                name: default
-          # Register: open endpoint; must be anonymous.
+          # 注册：开放接口，匿名可调用
           - path: /user/api/v1/auth/register
             pathType: Prefix
             backend:
@@ -58,8 +48,7 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          # Refresh: the caller's access token has already expired, so requiring a JWT would mean
-          # it can never be refreshed — must be anonymous just like login.
+          # 刷新：access 过期后唯一的出路，必须与 login 同样匿名
           - path: /user/api/v1/auth/refresh
             pathType: Prefix
             backend:
@@ -67,35 +56,15 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          # OAuth callback: the third-party platform redirects here, and the user has no local token yet,
-          # so it must be anonymous. Security relies on one-time state verification (CSRF protection),
-          # not on a login session.
-          #
-          # ⚠️ The path must be exact: /user/api/v1/oauth/{provider}/callback.
-          # If merged into /user/api/v1/oauth, then bind/start — which require login —
-          # would also be exempted → an unauthenticated user could initiate a binding hijack.
-          - path: /user/api/v1/oauth/github/callback
+          # 验证码：登录/注册前取题，此时调用方还没有任何凭据
+          - path: /user/api/v1/auth/captcha
             pathType: Prefix
             backend:
               resource:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-          - path: /user/api/v1/oauth/google/callback
-            pathType: Prefix
-            backend:
-              resource:
-                apiGroup: networking.higress.io
-                kind: McpBridge
-                name: default
-          - path: /user/api/v1/oauth/wechat/callback
-            pathType: Prefix
-            backend:
-              resource:
-                apiGroup: networking.higress.io
-                kind: McpBridge
-                name: default
-          # List available third-party login methods (the frontend renders entry points from this).
+          # 第三方登录方式列表：前端据此渲染登录入口，此时还没有本地令牌
           - path: /user/api/v1/oauth/providers
             pathType: Prefix
             backend:
@@ -103,8 +72,31 @@ spec:
                 apiGroup: networking.higress.io
                 kind: McpBridge
                 name: default
-
-          # Verification public key: not business traffic.
+          # GitHub 回调：一次性 state 校验，不依赖登录态
+          - path: /user/api/v1/oauth/github/callback
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
+          # Google 回调：一次性 state 校验，不依赖登录态
+          - path: /user/api/v1/oauth/google/callback
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
+          # 微信开放平台回调：一次性 state 校验，不依赖登录态
+          - path: /user/api/v1/oauth/wechat/callback
+            pathType: Prefix
+            backend:
+              resource:
+                apiGroup: networking.higress.io
+                kind: McpBridge
+                name: default
+          # 验证公钥（JWKS），供其他服务自验与人工排障，非业务流量
           - path: /.well-known/jwks.json
             pathType: Prefix
             backend:

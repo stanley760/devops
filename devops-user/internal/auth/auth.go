@@ -96,10 +96,13 @@ type Manager struct {
 	sessions securitysession.Store
 	// refreshTokens stores refresh tokens (opaque random strings).
 	refreshTokens *refreshtoken.Store
-	authn         *securitymiddleware.Authenticator
+	authn         securitymiddleware.BearerAuthenticator
 }
 
 // New creates a manager. Wiring is in cmd/root.go.
+//
+// This is the legacy path: the caller presents a Bearer JWT and this service verifies the
+// signature itself.
 //
 // When refreshTokens is nil, Refresh returns ErrRefreshInvalid (no nil
 // dereference), while access token issuance and verification still work
@@ -111,6 +114,27 @@ func New(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securityses
 		sessions:      sessions,
 		refreshTokens: refresh,
 		authn:         securitymiddleware.NewAuthenticator(tokens, sessions),
+	}
+}
+
+// NewGatewayIdentity creates a manager that takes the caller's identity from the headers the
+// gateway injected after verifying the JWT.
+//
+// The signature is not verified here — that is the gateway's job, and doing it twice is exactly
+// the "two-layer JWT verification" this mode removes. What is still checked is the session
+// state, so a kicked-out user is rejected immediately instead of staying valid until the access
+// token expires.
+//
+// The premise is network isolation: the backend must be reachable only from the gateway
+// (K8s NetworkPolicy, or the dedicated compose network). Requests that did not come through
+// the gateway carry no identity and are rejected with 401.
+func NewGatewayIdentity(cfg config.JWTConfig, tokens *securityjwt.Manager, sessions securitysession.Store, refresh *refreshtoken.Store) *Manager {
+	return &Manager{
+		cfg:           cfg,
+		tokens:        tokens,
+		sessions:      sessions,
+		refreshTokens: refresh,
+		authn:         securitymiddleware.NewGatewayIdentityAuthenticator(sessions),
 	}
 }
 

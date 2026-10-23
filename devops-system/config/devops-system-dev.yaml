@@ -88,8 +88,20 @@ apidoc:
   enabled: true
   base_path: /apidoc
 
-gateway:
-  # 本地进程开发：流量入口守卫默认关闭，便于 curl 直连 127.0.0.1:9999 调试。
-  # 验证守卫时置 require_jwt: true，此时直连必须带有效 Bearer token
-  #（登录拿到的 access_token）
-  require_jwt: true
+server:
+  # 可信代理网段：docker 网桥（网关跑在容器里，转发请求的对端是 172.x/192.168.x）+
+  # 本机回环（网关若以宿主进程方式运行）。
+  # 网关转发过来的请求，身份由网关注入的请求头携带；不在这个列表里的对端，即使伪造了
+  # 身份头也不会被信任（拿不到身份 → 401）。
+  trusted_proxies:
+    - "127.0.0.1"
+    - "::1"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+# 身份来源与网关暴露白名单在 config/bootstrap.yaml 的 gateway 段（每个服务一份，
+# 环境无关：本地与容器用的是同一份）。
+#
+# 本地开发同样必须走网关（Higress）：
+#   curl -H "Host: api.devops.local" http://127.0.0.1:8080/system/api/v1/auth/login
+# 直连 127.0.0.1:9999 没有网关身份，会被 401 拒绝。

@@ -13,32 +13,18 @@ import (
 // rate-limit by prefix.
 const userAPIPrefix = "/user"
 
-// Full paths of the anonymous endpoints. They must be exported by this package
-// and share one definition with the huma registrations below, avoiding each of
-// deploy/higress/ingresses/devops-user-public.yaml and the guard allowlist
-// writing its own copy of the string and silently drifting (the consequence of
-// drift is login deadlocking).
+// The allowlist of anonymous endpoints is no longer declared here: it is
+// maintained as a single policy in infra
+// (devops-infra/security/gateway/exposed-endpoints.yaml). The application-layer
+// guard reads that policy, the Higress public ingress is generated from it, and
+// the router's consistency test compares it with the actually registered
+// endpoints — so deploy/higress/ingresses/devops-user-public.yaml, the guard
+// allowlist and the huma registrations can no longer each keep their own copy
+// and drift apart (the consequence of drift is login deadlocking).
 //
-// These endpoints must be anonymous: the caller has no token yet. The C-side
-// jwt-auth must be mounted on a separate ingress (plugins are mounted per
-// Ingress resource and do not support path matching), and the application-layer
-// guard must allow them through in sync.
-const (
-	// AuthLoginPath is the login endpoint, which issues an access token.
-	AuthLoginPath = userAPIPrefix + "/api/v1/auth/login"
-	// AuthRegisterPath is the registration endpoint.
-	AuthRegisterPath = userAPIPrefix + "/api/v1/auth/register"
-	// AuthRefreshPath is the refresh endpoint. Must be anonymous: the caller's
-	// access token has expired by now, and forcing a JWT would make it
-	// impossible to ever get a new token (same as login).
-	AuthRefreshPath = userAPIPrefix + "/api/v1/auth/refresh"
-	// AuthCaptchaPath is the captcha issuance endpoint (login/register must
-	// present a solved captcha).
-	AuthCaptchaPath = userAPIPrefix + "/api/v1/auth/captcha"
-	// JWKSPath is the verification public key, for other services'
-	// self-verification and manual debugging.
-	JWKSPath = "/.well-known/jwks.json"
-)
+// JWKSPath is the verification public key, for other services'
+// self-verification and manual debugging.
+const JWKSPath = "/.well-known/jwks.json"
 
 // AuthRoutes holds authentication-related routes (login / register).
 type AuthRoutes func(huma.API)

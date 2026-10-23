@@ -140,6 +140,25 @@ fmt:
         (cd "$m" && {{go}} fmt ./...)
     done
 
+# ---------- Gateway exposure endpoint policy ----------
+#
+# The anonymous-endpoint allowlist (exempt from jwt-auth) is maintained in only one place:
+# the gateway.expose section of each service's own config/bootstrap.yaml.
+# The Higress public ingress is rendered from it, and each service's router test compares
+# it with the actually registered endpoints — so the gateway side and the application
+# layer can no longer drift apart (the classic symptom: the gateway lets it through
+# while the application layer answers 401).
+#
+# To change the allowlist: edit the service's bootstrap.yaml, then run gen-ingress.
+
+# Render the Higress public ingress from each service's bootstrap.yaml (gateway.expose section)
+gen-ingress:
+    {{go}} run ./devops-infra/cmd/gwpolicy -root . -out deploy/higress/ingresses
+
+# Verify the exposure endpoint allowlist matches the actually registered endpoints (consistency test in each service's router package)
+check-policy:
+    {{go}} test ./devops-system/internal/router/ ./devops-user/internal/router/
+
 # Build + vet + test: run this before committing
 check: build-local vet test
 

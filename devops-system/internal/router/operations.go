@@ -28,29 +28,13 @@ const systemAPIPrefix = "/system"
 // matchRules is per Ingress resource and does not support path matching, so they are carried by a
 // separate ingress; the application-layer guard must also let them through in sync, otherwise
 // direct connections (bypassing the gateway) would also have login blocked.
-const (
-	// AuthLoginPath is the login endpoint, issuing access + refresh tokens.
-	AuthLoginPath = systemAPIPrefix + "/api/v1/auth/login"
-	// AuthRefreshPath is the refresh endpoint, the only way out after the access token expires.
-	AuthRefreshPath = systemAPIPrefix + "/api/v1/auth/refresh"
-	// AuthCaptchaPath is the captcha issuance endpoint (login/register must present a solved captcha).
-	AuthCaptchaPath = systemAPIPrefix + "/api/v1/auth/captcha"
-	// JWKSPath is the verification public key, for other services to self-verify and manual troubleshooting.
-	JWKSPath = "/.well-known/jwks.json"
-)
-
-// AnonymousAuthPaths are the auth endpoints that must stay anonymous (no token):
-// login issues the tokens, refresh renews them, and captcha is fetched before any
-// credential exists. The application-layer guard (cmd/root.go) and the Higress
-// public ingress (deploy/higress/ingresses/devops-system-public.yaml) exempt
-// exactly this set — the three must be kept in sync.
+// The anonymous-endpoint allowlist (login / refresh / captcha) is no longer declared here:
+// it is maintained as a single policy in infra (devops-infra/security/gateway/
+// exposed-endpoints.yaml), which the application-layer guard reads and the Higress
+// public ingress is generated from — so the two can no longer drift apart.
 //
-// GET /api/v1/auth/tenants used to be anonymous too (it backed the login page's
-// tenant picker); that endpoint has been removed entirely — the tenant now comes
-// from the URL — so it is not part of this set.
-func AnonymousAuthPaths() []string {
-	return []string{AuthLoginPath, AuthRefreshPath, AuthCaptchaPath}
-}
+// JWKSPath is the verification public key, for other services to self-verify and manual troubleshooting.
+const JWKSPath = "/.well-known/jwks.json"
 
 // with merges common Operation fields and adds the devops-system API prefix.
 func with(common huma.Operation, op huma.Operation) huma.Operation {
