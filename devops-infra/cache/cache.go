@@ -19,6 +19,17 @@ type Cache interface {
 	Exists(ctx context.Context, key string) (bool, error)
 }
 
+// CacheMetrics records cache hits and misses by logical cache name.
+type CacheMetrics interface {
+	RecordHit(cache string)
+	RecordMiss(cache string)
+}
+
+// MetricsSetter installs an optional cache metrics recorder.
+type MetricsSetter interface {
+	SetCacheMetrics(m CacheMetrics)
+}
+
 // Health is a cache implementation that supports health checks.
 type Health interface {
 	Ping(ctx context.Context) error

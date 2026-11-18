@@ -223,6 +223,17 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    environment:
+      # The Kiri runtime injects an unreachable host proxy into containers.
+      # Clear it so Prometheus can scrape services and exporters directly.
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+    extra_hosts:
+      # Prometheus reaches host-run services through the LAN address; the
+      # host.docker.internal gateway is blocked by the Windows firewall.
+      - "devops-host:${HOST_IP:-172.16.60.150}"
     # command replaces the image default CMD entirely, so the config file and storage path must be carried along
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -245,6 +256,63 @@ services:
           cpus: "0.5"
           memory: 512m
     # No dependency on business services: Prometheus tolerates missing targets with retries, supporting partial startup
+
+  # WSL2/Docker VM metrics (not the Windows host). Keep this bind mount
+  # read-write: node-exporter otherwise reports the root filesystem read-only.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(var/lib/kiri|dev|proc|sys)($|/)
+      - --collector.filesystem.fs-types-exclude=^(sysfs|proc|devtmpfs|tmpfs|cgroup.*|overlay)$
+    pid: host
+    volumes:
+      - /:/host
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+
+  # MySQL server metrics; credentials are the development defaults from mysql.
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    command:
+      - --config.my-cnf=/cfg/.my.cnf
+    volumes:
+      - ./prometheus/my.cnf:/cfg/.my.cnf:ro
+    environment:
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+    depends_on:
+      mysql:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+
+  # Redis keyspace metrics, separate from application cache hit/miss metrics.
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: "123456"
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
 
   # Alert egress: Prometheus pushes fired alerts here. Dev has no external integration,
   # so alerts are only visible in the UI (http://localhost:9093); production wires up a DingTalk/email webhook.

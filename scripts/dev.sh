@@ -53,7 +53,7 @@ start_services() {
   start_service devops-system devops-system
   start_service devops-user devops-user
   echo ""
-  echo "On first run, or after schema changes, first create tables and seed data: sh deploy/dev.sh migrate"
+  echo "On first run, or after schema changes, first create tables and seed data: sh scripts/dev.sh migrate"
   echo "Before first use, copy .env.example to .env and fill in the LAN IP (NACOS_REGISTER_IP)."
 }
 
@@ -237,7 +237,7 @@ case "$COMMAND" in
     # Start middleware + gateway + observability stack, then automatically bring up local business services
     # higress-init automatically seeds deploy/higress config before higress (on first run / after down)
     compose up -d mysql redis nacos etcd higress
-    compose up -d tempo loki prometheus alertmanager grafana
+    compose up -d tempo loki prometheus alertmanager grafana node-exporter mysqld-exporter redis-exporter
     echo ""
     echo "Middleware and observability stack started."
     start_services

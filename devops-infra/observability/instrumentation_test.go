@@ -92,6 +92,7 @@ func TestInstrumentGORMRegistersDBPoolMetrics(t *testing.T) {
 		"go_sql_idle_connections",
 		"go_sql_wait_count_total",
 		"db_name=\"devops_db\"",
+		`go_sql_open_connections{db_name="devops_db",deployment_environment="dev",service_name="t-sqlpool"}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in /metrics:\\n%s", want, firstLines(body, 5))

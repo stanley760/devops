@@ -1,0 +1,1832 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations \u0026 Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Traces Drilldown (Tempo)",
+      "type": "link",
+      "url": "/a/grafana-exploretraces-app"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Host CPU utilization (%)",
+      "description": "Per-CPU utilization of the WSL2/Docker VM, not the Windows host.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 95
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{job=\"node\",mode=\"idle\"}[5m])) by (cpu))",
+          "legendFormat": "cpu{{cpu}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Host memory utilization (%)",
+      "description": "MemAvailable share of MemTotal for the WSL2/Docker VM.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 95
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{job=\"node\"} / node_memory_MemTotal_bytes{job=\"node\"})",
+          "legendFormat": "memory"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Disk I/O throughput (B/s)",
+      "description": "Read and write throughput per device of the WSL2/Docker VM.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "Bps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (device) (rate(node_disk_read_bytes_total{job=\"node\"}[5m]))",
+          "legendFormat": "read {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (device) (rate(node_disk_written_bytes_total{job=\"node\"}[5m]))",
+          "legendFormat": "write {{device}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Disk I/O saturation (%)",
+      "description": "Share of wall-clock time each device spent doing I/O.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(node_disk_io_time_seconds_total{job=\"node\"}[5m])",
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Filesystem usage (%)",
+      "description": "Used share per mounted filesystem of the WSL2/Docker VM. Read-only and virtual mounts are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"node\",mountpoint!~\"^/(var/lib/kiri|dev|proc|sys|run|tmp)(/|$)\"} / node_filesystem_size_bytes{job=\"node\",mountpoint!~\"^/(var/lib/kiri|dev|proc|sys|run|tmp)(/|$)\"})",
+          "legendFormat": "{{mountpoint}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Network throughput (B/s)",
+      "description": "Receive and transmit throughput per interface of the WSL2/Docker VM; loopback is excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "Bps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (device) (rate(node_network_receive_bytes_total{job=\"node\",device!=\"lo\"}[5m]))",
+          "legendFormat": "rx {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (device) (rate(node_network_transmit_bytes_total{job=\"node\",device!=\"lo\"}[5m]))",
+          "legendFormat": "tx {{device}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Host load (1m)",
+      "description": "1-minute load average of the WSL2/Docker VM. Compare against the CPU count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_load1{job=\"node\"}",
+          "legendFormat": "load1"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "File descriptor usage (%)",
+      "description": "Allocated file descriptors against the system maximum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * node_filefd_allocated{job=\"node\"} / node_filefd_maximum{job=\"node\"}",
+          "legendFormat": "fd"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Host uptime",
+      "description": "Uptime of the WSL2/Docker VM, derived from node_time_seconds and node_boot_time_seconds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_time_seconds{job=\"node\"} - node_boot_time_seconds{job=\"node\"}",
+          "legendFormat": "uptime"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Service process CPU (cores)",
+      "description": "Per-service process CPU usage. Metrics carry native service and environment labels.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(process_cpu_seconds_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}[5m])",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Service process memory (RSS)",
+      "description": "Resident set size per service.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "bytes"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_resident_memory_bytes{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Goroutines per service",
+      "description": "Live goroutine count per service. A sustained climb can indicate a leak or blocked dependency.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "go_goroutines{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Go GC pause (s/s)",
+      "description": "Cumulative GC stop-the-world time per second, per service.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(go_gc_duration_seconds_sum{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}[5m])",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Open file descriptors per service",
+      "description": "File descriptors held open by each service process.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_open_fds{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "HTTP QPS (by route)",
+      "description": "Request rate per business route. The route label uses Gin's route template to keep cardinality bounded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[1m]))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "HTTP 5xx error rate (%)",
+      "description": "Share of responses with a 5xx status. Thresholds: 1% warning, 5% critical.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\",status=~\"5..\"}[5m])) / sum(rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[5m]))",
+          "legendFormat": "5xx rate"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "HTTP status code distribution",
+      "description": "Request rate grouped by HTTP status code.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "HTTP latency quantiles (in-house histogram)",
+      "description": "P50/P95/P99 by business route from devops_http_request_duration_seconds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le, route) (rate(devops_http_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[5m])))",
+          "legendFormat": "p50 {{route}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(devops_http_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[5m])))",
+          "legendFormat": "p95 {{route}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(devops_http_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",route=~\"$route\"}[5m])))",
+          "legendFormat": "p99 {{route}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "HTTP latency quantiles (otelgin semconv)",
+      "description": "P50/P95/P99 from otelgin's semconv histogram, kept separate from the in-house histogram. It uses http_route, not route.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",http_route=~\"$route\"}[5m])))",
+          "legendFormat": "p50 {{http_route}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",http_route=~\"$route\"}[5m])))",
+          "legendFormat": "p95 {{http_route}}"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",http_route=~\"$route\"}[5m])))",
+          "legendFormat": "p99 {{http_route}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "HTTP in-flight requests",
+      "description": "Requests currently being processed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "http_server_in_flight{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "gRPC client QPS (by method)",
+      "description": "Outbound gRPC call rate per method.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rpc_method, service_name) (rate(rpc_client_call_duration_seconds_count{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{service_name}} {{rpc_method}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "gRPC client error rate (%)",
+      "description": "Share of outbound gRPC calls that did not return OK.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(rpc_client_call_duration_seconds_count{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",rpc_response_status_code!=\"OK\"}[5m])) / sum(rate(rpc_client_call_duration_seconds_count{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]))",
+          "legendFormat": "gRPC error rate"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "gRPC server QPS (by method)",
+      "description": "Inbound gRPC call rate per method.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 88
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rpc_method, service_name) (rate(rpc_server_call_duration_seconds_count{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{service_name}} {{rpc_method}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Gateway requests (by response class)",
+      "description": "Higress/Envoy downstream requests by status class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 88
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (response_code_class) (rate(envoy_http_downstream_rq{job=\"higress-gateway\",http_conn_manager_prefix=~\"outbound.*\"}[5m]))",
+          "legendFormat": "{{response_code_class}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Gateway upstream requests (by cluster)",
+      "description": "Envoy upstream requests per cluster.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 96
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cluster_name) (rate(envoy_cluster_upstream_rq{job=\"higress-gateway\"}[5m]))",
+          "legendFormat": "{{cluster_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Gateway circuit breakers (open connections)",
+      "description": "Open connections per Envoy cluster. Non-zero means the circuit breaker is shedding traffic.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 96
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "envoy_cluster_circuit_breakers_default_cx_open{job=\"higress-gateway\"}",
+          "legendFormat": "{{cluster_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Dependency readiness",
+      "description": "devops_readiness per dependency: 1 = reachable, 0 = unreachable. This matches the condition used by /readyz.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 104
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.5
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "devops_readiness{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "{{service_name}}/{{dependency}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Scrape target up",
+      "description": "1 = Prometheus can scrape the service's /metrics endpoint.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 104
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.5
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"devops-services\",instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Service uptime",
+      "description": "Seconds since the service process started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 112
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - process_start_time_seconds{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",instance=~\"$instance\"}",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Trace span calls (from Tempo)",
+      "description": "Span call rate by status code, remote-written by Tempo's metrics-generator. The service label is provided by Tempo.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 112
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service, status_code) (rate(traces_spanmetrics_calls_total[5m]))",
+          "legendFormat": "{{service}} {{status_code}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "devops",
+    "system",
+    "red"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({service_name=~\".+\"}, service_name)",
+        "query": {
+          "query": "label_values({service_name=~\".+\"}, service_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+        "query": {
+          "query": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(http_server_requests_total, route)",
+        "query": {
+          "query": "label_values(http_server_requests_total, route)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up, instance)",
+        "query": {
+          "query": "label_values(up, instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "DevOps system resources + application performance",
+  "uid": "devops-system-app",
+  "version": 1,
+  "weekStart": ""
+}

@@ -41,3 +41,4 @@ Thumbs.db
 
 # Local environment variables (incl. APP_ENV / NACOS_REGISTER_IP, etc.; not committed)
 **/config/.env
+deploy/.env

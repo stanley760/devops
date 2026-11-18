@@ -8,29 +8,19 @@ The dev environment starts **only middleware and the observability stack**; busi
 
 ### Starting Middleware
 
-```powershell
-.\deploy\dev.ps1
-```
-
 ```bash
-sh deploy/dev.sh
+sh scripts/dev.sh
 ```
 
-The script starts MySQL, Redis, Nacos, etcd, the Higress gateway and the observability stack (Tempo/Loki/Prometheus/Grafana),
-then automatically brings up the local business services:
-
-- **PowerShell**: runs `go run` for `devops-id` and `devops-system` in two separate cmd windows; closing a window stops that service.
-- **sh**: starts them as background processes, with logs and PIDs recorded under `deploy/.dev-logs/`
-  (`tail -f deploy/.dev-logs/devops-system.log` to view output).
+Run this from the repository root in a shell with `sh` available. The script starts MySQL, Redis, Nacos, etcd,
+the Higress gateway and the observability stack (Tempo/Loki/Prometheus/Grafana and exporters), then automatically
+brings up the local business services as background processes. Logs and PIDs are recorded under `deploy/.dev-logs/`
+(`tail -f deploy/.dev-logs/devops-system.log` to view output).
 
 On first run, or after schema changes, first create tables and seed data:
 
-```powershell
-.\deploy\dev.ps1 -Command migrate
-```
-
 ```bash
-sh deploy/dev.sh migrate
+sh scripts/dev.sh migrate
 ```
 
 > **NACOS_REGISTER_IP**: the IP under which the local process registers to Nacos must be the host's
@@ -41,25 +31,15 @@ sh deploy/dev.sh migrate
 
 ### Common Commands
 
-```powershell
-.\deploy\dev.ps1 -Command ps       # show container status
-.\deploy\dev.ps1 -Command logs     # follow logs
-.\deploy\dev.ps1 -Command migrate  # create tables and seed data (skipped if tables exist)
-.\deploy\dev.ps1 -Command restart  # restart middleware
-.\deploy\dev.ps1 -Command app      # start only the local business services (containers untouched)
-.\deploy\dev.ps1 -Command sync     # sync deploy/higress config to the named volume and restart the gateway
-.\deploy\dev.ps1 -Command down     # stop and clean up containers
-```
-
 ```bash
-sh deploy/dev.sh ps       # show container status
-sh deploy/dev.sh logs     # follow logs
-sh deploy/dev.sh migrate  # create tables and seed data (skipped if tables exist)
-sh deploy/dev.sh restart  # restart middleware
-sh deploy/dev.sh app      # start only the local business services (containers untouched)
-sh deploy/dev.sh stop    # stop the local business services (containers untouched)
-sh deploy/dev.sh sync    # sync deploy/higress config to the named volume and restart the gateway
-sh deploy/dev.sh down     # stop and clean up containers
+sh scripts/dev.sh ps       # show container status
+sh scripts/dev.sh logs     # follow logs
+sh scripts/dev.sh migrate  # create tables and seed data (skipped if tables exist)
+sh scripts/dev.sh restart  # restart middleware
+sh scripts/dev.sh app      # start only the local business services (containers untouched)
+sh scripts/dev.sh stop     # stop the local business services (containers untouched)
+sh scripts/dev.sh sync     # sync deploy/higress config to the named volume and restart the gateway
+sh scripts/dev.sh down     # stop and clean up containers
 ```
 
 ### Higress Config and the Named Volume
@@ -85,6 +65,22 @@ init overwrites these three directories every time — move any route/plugin cha
 | Prometheus | `http://localhost:9090` |
 | Alertmanager | `http://localhost:9093` (dev alerts are UI-only; production wires a webhook) |
 | Grafana | `http://localhost:3000` (admin/admin) |
+| node-exporter (host metrics) | `node-exporter:9100` (Compose network only) |
+| mysqld-exporter (MySQL metrics) | `mysqld-exporter:9104` (Compose network only) |
+| redis_exporter (Redis metrics) | `redis-exporter:9121` (Compose network only) |
+
+### Prometheus scrape target (`HOST_IP`)
+
+The three business services run on the host via `go run`, so Prometheus reaches
+them through the host's LAN address. `host.docker.internal` resolves to an
+address blocked by the Windows Firewall on the Public network profile.
+
+Compose pins the hostname `devops-host` to the LAN address using
+`extra_hosts`; Prometheus scrapes that literal hostname because it does not
+expand environment variables in `scrape_configs`. Copy
+[`deploy/.env.example`](./.env.example) to `deploy/.env` and set `HOST_IP` to
+the host's reachable LAN IPv4. Update it when the machine changes networks;
+it should match the address used for `NACOS_REGISTER_IP`.
 
 ### Signal Exploration (Drilldown)
 
@@ -97,6 +93,29 @@ range and label filters — no PromQL/LogQL required:
 | Logs | `/a/grafana-lokiexplore-app` | Loki | the services' slog output, grouped by `service.name` (index label `service_name`), with `trace_id`/`span_id` as structured metadata |
 | Traces | `/a/grafana-exploretraces-app` | Tempo | Rate / Errors / Duration charts fed by Tempo's span metrics (`traces_spanmetrics_*`, remote-written into Prometheus) |
 
+### Industrial ops dashboards
+
+Three dashboards are provisioned from `grafana/provisioning/dashboards/`:
+
+| Dashboard | uid | Covers |
+| --- | --- | --- |
+| System resources + application performance | `devops-system-app` | Host CPU/memory/disk/network, per-service runtime, HTTP/gRPC RED, gateway, dependency readiness |
+| Database + cache/middleware | `devops-data-middleware` | MySQL server metrics, SQL pool, application cache hit rate, Redis server metrics, Redis pool |
+| Logs + security | `devops-logs-security` | Log volume/level/status, slow requests, error stream, login failures, 4xx/5xx, rate limiting |
+
+The application cache hit rate (`devops_cache_operations_total`) measures
+lookups served from the cache. Redis connection-pool reuse
+(`db_client_connections_hits` / `misses`) measures a different behavior and is
+shown separately. Host resource metrics come from node-exporter inside the
+WSL2/Docker VM, not the Windows host.
+
+Dashboard JSON is rendered from `devops-infra/cmd/dashboards`. After changing a
+panel, re-render the files:
+
+```bash
+go run ./devops-infra/cmd/dashboards -out deploy/grafana/provisioning/dashboards
+```
+
 Data flow:
 
 - **Traces** — services export OTLP traces to Tempo (`:4318`, same port Jaeger
@@ -107,6 +126,8 @@ Data flow:
 - **Span RED metrics** — Tempo's metrics-generator remote-writes into Prometheus
   (requires `--web.enable-remote-write-receiver`), which is what feeds the Traces
   Drilldown Rate/Errors/Duration charts.
+- **Backend metrics** — Prometheus separately scrapes Tempo and Loki's `/metrics`
+  endpoints on the Compose network; these are their own service metrics, not span RED data.
 
 Cross-navigation is wired in `grafana/provisioning/datasources/observability.yml`:
 Prometheus exemplars → Tempo trace, Tempo → its logs (by `trace_id`), Tempo ↔ Loki.
@@ -124,8 +145,9 @@ Prometheus exemplars → Tempo trace, Tempo → its logs (by `trace_id`), Tempo 
 > locally, otherwise the gateway resolves to the loopback and every request returns 503.
 
 Alerts: rules live in [prometheus/alerts.yml](./prometheus/alerts.yml) (target down / HTTP 5xx /
-P99 / gRPC error rate / SQL·Redis pool waits, etc.); fired alerts are routed via Alertmanager. The dev receiver
-is empty (UI-only); in production, replace dev-sink in `alertmanager/alertmanager.yml` with a DingTalk/email webhook.
+P99 / gRPC error rate / SQL·Redis pool waits, plus host resources, MySQL, cache and security groups);
+fired alerts are routed via Alertmanager. The dev receiver is empty (UI-only); in production,
+replace dev-sink in `alertmanager/alertmanager.yml` with a DingTalk/email webhook.
 
 Dev environment data is stored in Docker volumes with a `dev-` prefix, isolated from the production orchestration's data volumes.
 Higress-specific routes, rate limiting, CORS and Kubernetes notes are in

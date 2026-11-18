@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 
+	"github.com/stanley760/devops/devops-infra/cache"
 	infracfg "github.com/stanley760/devops/devops-infra/config"
 	grpcinfra "github.com/stanley760/devops/devops-infra/grpc"
 	httpinfra "github.com/stanley760/devops/devops-infra/http"
@@ -230,6 +231,9 @@ var serverCmd = &cobra.Command{
 		addCleanup("redis", store.Close)
 		if err := obsRuntime.InstrumentRedis(store.Get()); err != nil {
 			return err
+		}
+		if setter, ok := store.Cache().(cache.MetricsSetter); ok {
+			setter.SetCacheMetrics(obsRuntime.CacheMetrics())
 		}
 
 		// Shared security wiring: configured private key → self-verifying KeySet

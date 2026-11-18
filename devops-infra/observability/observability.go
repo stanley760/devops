@@ -35,6 +35,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/stanley760/devops/devops-infra/cache"
 )
 
 // Config configures observability assembly.
@@ -55,10 +57,12 @@ type Config struct {
 type Runtime struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  *sdkmetric.MeterProvider
-	// registry is the self-built registry behind /metrics; nil when metrics are disabled.
-	// USE metrics (e.g. the SQL connection pool) are registered through it, output alongside the OTel metrics.
-	registry       *prometheus.Registry
-	MetricsHandler http.Handler
+	// registry is the base registry behind /metrics. The OTel exporter binds to
+	// it directly because it already exports service resource labels.
+	registry *prometheus.Registry
+	// registryWithLabels adds service and environment labels to non-OTel collectors.
+	registryWithLabels prometheus.Registerer
+	MetricsHandler     http.Handler
 
 	// logHandler is the OTLP log bridge; nil when log export is disabled.
 	// Shutdown flushes it together with the trace/meter providers.
@@ -67,7 +71,8 @@ type Runtime struct {
 	// readiness exports the dependency-readiness state (devops_readiness) so
 	// Grafana sees the same condition the orchestrator's readiness probe acts on;
 	// nil when metrics are disabled.
-	readiness *ReadinessCollector
+	readiness    *ReadinessCollector
+	cacheMetrics *CacheCollector
 
 	serviceName  string
 	httpRequests metric.Int64Counter
@@ -126,13 +131,20 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 
 	if cfg.MetricsEnabled {
 		// custom registry: OTel metrics + Go runtime/process metrics (GC, goroutines, memory)
-		// behind a single /metrics endpoint, so Grafana dashboards can reference runtime curves directly
+		// behind a single /metrics endpoint, so Grafana dashboards can reference runtime curves directly.
+		// Keep the OTel exporter on the base registry: wrapping it would duplicate
+		// service_name/deployment_environment on target_info.
 		registry := prometheus.NewRegistry()
-		registry.MustRegister(
+		rt.registry = registry
+		labels := prometheus.Labels{
+			"service_name":           cfg.ServiceName,
+			"deployment_environment": envOrUnknown(cfg.Env),
+		}
+		rt.registryWithLabels = prometheus.WrapRegistererWith(labels, registry)
+		rt.registryWithLabels.MustRegister(
 			collectors.NewGoCollector(),
 			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		)
-		rt.registry = registry
 		exp, err := promexporter.New(
 			promexporter.WithRegisterer(registry),
 			// Promote service.name / deployment.environment from the OTel Resource to
@@ -157,12 +169,18 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		}
 		// Dependency readiness (devops_readiness): mirrors what /readyz reports, so
 		// Grafana/Alertmanager can alert on the condition the orchestrator acts on.
-		rc, err := NewReadinessCollector(registry)
+		rc, err := NewReadinessCollector(rt.registryWithLabels)
 		if err != nil {
 			_ = rt.meterProvider.Shutdown(ctx)
 			return nil, fmt.Errorf("observability: failed to register the readiness collector: %w", err)
 		}
 		rt.readiness = rc
+		cc, err := NewCacheCollector(rt.registryWithLabels)
+		if err != nil {
+			_ = rt.meterProvider.Shutdown(ctx)
+			return nil, fmt.Errorf("observability: failed to register the cache collector: %w", err)
+		}
+		rt.cacheMetrics = cc
 	}
 
 	otel.SetTracerProvider(rt.tracerProvider)
@@ -216,6 +234,14 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	slog.SetDefault(slog.New(wrapped))
 
 	return rt, nil
+}
+
+// CacheMetrics returns the cache hit/miss recorder, or nil when metrics are disabled.
+func (rt *Runtime) CacheMetrics() cache.CacheMetrics {
+	if rt == nil || rt.cacheMetrics == nil {
+		return nil
+	}
+	return rt.cacheMetrics
 }
 
 // Shutdown flushes in-flight trace/metrics before releasing; call before process exit (with a timeout ctx).

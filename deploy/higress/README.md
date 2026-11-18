@@ -69,7 +69,7 @@ the named volume (defined in `docker-compose-dev.yml`, busybox image, exits when
 - explicit sync after editing yaml in this directory (stop gateway → re-seed → fix the toxic config → start gateway):
 
 ```bash
-sh deploy/dev.sh sync       # or .\deploy\dev.ps1 -Command sync
+sh scripts/dev.sh sync
 # Force-rerun higress-init seeding, and remove the auto-regenerated
 # inclusionRegexps: [.*] in higress-config (see the pitfall table in 2.3), then restart the gateway
 ```
@@ -85,7 +85,7 @@ sh deploy/dev.sh sync       # or .\deploy\dev.ps1 -Command sync
 | Console "service sources" shows `higress-console` instead of `devops-nacos` | The volume holds the default McpBridge generated on the all-in-one's first start; the git config was never seeded | Run `sync`; confirm `/data/mcpbridges/default.yaml` contains `devops-nacos` |
 | Route 404 / Ingress not effective | Same as above; `/data/ingresses/` is empty | Same as above |
 | Docker engine 500 / abnormally high CPU | ① Windows bind mount (already switched to a named volume); ② the all-in-one's built-in prometheus/loki/promtail/grafana run in parallel with the external stack; ③ `proxyStatsMatcher.inclusionRegexps: [.*]` in `higress-config` causes Envoy full high-cardinality metrics | Use the named volume; disable the built-in observability components (see "8. Observability"); `sync` already includes this fix (see the row below) |
-| envoy disappears ~1 minute after startup; 8080 TCP connects but returns empty (8001 is fine) | `inclusionRegexps: [.*]` in `higress-config` (**auto-regenerated on every first start of a new volume**, and the file has CRLF line endings) → envoy's stats tables blow up memory and it gets OOM-killed by cgroup; supervisord treats its exit 0 as expected and does not auto-restart it | `sh deploy/dev.sh sync` (stop, delete the config, then start); the dev compose memory limit has been raised to 2g as a backstop |
+| envoy disappears ~1 minute after startup; 8080 TCP connects but returns empty (8001 is fine) | `inclusionRegexps: [.*]` in `higress-config` (**auto-regenerated on every first start of a new volume**, and the file has CRLF line endings) → envoy's stats tables blow up memory and it gets OOM-killed by cgroup; supervisord treats its exit 0 as expected and does not auto-restart it | `sh scripts/dev.sh sync` (stop, delete the config, then start); the dev compose memory limit has been raised to 2g as a backstop |
 | Processes inside all-in-one batch exited | The supervisor shutdown sequence of container stop/restart; logs look like `exited: prometheus (exit status 0; expected)` | First check `docker compose ps` to see whether the container is in a restart loop |
 | Pages intermittently return **503 Service Unavailable** (roughly a fixed percentage of requests) | The canary Ingress uses `higress.io/canary-weight`, and the gray instance has zero instances in Nacos → that cluster does not exist in CDS → Envoy picks no upstream → `response_flags: NC`. `weighted_clusters` has **no** fallback to the baseline cluster, so the hit requests fail directly | Change the canary Ingress to tag-based gray release (`canary-by-header` / `canary-by-cookie`, Higress's `cluster_fallback` plugin degrades gracefully) → see section 5; or start the gray instance to make the cluster exist. Confirm via `curl -s localhost:15000/clusters?format=json` (the gray cluster should appear with the correct port) and `curl -s localhost:15000/stats \| grep no_cluster` |
 | The gray instance reports `mysql.host must not be empty` at startup | The config file name is derived from the service name; the gray instance registers as `devops-system-gray` but should reuse the main instance's config | Declare `nacos.config.service_name: devops-system` in the gray bootstrap (see `devops-system/config/bootstrap-gray.yaml`) |
@@ -759,9 +759,9 @@ Address-type configs to adjust when migrating:
 
 ```bash
 # dev: start / sync config / stop local services
-sh deploy/dev.sh          # containers + auto config seeding + bring up local services
-sh deploy/dev.sh sync     # sync to the named volume after editing higress yaml
-sh deploy/dev.sh app      # start only the local business services
+sh scripts/dev.sh          # containers + auto config seeding + bring up local services
+sh scripts/dev.sh sync     # sync to the named volume after editing higress yaml
+sh scripts/dev.sh app      # start only the local business services
 
 # Route verification
 curl -i -H 'Host: api.devops.local' http://localhost:8080/healthz

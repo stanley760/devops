@@ -1,0 +1,1190 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations \u0026 Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "MySQL connections",
+      "description": "Total, running and cached threads on the MySQL server.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "mysql_global_status_threads_connected{job=\"mysqld\"}",
+          "legendFormat": "connected"
+        },
+        {
+          "refId": "B",
+          "expr": "mysql_global_status_threads_running{job=\"mysqld\"}",
+          "legendFormat": "running"
+        },
+        {
+          "refId": "C",
+          "expr": "mysql_global_status_threads_cached{job=\"mysqld\"}",
+          "legendFormat": "cached"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "MySQL connection usage (%)",
+      "description": "Connected threads as a share of max_connections.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 85
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * mysql_global_status_threads_connected{job=\"mysqld\"} / mysql_global_variables_max_connections{job=\"mysqld\"}",
+          "legendFormat": "usage"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "MySQL query rate",
+      "description": "Queries executed per second on the MySQL server.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(mysql_global_status_queries{job=\"mysqld\"}[5m])",
+          "legendFormat": "queries"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "MySQL slow queries",
+      "description": "Rate of queries that exceeded long_query_time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(mysql_global_status_slow_queries{job=\"mysqld\"}[5m])",
+          "legendFormat": "slow queries"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "MySQL aborted connections",
+      "description": "Rates of failed connection attempts and aborted client connections.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(mysql_global_status_aborted_connects{job=\"mysqld\"}[5m])",
+          "legendFormat": "aborted connects"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(mysql_global_status_aborted_clients{job=\"mysqld\"}[5m])",
+          "legendFormat": "aborted clients"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "SQL pool saturation (%)",
+      "description": "In-use connections as a share of MaxOpenConns per database.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 70
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * go_sql_in_use_connections{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"} / go_sql_max_open_connections{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "{{service_name}} {{db_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "SQL pool connections",
+      "description": "Open, in-use and idle connections in the application's SQL pool.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "go_sql_open_connections{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "{{service_name}} open"
+        },
+        {
+          "refId": "B",
+          "expr": "go_sql_in_use_connections{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "{{service_name}} in use"
+        },
+        {
+          "refId": "C",
+          "expr": "go_sql_idle_connections{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "{{service_name}} idle"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "SQL pool wait rate",
+      "description": "Rate of goroutines waiting for a SQL connection and the time they spend waiting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(go_sql_wait_count_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m])",
+          "legendFormat": "waits/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(go_sql_wait_duration_seconds_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m])",
+          "legendFormat": "wait seconds/s"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Cache hit rate (%)",
+      "description": "Application-level cache hit rate from devops_cache_operations_total. The cache label is a logical name, never a raw key.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 30
+                  },
+                  {
+                    "color": "red",
+                    "value": 50
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (cache) (rate(devops_cache_operations_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",result=\"hit\"}[5m])) / (sum by (cache) (rate(devops_cache_operations_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",result=\"hit\"}[5m])) + sum by (cache) (rate(devops_cache_operations_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",result=\"miss\"}[5m])))",
+          "legendFormat": "{{cache}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Cache operations (hit / miss)",
+      "description": "Application cache lookup rate split by result.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache, result) (rate(devops_cache_operations_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{cache}} {{result}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Redis keyspace hit rate (%)",
+      "description": "Redis server keyspace hit rate, distinct from the application cache hit rate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 50
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) / (rate(redis_keyspace_hits_total{job=\"redis\"}[5m]) + rate(redis_keyspace_misses_total{job=\"redis\"}[5m]))",
+          "legendFormat": "keyspace hit rate"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Redis memory usage",
+      "description": "Memory used by the Redis server, with configured maxmemory for reference.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "bytes"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "redis_memory_used_bytes{job=\"redis\"}",
+          "legendFormat": "used"
+        },
+        {
+          "refId": "B",
+          "expr": "redis_config_maxmemory{job=\"redis\"}",
+          "legendFormat": "maxmemory"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Redis evictions and expirations",
+      "description": "Rate of keys evicted for lack of memory and keys expired by TTL.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(redis_evicted_keys_total{job=\"redis\"}[5m])",
+          "legendFormat": "evicted/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(redis_expired_keys_total{job=\"redis\"}[5m])",
+          "legendFormat": "expired/s"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Redis clients",
+      "description": "Connected and blocked clients on the Redis server.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "redis_connected_clients{job=\"redis\"}",
+          "legendFormat": "connected"
+        },
+        {
+          "refId": "B",
+          "expr": "redis_blocked_clients{job=\"redis\"}",
+          "legendFormat": "blocked"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Redis uptime",
+      "description": "Seconds since the Redis server started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "redis_uptime_in_seconds{job=\"redis\"}",
+          "legendFormat": "uptime"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Redis connection pool usage",
+      "description": "Used and idle connections in the application's Redis pool, against the pool maximum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "db_client_connections_usage{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",state=\"used\"}",
+          "legendFormat": "used"
+        },
+        {
+          "refId": "B",
+          "expr": "db_client_connections_usage{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",state=\"idle\"}",
+          "legendFormat": "idle"
+        },
+        {
+          "refId": "C",
+          "expr": "db_client_connections_max{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}",
+          "legendFormat": "max"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Redis pool wait and timeout rate",
+      "description": "Rate of pool acquisitions that waited and those that timed out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(db_client_connections_waits{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m])",
+          "legendFormat": "waits/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(db_client_connections_timeouts{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m])",
+          "legendFormat": "timeouts/s"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Redis connection pool reuse rate (%)",
+      "description": "Pool connection reuse rate, not application cache hit rate. Those metrics describe different behaviors.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 30
+                  },
+                  {
+                    "color": "red",
+                    "value": 50
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(db_client_connections_hits{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]) / (rate(db_client_connections_hits{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]) + rate(db_client_connections_misses{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\"}[5m]))",
+          "legendFormat": "{{pool_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "devops",
+    "database",
+    "cache"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({service_name=~\".+\"}, service_name)",
+        "query": {
+          "query": "label_values({service_name=~\".+\"}, service_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+        "query": {
+          "query": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(http_server_requests_total, route)",
+        "query": {
+          "query": "label_values(http_server_requests_total, route)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up, instance)",
+        "query": {
+          "query": "label_values(up, instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "DevOps database + cache / middleware",
+  "uid": "devops-data-middleware",
+  "version": 1,
+  "weekStart": ""
+}

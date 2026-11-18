@@ -46,6 +46,76 @@ func TestInitDefaults(t *testing.T) {
 	}
 }
 
+func TestMetricsCarryServiceNameLabel(t *testing.T) {
+	rt, err := Init(context.Background(), Config{
+		ServiceName:    "label-svc",
+		Env:            "dev",
+		MetricsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer func() { _ = rt.Shutdown(context.Background()) }()
+
+	rt.readiness.Set("mysql", true)
+
+	rec := httptest.NewRecorder()
+	rt.MetricsHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`go_goroutines{deployment_environment="dev",service_name="label-svc"}`,
+		`devops_readiness{dependency="mysql",deployment_environment="dev",service_name="label-svc"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in /metrics:\n%s", want, firstLines(body, 5))
+		}
+	}
+}
+
+func TestCacheMetricsCollectorExportsHitAndMiss(t *testing.T) {
+	rt, err := Init(context.Background(), Config{
+		ServiceName:    "cache-svc",
+		Env:            "test",
+		MetricsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer func() { _ = rt.Shutdown(context.Background()) }()
+
+	metrics := rt.CacheMetrics()
+	if metrics == nil {
+		t.Fatal("CacheMetrics() should be non-nil when metrics are enabled")
+	}
+	metrics.RecordHit("tenant")
+	metrics.RecordMiss("tenant")
+
+	rec := httptest.NewRecorder()
+	rt.MetricsHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`devops_cache_operations_total{cache="tenant",deployment_environment="test",result="hit",service_name="cache-svc"} 1`,
+		`devops_cache_operations_total{cache="tenant",deployment_environment="test",result="miss",service_name="cache-svc"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in /metrics:\n%s", want, firstLines(body, 5))
+		}
+	}
+}
+
+func TestCacheMetricsDisabledWhenMetricsDisabled(t *testing.T) {
+	rt, err := Init(context.Background(), Config{ServiceName: "no-metrics"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer func() { _ = rt.Shutdown(context.Background()) }()
+
+	if metrics := rt.CacheMetrics(); metrics != nil {
+		t.Fatalf("CacheMetrics() = %v, want nil when metrics are disabled", metrics)
+	}
+}
+
 func TestSamplerRatioClamping(t *testing.T) {
 	cases := []struct {
 		in, want float64
@@ -118,6 +188,12 @@ func TestMetricsMiddlewareRecordsAndPassesThrough(t *testing.T) {
 		!strings.Contains(body, `route="/users/:id"`) ||
 		!strings.Contains(body, `status="418"`) {
 		t.Fatalf("metric with route template label missing:\n%s", firstLines(body, 5))
+	}
+	if !strings.Contains(body, "devops_http_request_duration_seconds_bucket") {
+		t.Fatal("in-house HTTP duration histogram should use the devops_http_request_duration name")
+	}
+	if strings.Contains(body, "http_server_request_duration_seconds_bucket") {
+		t.Fatal("in-house HTTP duration histogram should not share otelgin's metric name")
 	}
 	// Resource constant labels: service_name / deployment_environment are output with
 	// every metric; Grafana dashboards filtering by service_name depend on these labels

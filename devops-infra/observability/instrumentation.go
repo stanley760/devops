@@ -37,10 +37,10 @@ func (rt *Runtime) InstrumentGORM(db *gorm.DB, database string) error {
 
 	// Connection pool metrics (USE perspective): go_sql_open_connections / in_use / idle /
 	// wait_count_total / wait_duration_seconds_total, with db_name as a label.
-	// Skipped when metrics are disabled (registry is nil), consistent with the fail-open
+	// Skipped when metrics are disabled (registryWithLabels is nil), consistent with the fail-open
 	// behavior on the trace side; failing to obtain *sql.DB or registering twice only
 	// warns, without blocking business operations.
-	if rt == nil || rt.registry == nil {
+	if rt == nil || rt.registryWithLabels == nil {
 		return nil
 	}
 	sqlDB, err := db.DB()
@@ -48,7 +48,7 @@ func (rt *Runtime) InstrumentGORM(db *gorm.DB, database string) error {
 		slog.Warn("observability: failed to obtain the underlying *sql.DB, connection pool metrics not assembled", "err", err)
 		return nil
 	}
-	if err := rt.registry.Register(collectors.NewDBStatsCollector(sqlDB, database)); err != nil {
+	if err := rt.registryWithLabels.Register(collectors.NewDBStatsCollector(sqlDB, database)); err != nil {
 		slog.Warn("observability: failed to register the SQL connection pool metrics", "db_name", database, "err", err)
 	}
 	return nil

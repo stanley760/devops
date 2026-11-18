@@ -1,10 +1,11 @@
-# Dashboard provisioning: automatically loads the JSON panels in this directory (devops-red.json).
+# Dashboard provisioning: automatically loads the JSON dashboards in this directory.
 apiVersion: 1
 providers:
   - name: devops
     folder: DevOps
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 5
+    # Poll the bind-mounted files; Windows/WSL Docker mounts may not forward fsnotify events.
+    updateIntervalSeconds: 30
     options:
       path: /etc/grafana/provisioning/dashboards

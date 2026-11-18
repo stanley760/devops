@@ -30,13 +30,18 @@ func (rt *Runtime) Middleware(opts ...otelgin.Option) gin.HandlerFunc {
 
 // RED metric definitions (output via the Prometheus exporter):
 //
-//	http_server_requests_total{method,route,status}     count
-//	http_server_request_duration_seconds{method,route}  duration histogram
-//	http_server_in_flight                               in-flight requests
+//	http_server_requests_total{method,route,status}        count
+//	devops_http_request_duration_seconds{method,route}     duration histogram
+//	http_server_in_flight                                  in-flight requests
 //
 // Label cardinality control: route uses the gin route template (/users/:id) and the
 // raw path never becomes a label; status is a bounded HTTP status code. Never put
 // high-cardinality values such as uid/tid into metric labels.
+//
+// The histogram carries a devops_ prefix on purpose. otelgin exports its own
+// semconv histogram under http_server_request_duration_seconds with a different
+// label schema; keeping distinct names prevents histogram_quantile from mixing
+// the two bucket sets.
 func (rt *Runtime) initHTTPMetrics() error {
 	if rt == nil || rt.meterProvider == nil {
 		return nil
@@ -48,7 +53,7 @@ func (rt *Runtime) initHTTPMetrics() error {
 	if err != nil {
 		return err
 	}
-	httpDuration, err := meter.Float64Histogram("http_server_request_duration",
+	httpDuration, err := meter.Float64Histogram("devops_http_request_duration",
 		metric.WithDescription("HTTP request duration"),
 		metric.WithUnit("s"))
 	if err != nil {

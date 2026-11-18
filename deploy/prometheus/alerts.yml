@@ -4,7 +4,9 @@
 # at http://localhost:9093; in prod, swap dev-sink for a DingTalk/WeCom/email webhook).
 #
 # Thresholds are dev starting values — tune per SLO in prod. Metric names match the dashboard:
-#   http_server_requests_total     business HTTP RED (otelgin custom instrumentation)
+#   http_server_requests_total     business HTTP RED (in-house counter)
+#   devops_http_request_duration_seconds  business HTTP RED (in-house histogram, has the route label)
+#   http_server_request_duration_seconds  otelgin semconv HTTP histogram (has the http_route label)
 #   rpc_client_call_duration_seconds   gRPC client (otelgrpc stats handler, devops-system/devops-user → devops-id)
 #   go_sql_*                       MySQL connection pool (client_golang DBStatsCollector)
 #   db_client_connections_*        Redis connection pool (redisotel)
@@ -39,7 +41,7 @@ groups:
       - alert: DevOpsHTTPP99High
         expr: |
           histogram_quantile(0.99,
-            sum(rate(http_server_request_duration_seconds_bucket{service_name=~"devops-(system|user)"}[5m])) by (le, route, service_name)
+            sum(rate(devops_http_request_duration_seconds_bucket{service_name=~"devops-(system|user)"}[5m])) by (le, route, service_name)
           ) > 1
         for: 5m
         labels:
@@ -149,3 +151,167 @@ groups:
           description: "Server-error failure share on {{ $labels.service_name }} registrations has been {{ $value | humanizePercentage }}
             for 10 minutes, above 30% (only code=5xx counted; 4xx parameter errors excluded):
             failure in the ID generation, database, or password hashing chain."
+
+  - name: devops-system-resources
+    rules:
+      - alert: DevOpsHostMemoryHigh
+        expr: |
+          node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"} < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory usage above 90% ({{ $labels.instance }})"
+          description: "MemAvailable has been below 10% of MemTotal for 5 minutes."
+
+      - alert: DevOpsHostDiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{job="node",mountpoint=~"^/$|^/mnt/[a-z]$"} / node_filesystem_size_bytes{job="node",mountpoint=~"^/$|^/mnt/[a-z]$"} < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space below 10% ({{ $labels.instance }} {{ $labels.mountpoint }})"
+          description: "Filesystem {{ $labels.mountpoint }} has less than 10% free space."
+
+      - alert: DevOpsHostDiskIOSaturated
+        expr: |
+          100 * rate(node_disk_io_time_seconds_total{job="node"}[5m]) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk I/O saturated ({{ $labels.instance }} {{ $labels.device }})"
+          description: "Device {{ $labels.device }} has been more than 90% busy for 10 minutes."
+
+      - alert: DevOpsHostCpuSustainedHigh
+        expr: |
+          100 * (1 - avg(avg by (cpu) (rate(node_cpu_seconds_total{job="node",mode="idle"}[5m])))) > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU above 90% ({{ $labels.instance }})"
+          description: "Average CPU utilization has been above 90% for 15 minutes."
+
+      - alert: DevOpsHostFileDescriptorsHigh
+        expr: |
+          100 * node_filefd_allocated{job="node"} / node_filefd_maximum{job="node"} > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "File descriptor usage above 80% ({{ $labels.instance }})"
+          description: "Allocated file descriptors have exceeded 80% of the system maximum."
+
+  - name: devops-database
+    rules:
+      - alert: DevOpsMySQLConnectionsNearLimit
+        expr: |
+          mysql_global_status_threads_connected{job="mysqld"} / mysql_global_variables_max_connections{job="mysqld"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL connections above 80% of max_connections"
+          description: "Connected threads have been above 80% of max_connections for 5 minutes."
+
+      - alert: DevOpsMySQLSlowQueryRateHigh
+        expr: |
+          rate(mysql_global_status_slow_queries{job="mysqld"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL slow queries detected"
+          description: "Slow queries have been occurring at {{ $value }}/s for 5 minutes."
+
+      - alert: DevOpsMySQLAbortedConnects
+        expr: |
+          rate(mysql_global_status_aborted_connects{job="mysqld"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL aborted connection attempts"
+          description: "Connection attempts have been failing at {{ $value }}/s for 5 minutes."
+
+      - alert: DevOpsSqlPoolSaturated
+        expr: |
+          100 * go_sql_in_use_connections{job="devops-services"} / go_sql_max_open_connections{job="devops-services"} > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQL connection pool saturated ({{ $labels.db_name }})"
+          description: "In-use connections have exceeded 90% of MaxOpenConns for 5 minutes."
+
+  - name: devops-cache
+    rules:
+      - alert: DevOpsCacheHitRateLow
+        expr: |
+          sum(rate(devops_cache_operations_total{result="hit"}[10m]))
+            /
+          (sum(rate(devops_cache_operations_total{result="hit"}[10m])) + sum(rate(devops_cache_operations_total{result="miss"}[10m]))) < 0.5
+          and sum(rate(devops_cache_operations_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Application cache hit rate below 50%"
+          description: "The application cache hit rate has been below 50% for 10 minutes."
+
+      - alert: DevOpsRedisEvictions
+        expr: |
+          rate(redis_evicted_keys_total{job="redis"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis evicting keys ({{ $labels.instance }})"
+          description: "Redis has been evicting keys at {{ $value }}/s for 5 minutes."
+
+      - alert: DevOpsRedisKeyspaceHitRateLow
+        expr: |
+          rate(redis_keyspace_hits_total{job="redis"}[5m])
+            /
+          (rate(redis_keyspace_hits_total{job="redis"}[5m]) + rate(redis_keyspace_misses_total{job="redis"}[5m])) < 0.8
+          and rate(redis_keyspace_hits_total{job="redis"}[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis keyspace hit rate below 80%"
+          description: "Redis keyspace hit rate has been below 80% for 10 minutes."
+
+  - name: devops-security
+    rules:
+      - alert: DevOpsLoginFailureBurst
+        expr: |
+          sum by (service_name) (rate(auth_login_total{result="failure"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Login failure burst ({{ $labels.service_name }})"
+          description: "Failed logins have exceeded 1/s for 5 minutes; inspect result and code labels."
+
+      - alert: DevOpsRateLimitHits
+        expr: |
+          sum(rate(http_server_requests_total{job="devops-services",status="429"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiting is rejecting requests"
+          description: "Requests are being rejected with 429 at {{ $value }}/s."
+
+      - alert: DevOpsClientErrorBurst
+        expr: |
+          sum(rate(http_server_requests_total{job="devops-services",status=~"4.."}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "4xx response burst"
+          description: "Client-error responses have been occurring at {{ $value }}/s for 5 minutes."

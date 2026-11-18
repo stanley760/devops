@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -15,9 +16,11 @@ import (
 
 // Client wraps the go-redis client and implements cache.Cache.
 var _ cache.Cache = (*Client)(nil)
+var _ cache.MetricsSetter = (*Client)(nil)
 
 type Client struct {
-	client *goredis.Client
+	client  *goredis.Client
+	metrics cache.CacheMetrics
 }
 
 // New creates a client and verifies connectivity.
@@ -39,6 +42,22 @@ func New(cfg Config) (*Client, error) {
 	return &Client{client: client}, nil
 }
 
+// SetCacheMetrics installs the optional cache hit/miss recorder.
+func (client *Client) SetCacheMetrics(metrics cache.CacheMetrics) {
+	if client == nil {
+		return
+	}
+	client.metrics = metrics
+}
+
+func logicalCacheName(key string) string {
+	name, _, found := strings.Cut(key, ":")
+	if !found || name == "" {
+		return "default"
+	}
+	return name
+}
+
 // Redis returns the underlying go-redis client for advanced capabilities such as pipelines and subscriptions.
 func (client *Client) Redis() *goredis.Client {
 	if client == nil {
@@ -55,10 +74,16 @@ func (client *Client) Get(ctx context.Context, key string) (string, error) {
 
 	value, err := client.client.Get(ctx, key).Result()
 	if errors.Is(err, goredis.Nil) {
+		if client.metrics != nil {
+			client.metrics.RecordMiss(logicalCacheName(key))
+		}
 		return "", cache.ErrNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to read Redis cache: %w", err)
+	}
+	if client.metrics != nil {
+		client.metrics.RecordHit(logicalCacheName(key))
 	}
 	return value, nil
 }

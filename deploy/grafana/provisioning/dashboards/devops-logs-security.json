@@ -1,0 +1,948 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations \u0026 Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Log volume (by service)",
+      "description": "Log lines per minute, grouped by service.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service_name) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} [1m]))",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Log level distribution",
+      "description": "Log lines per minute by detected level. Error series are empty while no error-level logs are emitted.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (detected_level) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | detected_level!=\"\" [1m]))",
+          "legendFormat": "{{detected_level}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "ERROR log rate",
+      "description": "Error-level log lines per minute. An empty graph means no error-level logs were emitted.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | detected_level=\"error\" [1m]))",
+          "legendFormat": "errors/min"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Log status codes",
+      "description": "Log lines per minute grouped by the HTTP status code carried as structured metadata.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | status!=\"\" [1m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Top request paths",
+      "description": "The ten most frequently logged request paths.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (path) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | path!=\"\" [1m])))",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Value"
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Slowest requests (by path)",
+      "description": "The ten paths with the highest observed request latency. Latency is aggregated, never used as a grouping label.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, max by (path) (max_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | unwrap duration(latency) | __error__=\"\" [1m])))",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Value"
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Top client IPs",
+      "description": "The ten client addresses producing the most log lines.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (client_ip) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | client_ip!=\"\" [1m])))",
+          "legendFormat": "{{client_ip}}"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Value"
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Error log stream",
+      "description": "Live stream of error-level log lines; empty while the system is healthy.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=~\"$service\",deployment_environment=~\"$env\"} | detected_level=\"error\""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Authentication failure stream",
+      "description": "Live stream of log lines carrying a 401 or 403 status.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=~\"$service\",deployment_environment=~\"$env\"} | status=~\"401|403\""
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Login failures",
+      "description": "Failed login attempts per second, per service. The counter is lazy, so an empty series means no login has been attempted.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service_name) (rate(auth_login_total{service_name=~\"$service\",deployment_environment=~\"$env\",result=\"failure\"}[5m])) or vector(0)",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Login failure rate (%)",
+      "description": "Share of login attempts that failed; the business code distinguishes credential failures from server errors.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 30
+                  },
+                  {
+                    "color": "red",
+                    "value": 50
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (service_name) (rate(auth_login_total{service_name=~\"$service\",deployment_environment=~\"$env\",result=\"failure\"}[5m])) / sum by (service_name) (rate(auth_login_total{service_name=~\"$service\",deployment_environment=~\"$env\"}[5m])) or vector(0)",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Login failures by business code",
+      "description": "Failed logins grouped by business error code.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (rate(auth_login_total{service_name=~\"$service\",deployment_environment=~\"$env\",result=\"failure\"}[5m])) or vector(0)",
+          "legendFormat": "code {{code}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Registration failures",
+      "description": "Failed registrations per second, per service.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service_name) (rate(auth_register_total{service_name=~\"$service\",deployment_environment=~\"$env\",result=\"failure\"}[5m])) or vector(0)",
+          "legendFormat": "{{service_name}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "4xx responses (scanning / credential stuffing)",
+      "description": "Client-error responses per second, grouped by status code.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",status=~\"4..\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "5xx responses (server faults)",
+      "description": "Server-error responses per second, grouped by status code.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",status=~\"5..\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Rate limiting (429)",
+      "description": "Requests rejected by the rate limiter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_server_requests_total{job=\"devops-services\",service_name=~\"$service\",deployment_environment=~\"$env\",status=\"429\"}[5m])) or vector(0)",
+          "legendFormat": "429/s"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Gateway responses by class",
+      "description": "Higress/Envoy downstream responses by status class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "reqps"
+        },
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (response_code_class) (rate(envoy_http_downstream_rq{job=\"higress-gateway\",http_conn_manager_prefix=~\"outbound.*\"}[5m]))",
+          "legendFormat": "{{response_code_class}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Top client IPs by error logs",
+      "description": "The ten client addresses producing the most error-level log lines.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": null
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (client_ip) (count_over_time({service_name=~\"$service\",deployment_environment=~\"$env\"} | client_ip!=\"\" | detected_level=\"error\" [1m])))",
+          "legendFormat": "{{client_ip}}"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Value"
+          }
+        ]
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "devops",
+    "logs",
+    "security"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({service_name=~\".+\"}, service_name)",
+        "query": {
+          "query": "label_values({service_name=~\".+\"}, service_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+        "query": {
+          "query": "label_values({deployment_environment=~\".+\"}, deployment_environment)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(http_server_requests_total, route)",
+        "query": {
+          "query": "label_values(http_server_requests_total, route)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up, instance)",
+        "query": {
+          "query": "label_values(up, instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "regex": "",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "DevOps logs + security",
+  "uid": "devops-logs-security",
+  "version": 1,
+  "weekStart": ""
+}

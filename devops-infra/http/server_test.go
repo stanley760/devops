@@ -83,10 +83,10 @@ func TestReadyZExportsReadinessMetric(t *testing.T) {
 	mrec := httptest.NewRecorder()
 	rt.MetricsHandler.ServeHTTP(mrec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := mrec.Body.String()
-	if !strings.Contains(body, `devops_readiness{dependency="mysql"} 1`) {
+	if !strings.Contains(body, `devops_readiness{dependency="mysql",deployment_environment="dev",service_name="readyz-test"} 1`) {
 		t.Fatalf("ready dependency missing from metrics:\n%s", body)
 	}
-	if !strings.Contains(body, `devops_readiness{dependency="redis"} 0`) {
+	if !strings.Contains(body, `devops_readiness{dependency="redis",deployment_environment="dev",service_name="readyz-test"} 0`) {
 		t.Fatalf("unready dependency missing from metrics:\n%s", body)
 	}
 }

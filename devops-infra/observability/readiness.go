@@ -20,19 +20,20 @@ type ReadinessCollector struct {
 	gauge *prometheus.GaugeVec
 }
 
-// NewReadinessCollector registers a readiness gauge on the given registry.
+// NewReadinessCollector registers a readiness gauge on the given registerer.
 //
 // The metric is named devops_readiness with a "dependency" label: 1 means the
-// dependency is reachable, 0 means it is not.
-func NewReadinessCollector(registry *prometheus.Registry) (*ReadinessCollector, error) {
-	if registry == nil {
+// dependency is reachable, 0 means it is not. A wrapped registerer can add
+// service-level constant labels to the gauge.
+func NewReadinessCollector(reg prometheus.Registerer) (*ReadinessCollector, error) {
+	if reg == nil {
 		return nil, nil
 	}
 	gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "devops_readiness",
 		Help: "Dependency readiness of the service: 1 = reachable, 0 = unreachable (the same condition the orchestrator's readiness probe acts on).",
 	}, []string{"dependency"})
-	if err := registry.Register(gauge); err != nil {
+	if err := reg.Register(gauge); err != nil {
 		return nil, err
 	}
 	return &ReadinessCollector{gauge: gauge}, nil
