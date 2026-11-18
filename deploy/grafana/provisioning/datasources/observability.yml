@@ -1,0 +1,51 @@
+# Grafana datasource one-shot config: Prometheus (default) + Tempo (traces) + Loki (logs).
+# The three Drilldown apps bind to these: Metrics → prometheus, Traces → tempo,
+# Logs → loki. Cross-navigation: Tempo ↔ Loki (trace ↔ log) and Tempo → Prometheus
+# (span-metrics / exemplars).
+apiVersion: 1
+
+# Clean up data sources that are no longer part of the stack: Jaeger was replaced
+# by Tempo (same OTLP ports, but Tempo is the only backend that backs the Traces
+# Drilldown Rate/Errors/Duration charts). deleteDatasources removes it explicitly;
+# prune additionally removes any provisioned data source whose file/entry disappears.
+deleteDatasources:
+  - name: Jaeger
+    orgId: 1
+prune: true
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s          # aligned with the Prometheus scrape_interval
+      exemplarTraceIdDestinations:
+        - name: trace_id           # exemplar click → Tempo trace view
+          datasourceUid: tempo
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://tempo:3200
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: loki        # trace → its logs (filter by trace_id)
+        filterByTraceID: true
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+      lokiSearch:
+        datasourceUid: loki        # "Search logs" tab inside Tempo
+      serviceMap:
+        datasourceUid: prometheus  # service graph metrics
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        # trace_id in a log line → link to the Tempo trace view
+        - name: TraceID
+          matcherRegex: "trace_id=(\\w+)"
+          datasourceUid: tempo

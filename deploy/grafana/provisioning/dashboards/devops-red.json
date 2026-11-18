@@ -27,9 +27,9 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": true,
-      "title": "Jaeger UI",
+      "title": "Traces Drilldown (Tempo)",
       "type": "link",
-      "url": "http://localhost:16686"
+      "url": "http://localhost:3000/a/grafana-exploretraces-app"
     }
   ],
   "panels": [

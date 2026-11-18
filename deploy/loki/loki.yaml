@@ -1,0 +1,47 @@
+# Loki single-binary config for the dev compose stack (mounted at /etc/loki/config.yaml).
+# Logs arrive via Loki's native OTLP endpoint (/otlp/v1/logs) straight from the services'
+# OTel log exporters — no collector in between. service.name becomes the index label
+# service_name (Logs Drilldown groups by it); trace_id/span_id land in structured
+# metadata, enabling the log → trace jump into Tempo.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# OTLP ingestion stores resource attributes as structured metadata; required since
+# Loki 3.0 (default true, pinned here to make the contract explicit).
+limits_config:
+  allow_structured_metadata: true
+  # Dev-friendly retention: reject queries older than the data we keep on disk.
+  retention_period: 72h
+
+# Cap memory on a dev machine: keep only the last N log lines per query.
+query_range:
+  parallelise_shardable_queries: false
+
+frontend:
+  encoding: protobuf

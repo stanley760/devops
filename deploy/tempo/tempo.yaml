@@ -1,0 +1,49 @@
+# Tempo single-binary config for the dev compose stack (mounted at /etc/tempo.yaml).
+# Replaces Jaeger as the trace backend: same OTLP ports (4317 gRPC / 4318 HTTP), so
+# business services keep otlp_endpoint: "http://tempo:4318" (or 127.0.0.1:4318 locally)
+# unchanged. Traces Drilldown's Rate/Errors/Duration charts read the span metrics that
+# the metrics-generator remote-writes into Prometheus (traces_spanmetrics_*).
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: info
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+# Generates RED metrics from spans (Rate/Errors/Duration) and service graphs,
+# remote-written to the Prometheus in this compose stack. The per-tenant override
+# under `overrides.defaults.metrics_generator` activates the processors.
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: devops-dev
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: ["span-metrics", "service-graphs"]
+
+usage_report:
+  reporting_enabled: false

@@ -117,9 +117,14 @@ func newRouter(cfg config.ServerConfig, register Register, readiness []Readiness
 			cancel()
 			if err != nil {
 				unready = append(unready, check.Name)
+				// Export the dependency state so Grafana/Alertmanager sees the same
+				// condition the orchestrator's readiness probe acts on: `up` stays 1
+				// while a dependency is down, which would otherwise hide the outage.
+				obs.SetReadiness(check.Name, false)
 				continue
 			}
 			ready = append(ready, check.Name)
+			obs.SetReadiness(check.Name, true)
 		}
 		if len(unready) == 0 {
 			response.OK(c, gin.H{"status": "ready", "ready": ready})

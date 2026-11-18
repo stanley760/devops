@@ -15,9 +15,11 @@ etcd:                    # snowflake worker coordination (mapped to host port 23
   dial_timeout: 5s
   lease_ttl: 10s         # slot release delay after a crash
 
-# Local development: Jaeger is exposed on host port 4318 by the dev compose setup; metrics use a separate HTTP port 9991.
+# Local development: Tempo is exposed on host port 4318 by the dev compose setup (OTLP
+# traces and logs both go there — traces to Tempo, logs to Loki); metrics use a separate HTTP port 9991.
 observability:
   otlp_endpoint: "http://127.0.0.1:4318"
+  otlp_log_endpoint: "http://127.0.0.1:3100/otlp"   # Loki OTLP endpoint (/otlp/v1/logs)
   sampler_ratio: 1.0
   metrics_enabled: true
   metrics_listen: ":9991"

@@ -50,6 +50,47 @@ func TestReadyZReportsCheckStatus(t *testing.T) {
 	}
 }
 
+// TestReadyZExportsReadinessMetric checks that the /readyz probe result is
+// exported as devops_readiness, so Grafana sees the same dependency state the
+// orchestrator acts on (the `up` metric alone cannot express it).
+func TestReadyZExportsReadinessMetric(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rt, err := observability.Init(context.Background(), observability.Config{
+		ServiceName:    "readyz-test",
+		Env:            "dev",
+		MetricsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	defer func() { _ = rt.Shutdown(context.Background()) }()
+
+	router, err := newRouter(config.ServerConfig{}, nil, []ReadinessCheck{
+		{Name: "mysql", Check: func(context.Context) error { return nil }},
+		{Name: "redis", Check: func(context.Context) error { return errBoom }},
+	}, rt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+
+	mrec := httptest.NewRecorder()
+	rt.MetricsHandler.ServeHTTP(mrec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := mrec.Body.String()
+	if !strings.Contains(body, `devops_readiness{dependency="mysql"} 1`) {
+		t.Fatalf("ready dependency missing from metrics:\n%s", body)
+	}
+	if !strings.Contains(body, `devops_readiness{dependency="redis"} 0`) {
+		t.Fatalf("unready dependency missing from metrics:\n%s", body)
+	}
+}
+
 func TestRouterDoesNotHandleCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router, err := newRouter(config.ServerConfig{}, nil, nil, nil, nil)

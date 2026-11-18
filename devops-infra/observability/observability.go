@@ -41,9 +41,14 @@ import (
 type Config struct {
 	ServiceName    string  // service name; should match the nacos registration name (cross-service trace and Grafana filtering depend on it)
 	Env            string  // deployment.environment resource attribute (dev/test/prod)
-	OTLPEndpoint   string  // OTLP HTTP endpoint, e.g. "http://jaeger:4318"; empty = no trace exporter
+	OTLPEndpoint   string  // OTLP HTTP endpoint, e.g. "http://tempo:4318"; empty = no trace exporter
 	SamplerRatio   float64 // root span sampling ratio; 1.0 recommended in dev, 0.1 in prod; <=0 means 1.0
 	MetricsEnabled bool    // whether to assemble the Prometheus exporter (/metrics)
+	// OTLPLogEndpoint is the OTLP HTTP base URL for log export (e.g.
+	// "http://loki:3100/otlp"); empty = no log export (file/console logging only).
+	// Loki's OTLP ingestion endpoint is /otlp/v1/logs, so the base carries the
+	// "/otlp" prefix and the logs signal path is appended to it.
+	OTLPLogEndpoint string
 }
 
 // Runtime is the assembly product: when MetricsHandler is non-nil it is mounted on the public route /metrics.
@@ -54,6 +59,15 @@ type Runtime struct {
 	// USE metrics (e.g. the SQL connection pool) are registered through it, output alongside the OTel metrics.
 	registry       *prometheus.Registry
 	MetricsHandler http.Handler
+
+	// logHandler is the OTLP log bridge; nil when log export is disabled.
+	// Shutdown flushes it together with the trace/meter providers.
+	logHandler *OTelLogHandler
+
+	// readiness exports the dependency-readiness state (devops_readiness) so
+	// Grafana sees the same condition the orchestrator's readiness probe acts on;
+	// nil when metrics are disabled.
+	readiness *ReadinessCollector
 
 	serviceName  string
 	httpRequests metric.Int64Counter
@@ -141,6 +155,14 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 			_ = rt.meterProvider.Shutdown(ctx)
 			return nil, fmt.Errorf("observability: failed to initialize HTTP metrics: %w", err)
 		}
+		// Dependency readiness (devops_readiness): mirrors what /readyz reports, so
+		// Grafana/Alertmanager can alert on the condition the orchestrator acts on.
+		rc, err := NewReadinessCollector(registry)
+		if err != nil {
+			_ = rt.meterProvider.Shutdown(ctx)
+			return nil, fmt.Errorf("observability: failed to register the readiness collector: %w", err)
+		}
+		rt.readiness = rc
 	}
 
 	otel.SetTracerProvider(rt.tracerProvider)
@@ -152,6 +174,21 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
+
+	// OTLP log export: build the bridge handler first, then wrap the current default
+	// handler so existing slog calls go to Loki AND keep their original output.
+	// Chain order: TraceHandler (adds trace_id/span_id attrs) → OTelLogHandler (exports
+	// to OTel, passes through) → base (file/console). The OTel record gets the native
+	// TraceID/SpanID fields from the ctx span inside OTelLogHandler itself.
+	if cfg.OTLPLogEndpoint != "" {
+		logHandler, lerr := NewOTelLogHandler(ctx, cfg.OTLPLogEndpoint, res)
+		if lerr != nil {
+			// fail-open: log export must not block business startup
+			slog.Warn("observability: failed to create the OTLP log exporter, log export disabled", "err", lerr, "endpoint", cfg.OTLPLogEndpoint)
+		} else {
+			rt.logHandler = logHandler
+		}
+	}
 
 	// Log trace correlation: wrap the current default handler so existing slog calls
 	// automatically carry trace_id/span_id.
@@ -168,9 +205,30 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	if log.Default().Writer() == os.Stderr {
 		base = slog.NewTextHandler(os.Stderr, nil)
 	}
-	slog.SetDefault(slog.New(TraceHandler{Handler: base}))
+	var wrapped slog.Handler = TraceHandler{Handler: base}
+	if rt.logHandler != nil {
+		// OTelLogHandler sits between TraceHandler and the file/console handlers:
+		// it sees the trace_id attrs added above and exports them, then delegates
+		// to base so file/console output is unchanged.
+		rt.logHandler.Handler = base
+		wrapped = TraceHandler{Handler: rt.logHandler}
+	}
+	slog.SetDefault(slog.New(wrapped))
 
 	return rt, nil
+}
+
+// Shutdown flushes in-flight trace/metrics before releasing; call before process exit (with a timeout ctx).
+// SetReadiness records the readiness of one dependency in the devops_readiness
+// metric. It is a no-op when metrics are disabled.
+//
+// Call it from the /readyz handler so the exported value always matches the
+// probe result the orchestrator acts on.
+func (rt *Runtime) SetReadiness(dependency string, ready bool) {
+	if rt == nil {
+		return
+	}
+	rt.readiness.Set(dependency, ready)
 }
 
 // Shutdown flushes in-flight trace/metrics before releasing; call before process exit (with a timeout ctx).
@@ -179,6 +237,11 @@ func (rt *Runtime) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
+	if rt.logHandler != nil {
+		if err := rt.logHandler.ShutdownLogExport(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("log exporter: %w", err))
+		}
+	}
 	if rt.meterProvider != nil {
 		if err := rt.meterProvider.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("meter provider: %w", err))

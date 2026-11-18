@@ -25,9 +25,11 @@ etcd:                 # snowflake worker coordination
     - "etcd:2379"
 
 # Production observability settings: sampling starts at 0.1; metrics go over a dedicated HTTP port, scraped only on the intranet.
-# An empty otlp_endpoint means local spans are not reported; fill in its OTLP HTTP address after wiring up Jaeger/Tempo/otel-collector.
+# An empty otlp_endpoint means local spans are not reported; fill in its OTLP HTTP address after wiring up Tempo/otel-collector.
+# otlp_log_endpoint points at the Loki OTLP port; leave empty to keep logs file/console only.
 observability:
   otlp_endpoint: ""
+  otlp_log_endpoint: ""
   sampler_ratio: 0.1
   metrics_enabled: true
   metrics_listen: ":9991"

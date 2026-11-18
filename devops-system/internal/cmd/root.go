@@ -64,11 +64,12 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		obs, err := observability.Init(cmd.Context(), observability.Config{
-			ServiceName:    cfg.Nacos.Registry.ServiceName,
-			Env:            infracfg.Env(),
-			OTLPEndpoint:   cfg.Observability.OTLPEndpoint,
-			SamplerRatio:   cfg.Observability.SamplerRatio,
-			MetricsEnabled: cfg.Observability.MetricsEnabled,
+			ServiceName:     cfg.Nacos.Registry.ServiceName,
+			Env:             infracfg.Env(),
+			OTLPEndpoint:    cfg.Observability.OTLPEndpoint,
+			SamplerRatio:    cfg.Observability.SamplerRatio,
+			MetricsEnabled:  cfg.Observability.MetricsEnabled,
+			OTLPLogEndpoint: cfg.Observability.OTLPLogEndpoint,
 		})
 		if err != nil {
 			return err

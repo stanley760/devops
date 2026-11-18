@@ -83,6 +83,7 @@ idclient:
 
 observability:
   otlp_endpoint: "http://127.0.0.1:4318"
+  otlp_log_endpoint: "http://127.0.0.1:3100/otlp"   # OTLP 日志直发 Loki（Loki 的 OTLP 端点是 /otlp/v1/logs）
   sampler_ratio: 1.0
   metrics_enabled: true
 

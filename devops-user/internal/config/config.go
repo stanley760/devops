@@ -172,6 +172,7 @@ type ObservabilityConfig struct {
 	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP endpoint; empty means local spans are not reported
 	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // root sampling ratio; <=0 is treated as 1.0
 	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // whether Prometheus metrics are enabled
+	OTLPLogEndpoint string `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
 }
 
 // APIDocConfig is the OpenAPI documentation gating. BasePath is the doc mount

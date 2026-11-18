@@ -568,8 +568,8 @@ kubectl -n devops get networkpolicy
 
 ## 8. Observability
 
-External stack (applies to both dev compose and production): **Jaeger (traces) + Prometheus (metrics) +
-Grafana (dashboards)**, configured in `deploy/prometheus/` and `deploy/grafana/`.
+External stack (applies to both dev compose and production): **Tempo (traces) + Loki (logs) + Prometheus (metrics) +
+Grafana (dashboards)**, configured in `deploy/prometheus/`, `deploy/tempo/`, `deploy/loki/` and `deploy/grafana/`.
 
 - **Scraping gateway metrics**: Envoy admin port 15020 outputs merged metrics
   (`enablePrometheusMerge: true` in `higress-config`); Prometheus scrape job:
@@ -715,7 +715,7 @@ volumes:
 **Monitoring**
 - Reuse the existing Prometheus/Grafana stack: scrape `higress-gateway:15020/stats/prometheus`
   (metrics) and controller metrics; import Envoy/Istio dashboards in Grafana to observe 4xx/5xx, P99
-  latency and connection counts, plus Jaeger traces to locate slow requests.
+  latency and connection counts, plus Tempo traces to locate slow requests.
 - Alert items: gateway health check failure, 5xx ratio, rate-limit 429 spikes, controller-to-Nacos
   disconnection.
 

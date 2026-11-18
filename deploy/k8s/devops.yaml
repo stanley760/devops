@@ -3,7 +3,7 @@
 # Assumptions (adjust to the actual environment):
 #   1. Images are pushed to a registry: registry.example.com/devops/*; replace the image values below with real addresses
 #   2. MySQL / Redis / etcd are managed services outside the cluster or deployed independently (connecting to RDS from inside K8s is a common pattern);
-#      the addresses in the configs are placeholders â€” replace them before applying
+#      the addresses in the configs are placeholders â€?replace them before applying
 #   3. The configs contain database passwords and the JWT signing key, hence carried in a Secret rather than a ConfigMap
 #      (the current config system has no env-var binding and cannot reference independent Secret keys)
 #
@@ -16,7 +16,7 @@
 #   - devops-id replicas 2: each claims an independent worker slot per leaf_name + biz_tag via etcd
 #   - devops-system is stateless (sessions in Redis), so it can scale horizontally freely
 #   - snowflake depends heavily on the clock: nodes must run NTP/chrony; a backwards step is rejected for ID generation
-#   - K8s â‰¥1.24 can use native grpc probes to check devops-id health
+#   - K8s â‰?.24 can use native grpc probes to check devops-id health
 #   - For network isolation see networkpolicy.yaml in the same directory (requires CNI support for NetworkPolicy, e.g. Calico/Cilium)
 apiVersion: v1
 kind: Namespace
@@ -50,7 +50,7 @@ stringData:
     etcd:
       endpoints:
         - "YOUR_ETCD_ENDPOINT:2379"
-    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Jaeger/Tempo/otel-collector
+    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Tempo/otel-collector
     observability:
       otlp_endpoint: ""
       sampler_ratio: 0.1
@@ -81,7 +81,7 @@ stringData:
       signing_key: "YOUR_JWT_SIGNING_KEY_MIN_32_CHARS"
     idclient:
       endpoint: "devops-id.devops.svc.cluster.local:9990"  # direct Service DNS inside K8s (no scheme, passthrough resolver)
-    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Jaeger/Tempo/otel-collector
+    # An empty otlp_endpoint means local spans are not reported; fill in the OTLP HTTP address after wiring up an in-cluster Tempo/otel-collector
     observability:
       otlp_endpoint: ""
       sampler_ratio: 0.1
@@ -95,9 +95,9 @@ stringData:
     # enforces that only the gateway can reach 9999.
     # The old static X-Gateway-Token (require_token / token) has been removed.
     # The identity source and the gateway exposure whitelist live in the service's own
-    # config/bootstrap.yaml (gateway section) â€” one place per service, environment
+    # config/bootstrap.yaml (gateway section) â€?one place per service, environment
     # independent. The gateway is the only JWT verifier there; the NetworkPolicy below is
-    # the premise â€” only the gateway may reach the pod, so the identity headers it injects
+    # the premise â€?only the gateway may reach the pod, so the identity headers it injects
     # cannot be forged.
     server:
       trusted_proxies: ["10.0.0.0/8"]   # adjust to the actual ingress/LB CIDRs; use [] for direct connections
@@ -179,7 +179,7 @@ spec:
             limits:
               cpu: "1"
               memory: 256Mi
-          # K8s â‰¥1.24 native grpc probe, probing grpc.health.v1
+          # K8s â‰?.24 native grpc probe, probing grpc.health.v1
           # liveness uses idgen.IdGen.live: a degraded (DEGRADED) state does not kill the Pod, only NotServing triggers a restart
           # readiness uses idgen.IdGen: degraded or unavailable takes the Pod out of service
           livenessProbe:

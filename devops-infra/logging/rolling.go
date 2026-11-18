@@ -23,7 +23,7 @@ const (
 func newRollingLogger(cfg config.LogConfig) (*timberjack.Logger, error) {
 	dir := strings.TrimSpace(cfg.Dir)
 	if dir == "" {
-		dir = "logs"
+		dir = "log"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)

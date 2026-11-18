@@ -1,5 +1,5 @@
 // OTLP export regression: before the fix, WithEndpointURL("http://host:4318") with no
-// path was normalized to "/", traces were sent to / and silently dropped by Jaeger's 404;
+// path was normalized to "/", traces were sent to / and silently dropped by Tempo's 404;
 // after the fix, /v1/traces is appended automatically.
 package observability
 
@@ -18,7 +18,7 @@ func TestOTLPExportPathCollected(t *testing.T) {
 	var gotPath string
 	var requests int
 
-	// simulate an OTLP receiver (Jaeger behavior: only /v1/traces accepts data)
+	// simulate an OTLP receiver (Tempo behavior: only /v1/traces accepts data)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requests++

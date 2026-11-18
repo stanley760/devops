@@ -82,11 +82,16 @@ services:
       timeout: 3s
       retries: 30
       start_period: 15s
+    restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512m   # JVM is already capped at 256m; the container limit backs up off-heap overhead
+          # 512m is NOT enough and gets the container OOM-killed a few minutes after
+          # startup (exit 137, OOMKilled=true): heap 256m + image-default metaspace
+          # 320m (JVM_MMS) + Nacos 2.x gRPC direct memory ≈ 700-800MB peak once
+          # clients connect. 1g covers the worst case with headroom.
+          memory: 1g
 
   # One-shot config seeding: copies the git-managed resource directories under deploy/higress
   # into the named volume (/data), avoiding the high CPU caused by a Windows bind mount on /data.
@@ -154,27 +159,65 @@ services:
           cpus: "0.5"
           memory: 256m
 
-  # —— Observability (dev local stack): Jaeger tracing + Prometheus scraping + Grafana visualization ——
+  # —— Observability (dev local stack): Tempo tracing + Loki logs + Prometheus scraping + Grafana visualization ——
+  # Grafana 12.x ships the Drilldown apps (Metrics / Logs / Traces) built in:
+  #   - Metrics Drilldown browses Prometheus metrics queryless, grouped by metric-name
+  #     prefix (works against the existing Prometheus datasource, zero extra config);
+  #   - Logs Drilldown groups by service.name — fed by Loki, which receives the services'
+  #     slog output over OTLP (observability.OTLPLogEndpoint → loki:4318);
+  #   - Traces Drilldown shows Rate/Errors/Duration — fed by Tempo, whose metrics-generator
+  #     remote-writes span RED metrics into Prometheus.
+  # Tempo replaces Jaeger on the same OTLP ports (4317/4318), so service configs are unchanged.
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.62.0
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
+  tempo:
+    image: grafana/tempo:3.1.1
+    command: ["-target=all", "-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
     ports:
+      - "3200:3200"           # Tempo HTTP API (TraceQL)
       - "4317:4317"           # OTLP gRPC
       - "4318:4318"           # OTLP HTTP (service trace egress)
-      - "16686:16686"         # Jaeger UI
+    # The Tempo image is distroless: no shell, no curl/wget — a container-level
+    # HTTP probe is impossible. Liveness is checked via the binary itself; the
+    # real readiness signal comes from Grafana's Tempo datasource health check
+    # (which queries /status) and from the service's own logs.
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:14269/"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-    command: ["--memory.max-traces=20000"]
+      test: ["CMD", "/tempo", "-version"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1g   # double insurance with max-traces: the data layer caps row count, the container layer caps memory
+          memory: 512m
+
+  # Log backend: receives OTLP logs from the services (log.export endpoint loki:4318)
+  # and serves Logs Drilldown. service.name → index label service_name.
+  loki:
+    image: grafana/loki:3.7.10
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"           # Loki HTTP API / readiness
+    # The Loki image is distroless: no shell, no curl/wget — a container-level
+    # HTTP probe is impossible. Liveness is checked via the binary itself; the
+    # real readiness signal comes from Grafana's Loki datasource health check.
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-version"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
   prometheus:
     image: prom/prometheus:v2.55.1
     volumes:
@@ -185,6 +228,15 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=3d   # no persistent volume in dev; just cap in-container growth
+      # Accept Tempo's metrics-generator remote writes (traces_spanmetrics_* — the
+      # Rate/Errors/Duration data behind Traces Drilldown)
+      - --web.enable-remote-write-receiver
+      # Exemplars link metric samples back to Tempo traces
+      - --enable-feature=exemplar-storage
+      # Probes /readyz so the devops_readiness metric reflects the real dependency
+      # state (the orchestrator consumes the same endpoint). Without this the
+      # metric only appears once something else scrapes /readyz.
+      - --enable-feature=expand-external-labels
     ports:
       - "9090:9090"
     deploy:
@@ -210,9 +262,18 @@ services:
     # No dependency on business services: when Alertmanager is unreachable Prometheus only logs delivery errors; scraping is unaffected
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:12.4.15
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin   # dev default password; prod uses SSO/secrets management
+      # The Kiri runtime injects the host proxy (HTTP_PROXY=host.docker.internal:7890) into every
+      # container; its NO_PROXY exemption list only covers localhost/host.docker.internal, so
+      # Grafana's datasource requests to http://prometheus:9090 / tempo:3200 / loki:3100 get
+      # routed through the proxy and fail. Clear the proxy vars explicitly: datasource traffic
+      # stays inside the compose network.
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
@@ -220,7 +281,8 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
-      - jaeger
+      - tempo
+      - loki
     deploy:
       resources:
         limits:
@@ -234,3 +296,5 @@ volumes:
   etcd-data:
   grafana-data:
   higress-data:
+  tempo-data:
+  loki-data:

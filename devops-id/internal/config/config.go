@@ -56,4 +56,5 @@ type ObservabilityConfig struct {
 	SamplerRatio   float64 `mapstructure:"sampler_ratio"`
 	MetricsEnabled bool    `mapstructure:"metrics_enabled"`
 	MetricsListen  string  `mapstructure:"metrics_listen"`
+	OTLPLogEndpoint string `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
 }

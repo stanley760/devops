@@ -16,7 +16,7 @@ The dev environment starts **only middleware and the observability stack**; busi
 sh deploy/dev.sh
 ```
 
-The script starts MySQL, Redis, Nacos, etcd, the Higress gateway and the observability stack (Jaeger/Prometheus/Grafana),
+The script starts MySQL, Redis, Nacos, etcd, the Higress gateway and the observability stack (Tempo/Loki/Prometheus/Grafana),
 then automatically brings up the local business services:
 
 - **PowerShell**: runs `go run` for `devops-id` and `devops-system` in two separate cmd windows; closing a window stops that service.
@@ -79,10 +79,37 @@ init overwrites these three directories every time — move any route/plugin cha
 | Higress gateway | `http://localhost:8080/healthz` (Host: `api.devops.local`) |
 | Higress console | `http://localhost:8001` |
 | Nacos console | `http://localhost:8848/nacos` |
-| Jaeger UI | `http://localhost:16686` |
+| Tempo UI (Grafana Traces Drilldown) | `http://localhost:3000/a/grafana-exploretraces-app` |
+| Tempo API | `http://localhost:3200` |
+| Loki API | `http://localhost:3100` |
 | Prometheus | `http://localhost:9090` |
 | Alertmanager | `http://localhost:9093` (dev alerts are UI-only; production wires a webhook) |
 | Grafana | `http://localhost:3000` (admin/admin) |
+
+### Signal Exploration (Drilldown)
+
+Grafana 12.x ships three queryless "Drilldown" apps, all sharing the global time
+range and label filters — no PromQL/LogQL required:
+
+| App | URL | Backend | Data |
+| --- | --- | --- | --- |
+| Metrics | `/a/grafana-metricsdrilldown-app` | Prometheus | all scraped metrics, grouped by metric-name prefix |
+| Logs | `/a/grafana-lokiexplore-app` | Loki | the services' slog output, grouped by `service.name` (index label `service_name`), with `trace_id`/`span_id` as structured metadata |
+| Traces | `/a/grafana-exploretraces-app` | Tempo | Rate / Errors / Duration charts fed by Tempo's span metrics (`traces_spanmetrics_*`, remote-written into Prometheus) |
+
+Data flow:
+
+- **Traces** — services export OTLP traces to Tempo (`:4318`, same port Jaeger
+  used, so `observability.otlp_endpoint` is unchanged).
+- **Logs** — services export OTLP logs to Loki's OTLP endpoint
+  (`http://loki:3100/otlp` → `/otlp/v1/logs`; note this is *not* the standard
+  `/v1/logs` path). Configured via `observability.otlp_log_endpoint`.
+- **Span RED metrics** — Tempo's metrics-generator remote-writes into Prometheus
+  (requires `--web.enable-remote-write-receiver`), which is what feeds the Traces
+  Drilldown Rate/Errors/Duration charts.
+
+Cross-navigation is wired in `grafana/provisioning/datasources/observability.yml`:
+Prometheus exemplars → Tempo trace, Tempo → its logs (by `trace_id`), Tempo ↔ Loki.
 
 > The frontend no longer connects to the business services directly — every API request goes
 > through the Higress gateway (see [higress/UNIFIED-ENTRY.md](./higress/UNIFIED-ENTRY.md)).

@@ -27,7 +27,8 @@ etcd:
 
 # The gRPC service's metrics go over a dedicated HTTP port (the gRPC port cannot serve /metrics), for Prometheus scraping.
 observability:
-  otlp_endpoint: "http://jaeger:4318"
+  otlp_endpoint: "http://tempo:4318"
+  otlp_log_endpoint: "http://loki:3100/otlp"
   sampler_ratio: 1.0
   metrics_enabled: true
   metrics_listen: ":9991"

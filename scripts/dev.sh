@@ -237,7 +237,7 @@ case "$COMMAND" in
     # Start middleware + gateway + observability stack, then automatically bring up local business services
     # higress-init automatically seeds deploy/higress config before higress (on first run / after down)
     compose up -d mysql redis nacos etcd higress
-    compose up -d jaeger prometheus alertmanager grafana
+    compose up -d tempo loki prometheus alertmanager grafana
     echo ""
     echo "Middleware and observability stack started."
     start_services
