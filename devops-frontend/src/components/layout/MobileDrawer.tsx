@@ -1,5 +1,5 @@
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Sidebar } from '@/components/layout/Sidebar'
+﻿import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { RailContext, Sidebar } from '@/components/layout/Sidebar'
 
 export function MobileDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   return (
@@ -8,8 +8,10 @@ export function MobileDrawer({ open, onOpenChange }: { open: boolean; onOpenChan
         <SheetHeader className="px-4 py-3">
           <SheetTitle>导航菜单</SheetTitle>
         </SheetHeader>
-        <Sidebar collapsed={false} />
+        <RailContext.Provider value={{ collapsed: false, mobileDrawer: true }}>
+          <Sidebar />\n        </RailContext.Provider>
       </SheetContent>
     </Sheet>
   )
 }
+

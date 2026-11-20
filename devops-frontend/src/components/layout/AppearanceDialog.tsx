@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+﻿import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -9,13 +9,13 @@ export function AppearanceDialog({ open, onOpenChange }: { open: boolean; onOpen
   const { appearance, update } = useAppearance()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="glass-panel max-w-sm">
         <DialogHeader><DialogTitle>外观设置</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>主题</Label>
             <Select value={appearance.theme} onValueChange={(v) => update({ theme: v as Theme })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="glass-control"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="light">浅色</SelectItem>
                 <SelectItem value="dark">深色</SelectItem>
@@ -26,7 +26,7 @@ export function AppearanceDialog({ open, onOpenChange }: { open: boolean; onOpen
           <div className="space-y-2">
             <Label>密度</Label>
             <Select value={appearance.density} onValueChange={(v) => update({ density: v as Density })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="glass-control"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="comfy">宽松</SelectItem>
                 <SelectItem value="regular">标准</SelectItem>

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+﻿import { useEffect, useState, type FormEvent } from 'react'
 import { adminAuth } from '@/api/admin/auth'
 import { toastError, toastSuccess } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,16 @@ export function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [newPassword, setNew] = useState('')
   const [confirm, setConfirm] = useState('')
 
+  const clear = () => {
+    setOld('')
+    setNew('')
+    setConfirm('')
+  }
+
+  useEffect(() => {
+    if (open) clear()
+  }, [open])
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (newPassword !== confirm) {
@@ -21,9 +31,7 @@ export function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       await adminAuth.updatePassword({ old_password: oldPassword, new_password: newPassword })
       toastSuccess('密码修改成功')
       onOpenChange(false)
-      setOld('')
-      setNew('')
-      setConfirm('')
+      clear()
     } catch (err) {
       toastError((err as Error).message)
     }
@@ -31,13 +39,13 @@ export function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="glass-panel max-w-sm">
         <DialogHeader><DialogTitle>修改密码</DialogTitle></DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <Field><FieldLabel>原密码</FieldLabel><Input type="password" value={oldPassword} onChange={(e) => setOld(e.target.value)} required /></Field>
           <Field><FieldLabel>新密码</FieldLabel><Input type="password" value={newPassword} onChange={(e) => setNew(e.target.value)} required /></Field>
           <Field><FieldLabel>确认新密码</FieldLabel><Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required /></Field>
-          <Button type="submit" className="w-full">提交</Button>
+          <Button type="submit" className="glass-primary w-full">提交</Button>
         </form>
       </DialogContent>
     </Dialog>

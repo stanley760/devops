@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+﻿import { useNavigate } from 'react-router-dom'
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from '@/components/ui/command'
@@ -20,6 +20,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             {menus.map((m) => (
               <CommandItem
                 key={m.id}
+                value={m.name}
                 onSelect={() => {
                   onOpenChange(false)
                   navigate(m.path)

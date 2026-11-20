@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Command, Menu as MenuIcon, UserRound } from 'lucide-react'
 import {
@@ -17,6 +17,18 @@ import { PasswordDialog } from '@/components/layout/PasswordDialog'
 import { MobileDrawer } from '@/components/layout/MobileDrawer'
 import { useConfirm } from '@/lib/confirm'
 
+import type { RouterNode } from '@/lib/types'
+
+function findCurrentMenu(pathname: string, routes: RouterNode[]) {
+  const visible = flattenMenus(routes).filter((m) => m.path && m.path !== '/')
+  const exact = visible.find((m) => m.path === pathname)
+  // Longest path wins so /system/user never resolves to /system and /user2
+  // never resolves to /user.
+  return exact ?? visible
+    .filter((m) => pathname.startsWith(`${m.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0]
+}
+
 export function Topbar() {
   const { authInfo, routes, logout } = useSession()
   const confirm = useConfirm()
@@ -29,7 +41,7 @@ export function Topbar() {
   // Ctrl/⌘ + K 命令面板
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setPaletteOpen((o) => !o)
       }
@@ -38,8 +50,7 @@ export function Topbar() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const menus = flattenMenus(routes)
-  const current = menus.find((m) => m.path !== '/' && location.pathname.startsWith(m.path))
+  const current = findCurrentMenu(location.pathname, routes)
   const tenantLabel = authInfo ? `${authInfo.tenant.name}（${authInfo.tenant.code}）` : ''
 
   const onLogout = async () => {
@@ -50,8 +61,8 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex items-center gap-3 px-4 py-3">
-      <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setDrawerOpen(true)} aria-label="打开菜单">
+    <header className="flex items-center gap-3 px-4 py-3" data-glass="solid">
+      <Button variant="ghost" size="icon" className="glass-control md:hidden" onClick={() => setDrawerOpen(true)} aria-label="打开菜单">
         <MenuIcon className="h-5 w-5" />
       </Button>
       <Breadcrumb>
@@ -69,17 +80,17 @@ export function Topbar() {
       </Breadcrumb>
       <span className="text-muted-foreground hidden text-xs md:inline">{tenantLabel}</span>
       <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => setPaletteOpen(true)} aria-label="打开命令面板">
-          <Command className="h-4 w-4" /> Ctrl+K
+        <Button variant="ghost" size="sm" className="glass-control" onClick={() => setPaletteOpen(true)} aria-label="打开命令面板">
+          <Command className="h-4 w-4" /> Ctrl/Cmd+K
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={
-            <Button variant="ghost" size="sm" aria-label="用户菜单">
+            <Button variant="ghost" size="sm" className="glass-control" aria-label="用户菜单">
               <UserRound className="h-4 w-4" />
               {authInfo?.user.nickname || authInfo?.user.username}
             </Button>
           } />
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="glass-panel">
             <DropdownMenuLabel>{authInfo?.user.username}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>修改密码</DropdownMenuItem>
@@ -96,3 +107,4 @@ export function Topbar() {
     </header>
   )
 }
+
