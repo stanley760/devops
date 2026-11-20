@@ -138,6 +138,9 @@ describe('client-side login bootstrap', () => {
   it('loads dynamic routes and permissions before navigating', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       const path = String(url)
+      if (path.includes('/auth/captcha')) {
+        return ok({ id: 'c', type: 'slide', image: 'i', width: 1, height: 1, enabled: false })
+      }
       if (path.includes('/auth/login')) {
         return ok({ access_token: 'a', refresh_token: 'r', expires_in: 3600, tenant: authInfo.tenant })
       }
@@ -199,11 +202,11 @@ describe('client-side login bootstrap', () => {
     expect(session.isLoggedIn()).toBe(false)
     const user = userEvent.setup()
     const inputs = document.querySelectorAll('input')
-    await user.type(inputs[0] as HTMLInputElement, 'alice')
-    await user.type(inputs[1] as HTMLInputElement, 'secret')
+    await user.type(document.getElementById('login-username') as HTMLInputElement, 'alice')
+    await user.type(document.getElementById('login-password') as HTMLInputElement, 'secret')
     await user.click(screen.getByRole('button', { name: '登录' }))
 
-    expect(screen.getByTestId('path')).toHaveTextContent('/system/users')
+    expect(await screen.findByTestId('path')).toHaveTextContent('/system/users')
     expect(screen.getByTestId('routes')).toHaveTextContent('1')
     expect(screen.getByTestId('permission')).toHaveTextContent('true')
     expect(vi.mocked(global.fetch)).toHaveBeenCalledWith(

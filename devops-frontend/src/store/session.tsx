@@ -64,8 +64,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useSession(): SessionContextValue {
+export function useSession(): SessionContextValue
+export function useSession(optional: true): SessionContextValue | null
+export function useSession(optional?: true): SessionContextValue | null {
   const ctx = useContext(SessionContext)
-  if (!ctx) throw new Error('useSession must be used within SessionProvider')
+  if (!ctx && !optional) throw new Error('useSession must be used within SessionProvider')
   return ctx
 }
