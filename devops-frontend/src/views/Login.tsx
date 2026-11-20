@@ -39,23 +39,21 @@ export default function Login() {
       setError(null)
       setBusy(true)
       try {
-        const body: Record<string, unknown> = {
+        const body = {
           username,
           password,
           tenant_code: effectiveTenant,
+          ...(challenge && answer ? buildCaptchaAnswer(challenge, answer) : {}),
         }
-        if (challenge && answer) {
-          Object.assign(body, buildCaptchaAnswer(challenge, answer))
-        }
-        const result = await adminAuth.login(body as { username: string; password: string; tenant_code: string })
+        const result = await adminAuth.login(body)
         session.saveSession(result, result.tenant)
         await sessionStore?.reload()
         session.setLastUser(username)
         navigate(redirect, { replace: true })
       } catch (err) {
         const msg = (err as Error).message
-        // 400 = 参数/验证码错误：留在弹框内提示并自动换题（挑战一次性消费）
-        if (challenge && answer && (err as { code?: number }).code === 400) {
+        // 仅在验证码字段参与提交且返回验证码专属 400 时换题；其他 400 走普通错误映射
+        if (challenge && answer && (err as { code?: number }).code === 400 && msg.toLowerCase().includes('captcha')) {
           toastError('验证码校验失败，已为你更换新题')
           const next = await adminAuth.getCaptcha(effectiveTenant)
           setChallenge(next)

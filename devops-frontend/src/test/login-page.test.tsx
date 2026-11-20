@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { toast } from 'sonner'
 import Login from '@/views/Login'
 import { session } from '@/lib/session'
 
@@ -82,5 +83,32 @@ describe('Login page', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'p' } })
     fireEvent.click(screen.getByText('登录'))
     await waitFor(() => expect(screen.getByText('安全验证')).toBeInTheDocument())
+  })
+
+  it('stays in captcha dialog, shows in-dialog error, and fetches a new challenge on captcha failure', async () => {
+    let captchaCount = 0
+    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      if ((url as string).includes('/captcha')) {
+        captchaCount++
+        return ok({ id: `c${captchaCount}`, type: 'click', image: 'i', width: 100, height: 50, text: 'circle' })
+      }
+      if ((url as string).includes('/login')) return bizError(400, 'captcha verification failed')
+      throw new Error('unexpected')
+    })
+    const toastSpy = vi.spyOn(toast, 'error').mockImplementation(() => 'toast')
+    renderLogin('/login')
+    fireEvent.change(screen.getByLabelText('账号'), { target: { value: 'u' } })
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'p' } })
+    fireEvent.click(screen.getByText('登录'))
+    await waitFor(() => expect(screen.getByText('安全验证')).toBeInTheDocument())
+    expect(captchaCount).toBe(1)
+
+    fireEvent.click(screen.getByAltText('captcha'))
+    fireEvent.click(screen.getByText('提交'))
+
+    await waitFor(() => expect(captchaCount).toBe(2))
+    expect(screen.getByText('安全验证')).toBeInTheDocument()
+    expect(toastSpy).toHaveBeenCalledWith('验证码校验失败，已为你更换新题')
+    expect(screen.queryByText('账号或密码错误')).not.toBeInTheDocument()
   })
 })

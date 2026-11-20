@@ -53,7 +53,7 @@ export function CaptchaDialog({ open, challenge, onAnswer, onRefresh, onCancel }
   const imgW = challenge.width
   const imgH = challenge.height
 
-  const onImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const onImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (challenge.type !== 'click') return
     const rect = e.currentTarget.getBoundingClientRect()
     const scaleX = imgW / rect.width
