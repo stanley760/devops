@@ -55,3 +55,27 @@ export function watchSystemTheme(cb: (a: Appearance) => void): () => void {
   mql.addEventListener('change', onChange)
   return () => mql.removeEventListener('change', onChange)
 }
+
+import { useCallback, useEffect, useState } from 'react'
+
+export function useAppearance(): { appearance: Appearance; update: (patch: Partial<Appearance>) => void } {
+  const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance())
+
+  useEffect(() => {
+    return watchSystemTheme((a) => {
+      setAppearance(a)
+      applyAppearance(a)
+    })
+  }, [])
+
+  const update = useCallback((patch: Partial<Appearance>) => {
+    setAppearance((prev) => {
+      const next = { ...prev, ...patch }
+      saveAppearance(next)
+      applyAppearance(next)
+      return next
+    })
+  }, [])
+
+  return { appearance, update }
+}
