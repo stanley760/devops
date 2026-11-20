@@ -15,6 +15,23 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 })
 
+// jsdom does not implement ResizeObserver (needed by cmdk).
+if (!('ResizeObserver' in globalThis)) {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    writable: true,
+    value: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  })
+}
+
+// jsdom does not implement Element.scrollIntoView (needed by cmdk).
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}
+
 beforeEach(() => {
   localStorage.clear()
 })
