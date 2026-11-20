@@ -36,9 +36,15 @@ export function buildDynamicRoutes(nodes: RouterNode[]): DynamicRouteDef[] {
   const defs: DynamicRouteDef[] = []
   const walk = (list: RouterNode[]) => {
     for (const n of list) {
-      if (n.component && COMPONENT_MAP[n.component]) {
+      const rawPath = typeof n.path === 'string' ? n.path : ''
+      const path = rawPath.replace(/^\/+/, '')
+      if (!rawPath) {
+        if (n.component) {
+          console.warn(`[router] missing path for component key: ${n.component}`)
+        }
+      } else if (n.component && COMPONENT_MAP[n.component]) {
         const Comp = COMPONENT_MAP[n.component]!
-        defs.push({ path: n.path, element: createElement(Comp) })
+        defs.push({ path: rawPath, element: createElement(Comp) })
       } else if (n.component) {
         // 未注册的 component 键：跳过并告警，不虚构菜单
         console.warn(`[router] unregistered component key: ${n.component} (path=${n.path})`)
@@ -54,10 +60,12 @@ export function flattenMenus(nodes: RouterNode[]): RouterNode[] {
   const out: RouterNode[] = []
   const walk = (list: RouterNode[]) => {
     for (const n of list) {
+      // 隐藏父节点的整棵子树都不应出现在菜单中
+      if (!n.visible) continue
       out.push(n)
       if (n.children?.length) walk(n.children)
     }
   }
   walk(nodes)
-  return out.filter((n) => n.visible)
+  return out
 }

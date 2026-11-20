@@ -49,6 +49,20 @@ describe('buildDynamicRoutes', () => {
     ])
     expect(defs.map((d) => d.path)).toEqual(['/system/user'])
   })
+
+  it('skips registered components with empty paths and walks their children', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const defs = buildDynamicRoutes([
+      node({
+        path: '',
+        component: 'system/user/index',
+        children: [node({ path: '/system/role', component: 'system/role/index' })],
+      }),
+    ])
+    expect(defs.map((d) => d.path)).toEqual(['/system/role'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('missing path'))
+    warn.mockRestore()
+  })
 })
 
 describe('flattenMenus', () => {
@@ -60,9 +74,31 @@ describe('flattenMenus', () => {
         children: [
           node({ id: '2', name: 'child', path: '/p/c' }),
           node({ id: '3', name: 'hidden', path: '/p/h', visible: false }),
+          node({ id: '4', name: 'visible-child', path: '/p/v' }),
         ],
       }),
     ])
-    expect(menus.map((m) => m.name)).toEqual(['parent', 'child'])
+    expect(menus.map((m) => m.name)).toEqual(['parent', 'child', 'visible-child'])
+  })
+
+  it('excludes the whole subtree of a hidden parent', () => {
+    const menus = flattenMenus([
+      node({
+        name: 'hidden-parent',
+        path: '/hidden',
+        visible: false,
+        children: [
+          node({ id: '2', name: 'child', path: '/hidden/child' }),
+          node({
+            id: '3',
+            name: 'grandchild-parent',
+            path: '/hidden/sub',
+            children: [node({ id: '4', name: 'grandchild', path: '/hidden/sub/deep' })],
+          }),
+        ],
+      }),
+      node({ id: '5', name: 'shown', path: '/shown' }),
+    ])
+    expect(menus.map((m) => m.name)).toEqual(['shown'])
   })
 })

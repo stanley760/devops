@@ -28,7 +28,7 @@ function RouterContent() {
         // 工作台静态置于首位（spec §4.4：dashboard 静态提供，后端 /auth/routers 不下发）
         { index: true, element: <Dashboard /> },
         ...dynamic.map((d) => ({
-          path: d.path.replace(/^\//, ''),
+          path: d.path.replace(/^\/+/, ''),
           element: d.element,
         })),
         { path: '*', element: <NotFound /> },

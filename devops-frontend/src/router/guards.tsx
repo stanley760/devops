@@ -6,6 +6,7 @@ import { useSession } from '@/store/session'
 function currentTenantCode(): string {
   return (
     session.getTenantCode() ||
+    session.getLastTenant() ||
     new URLSearchParams(window.location.search).get('tenantCode') ||
     'default'
   )

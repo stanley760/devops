@@ -4,6 +4,7 @@ import { adminAuth } from '@/api/admin/auth'
 import { session } from '@/lib/session'
 import { mapLoginError } from '@/lib/errors'
 import { resolveTenantEntry } from '@/lib/tenant'
+import { useSession } from '@/store/session'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input'
 export default function Login() {
   const [search] = useSearchParams()
   const navigate = useNavigate()
+  const { reload: reloadSession } = useSession()
   const entry = resolveTenantEntry(window.location.search, window.location.pathname, window.location.hostname)
   const tenantCode = search.get('tenantCode') ?? entry.code
   const [username, setUsername] = useState('')
@@ -28,6 +30,7 @@ export default function Login() {
     try {
       const result = await adminAuth.login({ username, password, tenant_code: tenantCode })
       session.saveSession(result, result.tenant)
+      await reloadSession()
       navigate(redirect, { replace: true })
     } catch (err) {
       setError(mapLoginError((err as Error).message))
