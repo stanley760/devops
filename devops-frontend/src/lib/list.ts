@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { request } from '@/lib/http'
 import type { PageResult } from '@/lib/types'
 
 export interface ListPageConfig<T> {
@@ -6,6 +7,7 @@ export interface ListPageConfig<T> {
   defaultQuery?: Record<string, unknown>
   pageSize?: number
   exportPath?: string
+  exportName?: string
 }
 
 export interface ListPageState<T> {
@@ -82,23 +84,17 @@ export function useListPage<T extends { id: string }>(cfg: ListPageConfig<T>): L
     if (!cfg.exportPath) return
     setExporting(true)
     try {
-      const params = new URLSearchParams(
+      const params = Object.fromEntries(
         Object.entries({ page_num: '1', page_size: '1000', ...query }).map(([k, v]) => [k, String(v)]),
       )
-      const token = localStorage.getItem('devops.access_token')
-      const tenantId = localStorage.getItem('devops.tenant_id')
-      const res = await fetch(`${cfg.exportPath}?${params}`, {
-        headers: {
-          Accept: 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
-        },
+      const blob = await request<Blob>(cfg.exportPath, {
+        query: params,
+        responseType: 'blob',
       })
-      const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'export.xlsx'
+      a.download = cfg.exportName ?? 'export.xlsx'
       a.click()
       URL.revokeObjectURL(url)
     } finally {

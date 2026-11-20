@@ -46,4 +46,37 @@ describe('useListPage', () => {
     await act(async () => { await result.current.load() })
     expect(fetcher).toHaveBeenCalledWith(expect.objectContaining({ page_size: 1000 }))
   })
+
+  it('exports via authenticated request and honors exportName', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(['x']),
+    } as Response)
+    let downloadedAs: string | null = null
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedAs = this.download
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    localStorage.setItem('devops.access_token', 'tok')
+    localStorage.setItem('devops.tenant_id', '42')
+    const { result } = renderHook(() =>
+      useListPage({
+        fetcher: vi.fn(),
+        exportPath: '/system/user/export',
+        exportName: 'users.xlsx',
+        defaultQuery: { keyword: 'a' },
+      }),
+    )
+    await act(async () => { await result.current.exportData() })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(String(url)).toContain('/system/user/export?page_num=1&page_size=1000&keyword=a')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('Authorization')).toBe('Bearer tok')
+    expect(headers.get('X-Tenant-ID')).toBe('42')
+    expect(click).toHaveBeenCalled()
+    expect(downloadedAs).toBe('users.xlsx')
+  })
 })

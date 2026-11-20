@@ -24,6 +24,11 @@ describe('admin session store', () => {
     expect(session.sessionVersion()).toBe(v)
   })
 
+  it('setLastUser stores raw username', () => {
+    session.setLastUser('alice')
+    expect(localStorage.getItem('devops.last_user')).toBe('alice')
+  })
+
   it('saveTokens rotates tokens only', () => {
     session.saveSession({ access_token: 'a', refresh_token: 'r' }, { id: '1', code: 'acme' })
     const before = session.getTenantCode()

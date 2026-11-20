@@ -32,8 +32,29 @@ describe('request envelope', () => {
     )
     const err = await request('/x').catch((e) => e)
     expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(200)
     expect((err as ApiError).code).toBe(400)
     expect((err as ApiError).msg).toBe('参数错误')
+  })
+
+  it('refreshes and retries when envelope code is 401 with HTTP 200', async () => {
+    session.saveSession({ access_token: 'old', refresh_token: 'r1' }, null)
+    let refreshCalls = 0
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const u = url as string
+      if (u.includes('/auth/refresh')) {
+        refreshCalls++
+        return envelopeOk({ access_token: 'new', refresh_token: 'r2', expires_in: 3600 })
+      }
+      const auth = new Headers((init as RequestInit).headers).get('Authorization')
+      if (auth === 'Bearer old') {
+        return new Response(JSON.stringify({ code: 401, msg: 'expired' }), { status: 200 })
+      }
+      return envelopeOk('done')
+    })
+    await expect(request<string>('/x')).resolves.toBe('done')
+    expect(refreshCalls).toBe(1)
+    expect(session.getAccessToken()).toBe('new')
   })
 
   it('throws parse-failure error for non-JSON response', async () => {
@@ -69,6 +90,35 @@ describe('request envelope', () => {
     expect(r2).toBe('done')
     expect(refreshCalls).toBe(1)
     expect(session.getAccessToken()).toBe('new')
+  })
+
+  it('does not misreport shared-refresh version bump as session switched', async () => {
+    session.saveSession({ access_token: 'old', refresh_token: 'r1' }, { id: '42', code: 'acme' })
+    let releaseFirst401!: () => void
+    const first401 = new Promise<void>((resolve) => {
+      releaseFirst401 = resolve
+    })
+    let refreshCalls = 0
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      const url = _url as string
+      if (url.includes('/auth/refresh')) {
+        refreshCalls++
+        return envelopeOk({ access_token: 'new', refresh_token: 'r2', expires_in: 3600 })
+      }
+      const auth = new Headers((init as RequestInit).headers).get('Authorization')
+      if (auth === 'Bearer old') {
+        if (url.includes('/slow')) await first401
+        return new Response('', { status: 401 })
+      }
+      return envelopeOk(url)
+    })
+    const slow = request<string>('/slow')
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const fast = request<string>('/fast')
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    releaseFirst401()
+    await expect(Promise.all([slow, fast])).resolves.toEqual(['/slow', '/fast'])
+    expect(refreshCalls).toBe(1)
   })
 
   it('clears session and fires unauthorized when refresh fails', async () => {

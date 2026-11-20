@@ -31,9 +31,11 @@ export const portalSession = {
 }
 
 let refreshing: Promise<boolean> | null = null
+let refreshTokensAtStart: PortalTokenPair | null = null
 
 function doRefresh(): Promise<boolean> {
   if (!refreshing) {
+    refreshTokensAtStart = portalSession.getTokens()
     refreshing = (async () => {
       const tokens = portalSession.getTokens()
       if (!tokens) return false
@@ -52,6 +54,15 @@ function doRefresh(): Promise<boolean> {
     })
   }
   return refreshing
+}
+
+function tokensUnchanged(tokens: PortalTokenPair | null): boolean {
+  return (
+    !!tokens &&
+    !!refreshTokensAtStart &&
+    tokens.access_token === refreshTokensAtStart.access_token &&
+    tokens.refresh_token === refreshTokensAtStart.refresh_token
+  )
 }
 
 interface PortalRequestOptions extends RequestInit {
@@ -73,29 +84,48 @@ export async function portalRequest<T>(path: string, opts: PortalRequestOptions 
   const headers = new Headers(opts.headers)
   headers.set('Accept', 'application/json')
   if (opts.body) headers.set('Content-Type', 'application/json')
-  const tokens = portalSession.getTokens()
-  if (auth && tokens) headers.set('Authorization', `Bearer ${tokens.access_token}`)
+  const tokensAtStart = portalSession.getTokens()
+  if (auth && tokensAtStart) headers.set('Authorization', `Bearer ${tokensAtStart.access_token}`)
 
   const url = withQuery(path, opts.query)
   let res = await fetch(url, { ...opts, headers })
-  if (res.status === 401 && auth) {
-    const ok = await doRefresh()
-    if (!ok) {
-      portalSession.clearTokens()
-      throw new PortalApiError(401, '登录已过期，请重新登录')
-    }
-    headers.set('Authorization', `Bearer ${portalSession.getTokens()!.access_token}`)
-    res = await fetch(url, { ...opts, headers })
-    if (res.status === 401) {
-      portalSession.clearTokens()
-      throw new PortalApiError(401, '登录已过期，请重新登录')
-    }
-  }
-
   let envelope: { code: number; msg?: string; data?: unknown }
   try {
     envelope = (await res.json()) as { code: number; msg?: string; data?: unknown }
   } catch {
+    envelope = null as never
+  }
+  if ((res.status === 401 || envelope?.code === 401) && auth) {
+    if (refreshing && tokensUnchanged(tokensAtStart)) {
+      const ok = await refreshing
+      if (!ok) {
+        portalSession.clearTokens()
+        throw new PortalApiError(401, '登录已过期，请重新登录')
+      }
+    } else if (!refreshing) {
+      const ok = await doRefresh()
+      if (!ok) {
+        portalSession.clearTokens()
+        throw new PortalApiError(401, '登录已过期，请重新登录')
+      }
+    }
+    const next = portalSession.getTokens()
+    if (!next) {
+      throw new PortalApiError(401, '登录已过期，请重新登录')
+    }
+    headers.set('Authorization', `Bearer ${next.access_token}`)
+    res = await fetch(url, { ...opts, headers })
+    try {
+      envelope = (await res.json()) as { code: number; msg?: string; data?: unknown }
+    } catch {
+      envelope = null as never
+    }
+    if (res.status === 401 || envelope?.code === 401) {
+      portalSession.clearTokens()
+      throw new PortalApiError(401, '登录已过期，请重新登录')
+    }
+  }
+  if (!envelope) {
     throw new PortalApiError(res.status, `响应解析失败（HTTP ${res.status}）`)
   }
   if (envelope.code !== 200) {

@@ -26,6 +26,24 @@ describe('portalRequest', () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(ok({ p: 1 }))
     await expect(portalRequest<{ p: number }>('/x')).resolves.toEqual({ p: 1 })
   })
+  it('refreshes when envelope code is 401 with HTTP 200', async () => {
+    portalSession.saveTokens(tokens())
+    let refreshCalls = 0
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      if ((url as string).includes('/auth/refresh')) {
+        refreshCalls++
+        return ok({ ...tokens(), access_token: 'n', refresh_token: 'r2' })
+      }
+      const auth = new Headers((init as RequestInit).headers).get('Authorization')
+      if (auth === 'Bearer a') {
+        return new Response(JSON.stringify({ code: 401, msg: 'expired' }), { status: 200 })
+      }
+      return ok('done')
+    })
+    await expect(portalRequest<string>('/x')).resolves.toBe('done')
+    expect(refreshCalls).toBe(1)
+    expect(portalSession.getTokens()!.access_token).toBe('n')
+  })
   it('single-flight refresh then retry once', async () => {
     portalSession.saveTokens(tokens())
     let refreshCalls = 0

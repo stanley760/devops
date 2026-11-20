@@ -69,7 +69,7 @@ export const session = {
     return bumpVer()
   },
   setLastUser(username: string): void {
-    localStorage.setItem(LAST_USER, JSON.stringify({ username }))
+    localStorage.setItem(LAST_USER, username)
   },
   getLastTenant(): string | null {
     return localStorage.getItem(LAST_TENANT)
