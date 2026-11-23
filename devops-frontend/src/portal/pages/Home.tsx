@@ -1,5 +1,3 @@
-import { type ReactNode } from 'react'
-
 interface HomeProps {
   navigate: (to: string) => void
   loggedIn: boolean
@@ -14,7 +12,7 @@ export function Home({ navigate, loggedIn }: HomeProps) {
         <div className="bg-primary/10 absolute -left-24 top-10 h-72 w-72 rounded-full blur-3xl" />
         <div className="bg-primary/15 absolute right-0 bottom-0 h-96 w-96 rounded-full blur-3xl" />
       </div>
-      <main className="relative z-10 mx-4 max-w-2xl rounded-3xl p-10 text-center">
+      <main className="glass-panel relative z-10 mx-4 max-w-2xl rounded-3xl p-10 text-center">
         <h1 className="text-5xl font-bold tracking-tight">Design World</h1>
         <p className="text-muted-foreground mt-4 text-xl">Explore New Ideas</p>
         <div className="mt-8 flex items-center justify-center gap-3">
@@ -54,8 +52,4 @@ export function Home({ navigate, loggedIn }: HomeProps) {
       </main>
     </div>
   )
-}
-
-export function HomeSection({ children }: { children: ReactNode }) {
-  return <section className="mx-auto max-w-3xl px-4 py-8">{children}</section>
 }

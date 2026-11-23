@@ -27,8 +27,11 @@ export const portalAuth = {
       method: 'POST', auth: false, body: JSON.stringify({ refresh_token }),
     })
   },
-  logout(): Promise<void> {
-    return portalRequest<void>(`${BASE}/auth/logout`, { method: 'POST' })
+  logout(refresh_token?: string): Promise<void> {
+    return portalRequest<void>(`${BASE}/auth/logout`, {
+      method: 'POST',
+      body: JSON.stringify(refresh_token ? { refresh_token } : {}),
+    })
   },
   getProfile(): Promise<PublicProfile> {
     return portalRequest<PublicProfile>(`${BASE}/profile`)

@@ -12,7 +12,7 @@ export function PortalDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="glass-panel max-w-md">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {children}
       </DialogContent>

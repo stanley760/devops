@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 // #/docs 静态文档页（spec §5.3 明确的静态页，有确定内容）
 export function Docs() {
   return (
-    <Card className="mx-auto my-10 max-w-2xl">
+    <Card className="glass-panel mx-auto my-10 max-w-2xl">
       <CardHeader><CardTitle>产品文档</CardTitle></CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p>Design World 平台的产品说明与使用指引将在此发布。</p>
