@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { adminSystem, type TenantWrite } from '@/api/admin/system'
+import { adminSystem, type TenantUpdateWrite, type TenantWrite } from '@/api/admin/system'
 import { useListPage } from '@/lib/list'
 import { useConfirm } from '@/lib/confirm'
 import { toastError, toastSuccess } from '@/lib/toast'
@@ -19,6 +19,25 @@ interface TenantForm {
 const emptyForm: TenantForm = {
   name: '', code: '', contact_name: '', contact_mobile: '',
   expire_time: '', remark: '', admin_username: '', admin_password: '',
+}
+
+/** Backend *time.Time requires RFC3339; a bare YYYY-MM-DD is rejected by Huma. */
+function toRfc3339(value: string): string | null {
+  const v = value.trim()
+  if (!v) return null
+  const m = v.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?(Z|[+-]\d{2}:\d{2})?$/)
+  if (!m) return null
+  const date = m[1]!
+  const time = m[2] ?? '00:00:00'
+  const zone = m[3]
+  const d = new Date(`${date}T${time}${zone ?? ''}`)
+  if (Number.isNaN(d.getTime())) return null
+  if (zone) return `${date}T${time}${zone}`
+  const p = (n: number) => String(n).padStart(2, '0')
+  const offset = -d.getTimezoneOffset()
+  const sign = offset >= 0 ? '+' : '-'
+  const abs = Math.abs(offset)
+  return `${date}T${time}${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`
 }
 
 export default function Tenants() {
@@ -47,18 +66,32 @@ export default function Tenants() {
       setFormError('管理员账号与密码必填')
       return
     }
+    const expire = toRfc3339(form.expire_time)
+    if (form.expire_time.trim() && !expire) {
+      setFormError('过期时间格式不正确')
+      return
+    }
     setBusy(true)
     try {
-      const base: TenantWrite = {
-        name: form.name, code: form.code,
-        contact_name: form.contact_name, contact_mobile: form.contact_mobile,
+      if (editing) {
+        const body: TenantUpdateWrite = {
+          name: form.name,
+          contact_name: form.contact_name,
+          contact_mobile: form.contact_mobile,
+          expire_time: expire,
+          remark: form.remark,
+        }
+        await adminSystem.updateTenant(editing.id, body)
+      } else {
+        const body: TenantWrite = {
+          name: form.name, code: form.code,
+          contact_name: form.contact_name, contact_mobile: form.contact_mobile,
+          admin_username: form.admin_username, admin_password: form.admin_password,
+        }
+        if (expire) body.expire_time = expire
+        if (form.remark) body.remark = form.remark
+        await adminSystem.createTenant(body)
       }
-      if (form.expire_time) base.expire_time = form.expire_time
-      if (form.remark) base.remark = form.remark
-      if (editing) await adminSystem.updateTenant(editing.id, base)
-      else await adminSystem.createTenant({
-        ...base, admin_username: form.admin_username, admin_password: form.admin_password,
-      })
       toastSuccess(editing ? '更新成功' : '创建成功')
       setFormOpen(false)
       await list.afterMutate()
@@ -96,7 +129,7 @@ export default function Tenants() {
               setEditing(t)
               setForm({
                 name: t.name, code: t.code, contact_name: t.contactName, contact_mobile: t.contactMobile,
-                expire_time: t.expireTime ?? '', remark: t.remark ?? '', admin_username: '', admin_password: '',
+                expire_time: t.expireTime?.slice(0, 10) ?? '', remark: t.remark ?? '', admin_username: '', admin_password: '',
               })
               setFormError(null)
               setFormOpen(true)

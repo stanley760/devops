@@ -88,10 +88,19 @@ export interface TenantWrite {
   code: string
   contact_name: string
   contact_mobile: string
-  expire_time?: string
+  expire_time?: string | null
   remark?: string
   admin_username?: string
   admin_password?: string
+}
+
+/** PUT /tenants/:id accepts no code and uses null to explicitly clear expire_time. */
+export interface TenantUpdateWrite {
+  name: string
+  contact_name?: string
+  contact_mobile?: string
+  expire_time?: string | null
+  remark?: string
 }
 
 export interface DictTypeWrite {
@@ -180,7 +189,7 @@ export const adminSystem = {
   listTenants: (q: ListQuery) => request<PageResult<SystemTenant>>('/system/api/v1/tenants', { query: q }),
   createTenant: (t: TenantWrite) =>
     request<void>('/system/api/v1/tenants', { method: 'POST', body: JSON.stringify(t) }),
-  updateTenant: (id: string, t: Partial<TenantWrite>) =>
+  updateTenant: (id: string, t: TenantUpdateWrite) =>
     request<void>(`/system/api/v1/tenants/${id}`, { method: 'PUT', body: JSON.stringify(t) }),
   deleteTenant: (id: string) => request<void>(`/system/api/v1/tenants/${id}`, { method: 'DELETE' }),
 
