@@ -5,6 +5,7 @@
  */
 import { computed, ref, shallowRef, type Component } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
+import Roles from '@/views/system/Roles'
 import { authApi, type AuthInfo, type RouterNode, type AuthUser } from '@/api/auth'
 import { session, sessionVersion as sessionVer, type TenantBrief } from '@/api/session'
 import { ApiError } from '@/api/http'
@@ -14,7 +15,7 @@ import { ApiError } from '@/api/http'
 const COMPONENT_MAP: Record<string, () => Promise<{ default: Component }>> = {
   'dashboard/index': () => import('@/views/Dashboard.vue'),
   'system/user/index': () => import('@/views/system/Users.vue'),
-  'system/role/index': () => import('@/views/system/Roles.vue'),
+  'system/role/index': () => Promise.resolve({ default: Roles as unknown as Component }),
   'system/menu/index': () => import('@/views/system/Menus.vue'),
   'system/dept/index': () => import('@/views/system/Depts.vue'),
   'system/post/index': () => import('@/views/system/Posts.vue'),

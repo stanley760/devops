@@ -15,6 +15,8 @@ vi.mock('@/api/admin/system', () => ({
     assignRoleMenus: vi.fn().mockResolvedValue(undefined),
     deleteRole: vi.fn().mockResolvedValue(undefined),
     listMenus: vi.fn(),
+    listMenuTree: vi.fn(),
+    getRole: vi.fn(),
     listDepts: vi.fn().mockResolvedValue([]),
   },
   parseDeptIDsJson: (s?: string) => (s ? JSON.parse(s) : []),
@@ -51,7 +53,8 @@ beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   vi.mocked(adminSystem.listRoles).mockResolvedValue(page([role({})]))
-  vi.mocked(adminSystem.listMenus).mockResolvedValue(menuTree)
+  vi.mocked(adminSystem.listMenuTree).mockResolvedValue(menuTree)
+  vi.mocked(adminSystem.getRole).mockResolvedValue({ ...role({}), menuIds: [] })
   vi.mocked(adminSystem.listDepts).mockResolvedValue([])
   vi.mocked(adminSystem.createRole).mockResolvedValue(undefined)
   vi.mocked(adminSystem.updateRole).mockResolvedValue(undefined)
@@ -111,14 +114,26 @@ describe('Roles page', () => {
     )
   })
 
-  it('assigns menus using the backend menuIds payload from tree selection', async () => {
+  it('loads the nested menu tree and preselects existing assignments', async () => {
+    vi.mocked(adminSystem.getRole).mockResolvedValue({ ...role({}), menuIds: ['2'] })
     renderRoles()
     await screen.findByText('管理员')
     fireEvent.click(screen.getByText('分配菜单'))
     await screen.findByText('系统')
-    fireEvent.click(screen.getByLabelText('选菜单 用户'))
+    expect(adminSystem.listMenuTree).toHaveBeenCalled()
+    expect(adminSystem.getRole).toHaveBeenCalledWith('1')
+    expect(screen.getByLabelText('选菜单 用户')).toBeChecked()
     fireEvent.click(screen.getByText('确定分配'))
     await waitFor(() => expect(adminSystem.assignRoleMenus).toHaveBeenCalledWith('1', ['2']))
+  })
+
+  it('closes the assignment dialog when the menu tree cannot be loaded', async () => {
+    vi.mocked(adminSystem.listMenuTree).mockRejectedValue(new Error('tree down'))
+    renderRoles()
+    await screen.findByText('管理员')
+    fireEvent.click(screen.getByText('分配菜单'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(adminSystem.assignRoleMenus).not.toHaveBeenCalled()
   })
 
   it('hides delete for builtin roles (type === 1)', async () => {

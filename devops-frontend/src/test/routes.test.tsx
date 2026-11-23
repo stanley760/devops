@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { COMPONENT_MAP, buildDynamicRoutes, flattenMenus } from '@/router/routes'
+import Roles from '@/views/system/Roles'
 import type { RouterNode } from '@/lib/types'
 
 const node = (over: Partial<RouterNode>): RouterNode => ({
@@ -21,6 +22,10 @@ describe('COMPONENT_MAP', () => {
       'system/operationlog/index',
       'platform/tenant/index',
     ].sort())
+  })
+
+  it('maps the role menu key to the React Roles page', () => {
+    expect(COMPONENT_MAP['system/role/index']).toBe(Roles)
   })
 })
 

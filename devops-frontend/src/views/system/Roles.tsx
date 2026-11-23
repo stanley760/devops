@@ -104,6 +104,8 @@ export default function Roles() {
   const [assignRole, setAssignRole] = useState<SystemRole | null>(null)
   const [menus, setMenus] = useState<SystemMenu[]>([])
   const [selectedMenus, setSelectedMenus] = useState<Set<string>>(new Set())
+  const [assignLoading, setAssignLoading] = useState(false)
+  const [assignFailed, setAssignFailed] = useState(false)
   const [depts, setDepts] = useState<SystemDept[]>([])
 
   useEffect(() => {
@@ -145,11 +147,23 @@ export default function Roles() {
   const openAssign = async (r: SystemRole) => {
     setAssignRole(r)
     setSelectedMenus(new Set())
+    setMenus([])
+    setAssignFailed(false)
+    setAssignLoading(true)
     setAssignOpen(true)
     try {
-      setMenus(await adminSystem.listMenus())
+      const [tree, detail] = await Promise.all([
+        adminSystem.listMenuTree(),
+        adminSystem.getRole(r.id),
+      ])
+      setMenus(tree)
+      setSelectedMenus(new Set(detail.menuIds ?? []))
     } catch (err) {
       toastError(err instanceof Error ? err.message : '加载菜单失败')
+      setAssignFailed(true)
+      setAssignOpen(false)
+    } finally {
+      setAssignLoading(false)
     }
   }
 
@@ -189,7 +203,7 @@ export default function Roles() {
   }
 
   const doAssign = async () => {
-    if (!assignRole) return
+    if (!assignRole || assignLoading || assignFailed) return
     try {
       await adminSystem.assignRoleMenus(assignRole.id, [...selectedMenus])
       toastSuccess('菜单分配成功')
@@ -325,7 +339,7 @@ export default function Roles() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignOpen(false)}>取消</Button>
-            <Button onClick={() => void doAssign()}>确定分配</Button>
+            <Button disabled={assignLoading || assignFailed} onClick={() => void doAssign()}>确定分配</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

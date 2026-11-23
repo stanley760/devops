@@ -140,12 +140,14 @@ export const adminSystem = {
     request<void>('/system/api/v1/roles', { method: 'POST', body: JSON.stringify(r) }),
   updateRole: (id: string, r: Partial<RoleWrite>) =>
     request<void>(`/system/api/v1/roles/${id}`, { method: 'PUT', body: JSON.stringify(r) }),
+  getRole: (id: string) => request<SystemRole & { menuIds: string[] }>(`/system/api/v1/roles/${id}`),
   assignRoleMenus: (id: string, menuIds: string[]) =>
     request<void>(`/system/api/v1/roles/${id}/menus`, { method: 'PUT', body: JSON.stringify({ menuIds }) }),
   deleteRole: (id: string) => request<void>(`/system/api/v1/roles/${id}`, { method: 'DELETE' }),
 
   // ── 菜单 ──
   listMenus: () => request<SystemMenu[]>('/system/api/v1/menus'),
+  listMenuTree: () => request<SystemMenu[]>('/system/api/v1/menus/tree'),
   createMenu: (m: MenuWrite) =>
     request<void>('/system/api/v1/menus', { method: 'POST', body: JSON.stringify(m) }),
   updateMenu: (id: string, m: Partial<MenuWrite>) =>

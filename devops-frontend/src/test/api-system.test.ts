@@ -60,6 +60,18 @@ describe('admin system API write mapping', () => {
     expect(spy.mock.calls[0]![1]!.method).toBe('DELETE')
   })
 
+  it('listMenuTree targets the nested menu tree endpoint', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
+    await adminSystem.listMenuTree()
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/menus\/tree$/)
+  })
+
+  it('getRole targets the role detail endpoint', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
+    await adminSystem.getRole('r1')
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/roles\/r1$/)
+  })
+
   it('assignRoleMenus sends the backend menuIds payload', async () => {
     const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
     await adminSystem.assignRoleMenus('r1', ['m1', 'm2'])
