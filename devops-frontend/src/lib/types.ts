@@ -117,7 +117,8 @@ export interface SystemUser {
   roleIds: string[]
   email?: string
   mobile?: string
-  gender?: string
+  /** Backend int8: 0 unknown, 1 male, 2 female. */
+  gender?: number
   avatar?: string
   remark?: string
   status: number

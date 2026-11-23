@@ -11,13 +11,20 @@ function ok() {
 }
 
 describe('admin system API write mapping', () => {
-  it('createUser sends snake_case body', async () => {
+  it('createUser targets /users and sends the backend camelCase body', async () => {
     const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
     await adminSystem.createUser({
-      username: 'u', nickname: 'n', dept_id: '1', post_ids: ['2'], role_ids: ['3'], status: 1,
+      username: 'u', nickname: 'n', deptId: '1', postIds: ['2'], roleIds: ['3'],
+      password: 'pass123', gender: 2, status: 1,
     })
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/users$/)
     const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string)
-    expect(body).toMatchObject({ username: 'u', dept_id: '1', post_ids: ['2'], role_ids: ['3'] })
+    expect(body).toMatchObject({
+      username: 'u', nickname: 'n', deptId: '1', postIds: ['2'], roleIds: ['3'],
+      password: 'pass123', gender: 2, status: 1,
+    })
+    expect(body.dept_id).toBeUndefined()
+    expect(body.gender).toBe(2)
   })
 
   it('createConfig sends snake_case keys', async () => {
@@ -30,12 +37,40 @@ describe('admin system API write mapping', () => {
     expect(body.configKey).toBeUndefined()
   })
 
-  it('updateUserPassword targets /password with snake_case', async () => {
+  it('updateUserPassword targets the dedicated password endpoint', async () => {
     const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
     await adminSystem.updateUserPassword('9', { password: 'p' })
-    expect(spy.mock.calls[0]![0]).toBe('/system/api/v1/system/users/9/password')
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/users\/9\/password$/)
     const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string)
     expect(body).toEqual({ password: 'p' })
+  })
+
+  it('deleteUser deletes by single string id, no batch body', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
+    await adminSystem.deleteUser('1234567890123456789')
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/users\/1234567890123456789$/)
+    expect(spy.mock.calls[0]![1]!.method).toBe('DELETE')
+    expect((spy.mock.calls[0]![1] as RequestInit).body).toBeUndefined()
+  })
+
+  it('deletePost deletes by single string id', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
+    await adminSystem.deletePost('1234567890123456789')
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/posts\/1234567890123456789$/)
+    expect(spy.mock.calls[0]![1]!.method).toBe('DELETE')
+  })
+
+  it('listAllPosts and listAllRoles use paginated list endpoints', async () => {
+    const pageResponse = () =>
+      new Response(JSON.stringify({ code: 200, data: { list: [], total: 0, page_num: 1, page_size: 10, pages: 0 } }), { status: 200 })
+    const spy = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(pageResponse())
+      .mockResolvedValueOnce(pageResponse())
+    await adminSystem.listAllPosts()
+    await adminSystem.listAllRoles()
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/posts\?/)
+    expect(spy.mock.calls[0]![0]).toContain('page_size=1000')
+    expect(spy.mock.calls[1]![0]).toMatch(/\/api\/v1\/roles\?/)
   })
 })
 
@@ -53,10 +88,16 @@ describe('dept IDs JSON codec', () => {
 })
 
 describe('ID handling stays string', () => {
-  it('deleteUsers passes ids verbatim', async () => {
+  it('write payloads keep snowflake IDs as strings', async () => {
     const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
-    await adminSystem.deleteUsers(['1234567890123456789'])
+    await adminSystem.createUser({
+      username: 'u', nickname: 'n', deptId: '1234567890123456789',
+      postIds: ['9876543210987654321'], roleIds: ['5555555555555555555'],
+      password: 'pass123',
+    })
     const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string)
-    expect(body.ids).toEqual(['1234567890123456789'])
+    expect(body.deptId).toBe('1234567890123456789')
+    expect(body.postIds).toEqual(['9876543210987654321'])
+    expect(body.roleIds).toEqual(['5555555555555555555'])
   })
 })
