@@ -224,4 +224,10 @@ export interface OperationLog {
   request?: string
   response?: string
   createdAt: string
+  title?: string
+  operatorName?: string
+  status?: number
+  costMs?: number
+  errorMsg?: string
+  operTime?: string
 }
