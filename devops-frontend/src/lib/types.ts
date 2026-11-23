@@ -203,31 +203,50 @@ export interface SystemConfig {
   remark?: string
 }
 
+/** Backend types.LoginLogDTO — camelCase wire fields, IDs serialized as strings. */
 export interface LoginLog {
   id: string
   username: string
+  userId: string
   ip: string
-  status: number
-  msg: string
-  loginAt: string
+  userAgent: string
+  geoCountry: string
+  geoProvince: string
+  geoCity: string
+  geoIsp: string
+  /** 0 success, 1 failure. */
+  result: number
+  /** Auth business code; the error text is not part of the DTO. */
+  code: number
+  createTime: string
 }
 
+/** Backend types.OperationLogDTO — camelCase wire fields. */
 export interface OperationLog {
   id: string
-  username: string
+  traceId: string
+  userId: string
+  userName: string
+  userType: number
+  userTypeName: string
   module: string
-  action: string
-  method: string
-  uri: string
-  ip: string
-  statusCode?: number
-  request?: string
-  response?: string
-  createdAt: string
-  title?: string
-  operatorName?: string
-  status?: number
-  costMs?: number
-  errorMsg?: string
-  operTime?: string
+  subModule: string
+  bizId: string
+  /** Change summary; no dedicated action/title fields exist. */
+  contents: string
+  /** Extra JSON text (e.g. duration); no dedicated request/response fields exist. */
+  extra: string
+  requestMethod: string
+  requestUrl: string
+  userIp: string
+  userAgent: string
+  geoCountry: string
+  geoProvince: string
+  geoCity: string
+  geoIsp: string
+  /** 0 success, 1 failure. */
+  result: number
+  /** HTTP status code. */
+  code: number
+  createTime: string
 }

@@ -218,12 +218,12 @@ export const adminSystem = {
 
   // ── 日志 ──
   listLoginLogs: (q: ListQuery) => request<PageResult<LoginLog>>('/system/api/v1/login-logs', { query: q }),
-  cleanLoginLogs: () => request<void>('/system/api/v1/login-logs', { method: 'DELETE' }),
+  cleanLoginLogs: () => request<void>('/system/api/v1/login-logs/clean', { method: 'DELETE' }),
   removeLoginLogs: (ids: string[]) =>
     request<void>('/system/api/v1/login-logs', { query: { ids: ids.join(',') }, method: 'DELETE' }),
   listOperationLogs: (q: ListQuery) =>
     request<PageResult<OperationLog>>('/system/api/v1/operation-logs', { query: q }),
-  cleanOperationLogs: () => request<void>('/system/api/v1/operation-logs', { method: 'DELETE' }),
+  cleanOperationLogs: () => request<void>('/system/api/v1/operation-logs/clean', { method: 'DELETE' }),
   removeOperationLogs: (ids: string[]) =>
     request<void>('/system/api/v1/operation-logs', { query: { ids: ids.join(',') }, method: 'DELETE' }),
 }

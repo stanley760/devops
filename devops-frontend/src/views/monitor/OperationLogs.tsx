@@ -12,6 +12,20 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { OperationLog } from '@/lib/types'
 
+const RESULT_OPTIONS = [
+  { label: '成功', value: '0' },
+  { label: '失败', value: '1' },
+]
+
+function durationMs(extra: string): number | null {
+  try {
+    const parsed = JSON.parse(extra) as { duration_ms?: number }
+    return typeof parsed.duration_ms === 'number' ? parsed.duration_ms : null
+  } catch {
+    return null
+  }
+}
+
 export default function OperationLogs() {
   const confirm = useConfirm()
   const list = useListPage<OperationLog>({ fetcher: (p) => adminSystem.listOperationLogs(p) })
@@ -20,7 +34,7 @@ export default function OperationLogs() {
   useEffect(() => { void list.load() }, [list.page, list.pageSize, list.query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const doClean = async () => {
-    const ok = await confirm({ title: '确认清空全部操作日志？', description: '此操作不可恢复', danger: true, confirmText: '确定' })
+    const ok = await confirm({ title: '确认清空全部操作日志？', description: '此操作不可恢复', danger: true, confirmText: '清空' })
     if (!ok) return
     await adminSystem.cleanOperationLogs()
     toastSuccess('已清空')
@@ -36,13 +50,18 @@ export default function OperationLogs() {
   }
 
   const columns: ListColumn<OperationLog>[] = [
-    { key: 'username', title: '账号' },
+    { key: 'userName', title: '操作人' },
     { key: 'module', title: '模块' },
-    { key: 'action', title: '动作' },
-    { key: 'method', title: '方法' },
-    { key: 'uri', title: 'URI', className: 'max-w-48 truncate' },
-    { key: 'statusCode', title: '状态码' },
-    { key: 'createdAt', title: '时间', render: (r) => formatDateTime(r.createdAt) },
+    { key: 'subModule', title: '子模块' },
+    { key: 'requestMethod', title: '方法' },
+    { key: 'requestUrl', title: 'URI', className: 'max-w-48 truncate' },
+    { key: 'userIp', title: 'IP' },
+    {
+      key: 'result', title: '执行结果',
+      render: (r) => <Badge variant={r.result === 0 ? 'default' : 'destructive'}>{r.result === 0 ? '成功' : '失败'}</Badge>,
+    },
+    { key: 'code', title: '状态码' },
+    { key: 'createTime', title: '时间', render: (r) => formatDateTime(r.createTime) },
     {
       key: 'op', title: '操作',
       render: (r) => <Button variant="ghost" size="sm" onClick={() => setDetail(r)}>详情</Button>,
@@ -52,7 +71,12 @@ export default function OperationLogs() {
   return (
     <div className="space-y-3">
       <SearchForm
-        fields={[{ key: 'username', label: '账号' }, { key: 'module', label: '模块' }]}
+        fields={[
+          { key: 'user_name', label: '操作人' },
+          { key: 'module', label: '模块' },
+          { key: 'user_ip', label: 'IP' },
+          { key: 'result', label: '执行结果', type: 'select', options: RESULT_OPTIONS },
+        ]}
         value={list.query} onSearch={() => void list.search()} onReset={() => void list.reset()}
       />
       <ListPage
@@ -74,27 +98,25 @@ export default function OperationLogs() {
           <SheetHeader><SheetTitle>操作日志详情</SheetTitle></SheetHeader>
           {detail && (
             <div className="space-y-2 text-sm">
-              <div><span className="text-muted-foreground">标题：</span>{detail.title ?? '-'}</div>
-              <div><span className="text-muted-foreground">动作：</span>{detail.action || '-'}</div>
-              <div><span className="text-muted-foreground">方法：</span>{detail.method || '-'}</div>
-              <div><span className="text-muted-foreground">操作人：</span>{detail.operatorName ?? detail.username ?? '-'}</div>
-              <div><span className="text-muted-foreground">IP：</span>{detail.ip || '-'}</div>
+              <div><span className="text-muted-foreground">摘要：</span>{detail.contents || '-'}</div>
+              <div><span className="text-muted-foreground">模块：</span>{[detail.module, detail.subModule].filter(Boolean).join(' / ') || '-'}</div>
+              <div><span className="text-muted-foreground">方法：</span>{detail.requestMethod || '-'}</div>
+              <div><span className="text-muted-foreground">路径：</span>{detail.requestUrl || '-'}</div>
+              <div><span className="text-muted-foreground">操作人：</span>{detail.userName || '-'}（{detail.userTypeName || '-'}）</div>
+              <div><span className="text-muted-foreground">IP：</span>{detail.userIp || '-'}</div>
               <div>
-                <span className="text-muted-foreground">状态：</span>
-                <Badge variant={detail.status === 0 || detail.statusCode === 200 ? 'default' : 'destructive'}>
-                  {detail.status === 0 ? '成功' : detail.status === 1 ? '失败' : detail.statusCode === 200 ? '成功' : detail.statusCode === undefined ? '-' : '失败'}
+                <span className="text-muted-foreground">执行结果：</span>
+                <Badge variant={detail.result === 0 ? 'default' : 'destructive'}>
+                  {detail.result === 0 ? '成功' : detail.result === 1 ? '失败' : '-'}
                 </Badge>
               </div>
-              <div><span className="text-muted-foreground">耗时：</span>{detail.costMs != null ? `${detail.costMs} ms` : '-'}</div>
-              <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(detail.operTime ?? detail.createdAt)}</div>
-              <div><span className="text-muted-foreground">错误信息：</span>{detail.errorMsg ?? '-'}</div>
+              <div><span className="text-muted-foreground">状态码：</span>{detail.code || '-'}</div>
+              <div><span className="text-muted-foreground">错误码：</span>{detail.result === 1 ? detail.code || '-' : '-'}</div>
+              <div><span className="text-muted-foreground">耗时：</span>{durationMs(detail.extra) != null ? `${durationMs(detail.extra)} ms` : '-'}</div>
+              <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(detail.createTime)}</div>
               <div>
-                <div className="text-muted-foreground">请求体：</div>
-                <pre className="bg-muted mt-1 overflow-auto rounded p-2 text-xs">{detail.request ?? '-'}</pre>
-              </div>
-              <div>
-                <div className="text-muted-foreground">响应体：</div>
-                <pre className="bg-muted mt-1 overflow-auto rounded p-2 text-xs">{detail.response ?? '-'}</pre>
+                <div className="text-muted-foreground">附加信息：</div>
+                <pre className="bg-muted mt-1 overflow-auto rounded p-2 text-xs">{detail.extra || '-'}</pre>
               </div>
             </div>
           )}

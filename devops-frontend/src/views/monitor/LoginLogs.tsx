@@ -10,6 +10,11 @@ import { PermissionButton } from '@/components/business/PermissionButton'
 import { Badge } from '@/components/ui/badge'
 import type { LoginLog } from '@/lib/types'
 
+const RESULT_OPTIONS = [
+  { label: '成功', value: '0' },
+  { label: '失败', value: '1' },
+]
+
 export default function LoginLogs() {
   const confirm = useConfirm()
   const list = useListPage<LoginLog>({ fetcher: (p) => adminSystem.listLoginLogs(p) })
@@ -36,17 +41,21 @@ export default function LoginLogs() {
     { key: 'username', title: '账号' },
     { key: 'ip', title: 'IP' },
     {
-      key: 'status', title: '状态',
-      render: (r) => <Badge variant={r.status === 1 ? 'default' : 'destructive'}>{r.status === 1 ? '成功' : '失败'}</Badge>,
+      key: 'result', title: '登录结果',
+      render: (r) => <Badge variant={r.result === 0 ? 'default' : 'destructive'}>{r.result === 0 ? '成功' : '失败'}</Badge>,
     },
-    { key: 'msg', title: '消息' },
-    { key: 'loginAt', title: '时间', render: (r) => formatDateTime(r.loginAt) },
+    { key: 'code', title: '错误码' },
+    { key: 'createTime', title: '时间', render: (r) => formatDateTime(r.createTime) },
   ]
 
   return (
     <div className="space-y-3">
       <SearchForm
-        fields={[{ key: 'username', label: '账号' }, { key: 'ip', label: 'IP' }]}
+        fields={[
+          { key: 'username', label: '账号' },
+          { key: 'ip', label: 'IP' },
+          { key: 'result', label: '登录结果', type: 'select', options: RESULT_OPTIONS },
+        ]}
         value={list.query} onSearch={() => void list.search()} onReset={() => void list.reset()}
       />
       <ListPage

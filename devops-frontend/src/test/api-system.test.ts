@@ -108,6 +108,24 @@ describe('admin system API write mapping', () => {
     }
   })
 
+  it('clean helpers target the dedicated /clean routes, batch delete stays on the collection', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockImplementation(async () => ok())
+    await adminSystem.cleanLoginLogs()
+    await adminSystem.cleanOperationLogs()
+    await adminSystem.removeLoginLogs(['1'])
+    await adminSystem.removeOperationLogs(['2'])
+    const urls = spy.mock.calls.map(([url]) => String(url))
+    expect(urls.slice(0, 2)).toEqual([
+      '/system/api/v1/login-logs/clean',
+      '/system/api/v1/operation-logs/clean',
+    ])
+    expect(urls[2]).toMatch(/\/api\/v1\/login-logs\?/)
+    expect(urls[3]).toMatch(/\/api\/v1\/operation-logs\?/)
+    for (const [, init] of spy.mock.calls) {
+      expect(init!.method).toBe('DELETE')
+    }
+  })
+
   it('listAllPosts and listAllRoles use paginated list endpoints', async () => {
     const pageResponse = () =>
       new Response(JSON.stringify({ code: 200, data: { list: [], total: 0, page_num: 1, page_size: 10, pages: 0 } }), { status: 200 })

@@ -113,11 +113,11 @@ export default function Dashboard() {
                       <TableCell>{l.username}</TableCell>
                       <TableCell>{l.ip}</TableCell>
                       <TableCell>
-                        <Badge variant={l.status === 1 ? 'default' : 'destructive'}>
-                          {l.status === 1 ? '成功' : '失败'}
+                        <Badge variant={l.result === 0 ? 'default' : 'destructive'}>
+                          {l.result === 0 ? '成功' : '失败'}
                         </Badge>
                       </TableCell>
-                      <TableCell>{formatDateTime(l.loginAt)}</TableCell>
+                      <TableCell>{formatDateTime(l.createTime)}</TableCell>
                     </TableRow>
                   ))}
                   {logs.length === 0 && (
@@ -151,11 +151,11 @@ export default function Dashboard() {
                 <TableBody>
                   {opLogs.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell>{l.username}</TableCell>
+                      <TableCell>{l.userName}</TableCell>
                       <TableCell>{l.module}</TableCell>
-                      <TableCell>{l.action}</TableCell>
-                      <TableCell>{l.ip}</TableCell>
-                      <TableCell>{formatDateTime(l.createdAt)}</TableCell>
+                      <TableCell>{l.contents}</TableCell>
+                      <TableCell>{l.userIp}</TableCell>
+                      <TableCell>{formatDateTime(l.createTime)}</TableCell>
                     </TableRow>
                   ))}
                   {opLogs.length === 0 && (

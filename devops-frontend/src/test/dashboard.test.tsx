@@ -47,14 +47,21 @@ beforeEach(() => {
   vi.mocked(adminAuth.getInfo).mockResolvedValue(authInfo)
   vi.mocked(adminAuth.getRouters).mockResolvedValue(routers)
   vi.mocked(adminSystem.listLoginLogs).mockResolvedValue({
-    list: [{ id: 'l1', username: 'admin', ip: '1.2.3.4', status: 1, msg: 'ok', loginAt: '2026-01-02 03:04:05' }],
+    list: [{
+      id: 'l1', username: 'admin', userId: '9', ip: '1.2.3.4', userAgent: 'test-agent',
+      geoCountry: '', geoProvince: '', geoCity: '', geoIsp: '',
+      result: 0, code: 200, createTime: '2026-01-02 03:04:05',
+    }],
     total: 1, page_num: 1, page_size: 10, pages: 1,
   })
   vi.mocked(adminSystem.listOperationLogs).mockResolvedValue({
     list: [{
-      id: 'o1', username: 'admin', module: 'user', action: 'create', method: 'POST',
-      uri: '/system/api/v1/system/users', ip: '5.6.7.8', statusCode: 200,
-      request: '{}', response: '{}', createdAt: '2026-01-02 03:05:06',
+      id: 'o1', traceId: 't1', userId: '9', userName: 'admin', userType: 2,
+      userTypeName: '管理员', module: 'system', subModule: 'user', bizId: '0',
+      contents: '创建用户', extra: '{"duration_ms":12}', requestMethod: 'POST',
+      requestUrl: '/system/api/v1/users', userIp: '5.6.7.8', userAgent: 'test-agent',
+      geoCountry: '', geoProvince: '', geoCity: '', geoIsp: '',
+      result: 0, code: 200, createTime: '2026-01-02 03:05:06',
     }],
     total: 1, page_num: 1, page_size: 10, pages: 1,
   })
@@ -79,7 +86,7 @@ describe('Dashboard', () => {
     expect(screen.getByText('菜单')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
     expect(adminSystem.listOperationLogs).toHaveBeenCalledWith({ page_num: 1, page_size: 10 })
-    expect(await screen.findByText('create')).toBeInTheDocument()
+    expect(await screen.findByText('创建用户')).toBeInTheDocument()
   })
 
   it('hides log panels and skips log APIs without permissions', async () => {

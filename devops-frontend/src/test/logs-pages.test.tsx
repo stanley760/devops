@@ -19,13 +19,18 @@ vi.mock('@/api/admin/system', () => ({
   },
 }))
 
-const loginLog: LoginLog = { id: 'l1', username: 'admin', ip: '1.2.3.4', status: 1, msg: 'ok', loginAt: '2026-01-02 03:04:05' }
+const loginLog: LoginLog = {
+  id: 'l1', username: 'admin', userId: '9', ip: '1.2.3.4', userAgent: 'test-agent',
+  geoCountry: '', geoProvince: '', geoCity: '', geoIsp: '',
+  result: 1, code: 401, createTime: '2026-01-02 03:04:05',
+}
 const opLog: OperationLog = {
-  id: 'o1', username: 'admin', module: 'user', action: 'create', method: 'POST',
-  uri: '/system/api/v1/system/users', ip: '1.2.3.4', statusCode: 200,
-  request: '{"username":"u1"}', response: '{"ok":true}', createdAt: '2026-01-02 03:04:05',
-  title: '创建用户', operatorName: 'admin', status: 0, costMs: 12,
-  errorMsg: '', operTime: '2026-01-02 03:04:05',
+  id: 'o1', traceId: 't1', userId: '9', userName: 'admin', userType: 2,
+  userTypeName: '管理员', module: 'system', subModule: 'user', bizId: '0',
+  contents: '创建用户', extra: '{"duration_ms":12}', requestMethod: 'POST',
+  requestUrl: '/system/api/v1/users', userIp: '1.2.3.4', userAgent: 'test-agent',
+  geoCountry: '', geoProvince: '', geoCity: '', geoIsp: '',
+  result: 0, code: 200, createTime: '2026-01-02 03:04:05',
 }
 
 beforeEach(() => {
@@ -76,15 +81,24 @@ describe('LoginLogs page', () => {
 })
 
 describe('OperationLogs page', () => {
-  it('renders op logs and opens detail drawer with request/response', async () => {
+  it('renders op logs and opens detail drawer with backend DTO fields', async () => {
     wrap(<OperationLogs />)
     await screen.findByText('admin')
     fireEvent.click(screen.getByText('详情'))
-    expect(await screen.findByText(/"username":"u1"/)).toBeInTheDocument()
-    expect(screen.getByText(/"ok":true/)).toBeInTheDocument()
+    expect(await screen.findByText(/"duration_ms":12/)).toBeInTheDocument()
     expect(screen.getByText('创建用户')).toBeInTheDocument()
     expect(screen.getByText('12 ms')).toBeInTheDocument()
     expect(screen.getByText('操作时间：')).toBeInTheDocument()
+    expect(screen.getByText(/管理员/)).toBeInTheDocument()
+  })
+
+  it('clean requires confirm and calls cleanOperationLogs', async () => {
+    wrap(<OperationLogs />)
+    await screen.findByText('admin')
+    fireEvent.click(screen.getByText('清空'))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByText('清空'))
+    await waitFor(() => expect(adminSystem.cleanOperationLogs).toHaveBeenCalled())
   })
 
   it('batch remove sends selected ids', async () => {
