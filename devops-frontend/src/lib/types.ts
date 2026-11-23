@@ -131,8 +131,10 @@ export interface SystemRole {
   code: string
   sort: number
   dataScope: number
-  dataScopeDeptIds: string[]
-  builtin?: boolean
+  /** Backend stores this as a JSON array string (e.g. '["101"]'); decode with parseDeptIDsJson. */
+  dataScopeDeptIds: string
+  /** Backend type: 1 builtin, 2 custom. */
+  type: number
   status: number
   remark?: string
 }
@@ -142,6 +144,7 @@ export interface SystemMenu extends RouterNode {
   parentId: string
   permission?: string
   status: number
+  children?: SystemMenu[]
 }
 
 export interface SystemDept {
