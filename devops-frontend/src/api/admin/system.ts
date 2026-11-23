@@ -140,10 +140,9 @@ export const adminSystem = {
     request<void>('/system/api/v1/roles', { method: 'POST', body: JSON.stringify(r) }),
   updateRole: (id: string, r: Partial<RoleWrite>) =>
     request<void>(`/system/api/v1/roles/${id}`, { method: 'PUT', body: JSON.stringify(r) }),
-  assignRoleMenus: (id: string, menu_ids: string[]) =>
-    request<void>(`/system/api/v1/roles/${id}/menus`, { method: 'PUT', body: JSON.stringify({ menu_ids }) }),
-  deleteRoles: (ids: string[]) =>
-    request<void>('/system/api/v1/roles', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  assignRoleMenus: (id: string, menuIds: string[]) =>
+    request<void>(`/system/api/v1/roles/${id}/menus`, { method: 'PUT', body: JSON.stringify({ menuIds }) }),
+  deleteRole: (id: string) => request<void>(`/system/api/v1/roles/${id}`, { method: 'DELETE' }),
 
   // ── 菜单 ──
   listMenus: () => request<SystemMenu[]>('/system/api/v1/menus'),
@@ -180,8 +179,7 @@ export const adminSystem = {
     request<void>('/system/api/v1/tenants', { method: 'POST', body: JSON.stringify(t) }),
   updateTenant: (id: string, t: Partial<TenantWrite>) =>
     request<void>(`/system/api/v1/tenants/${id}`, { method: 'PUT', body: JSON.stringify(t) }),
-  deleteTenants: (ids: string[]) =>
-    request<void>('/system/api/v1/tenants', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  deleteTenant: (id: string) => request<void>(`/system/api/v1/tenants/${id}`, { method: 'DELETE' }),
 
   // ── 字典 ──
   listDictTypes: (q: ListQuery) => request<PageResult<DictType>>('/system/api/v1/dict-types', { query: q }),
@@ -189,16 +187,14 @@ export const adminSystem = {
     request<void>('/system/api/v1/dict-types', { method: 'POST', body: JSON.stringify(d) }),
   updateDictType: (id: string, d: Partial<DictTypeWrite>) =>
     request<void>(`/system/api/v1/dict-types/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
-  deleteDictTypes: (ids: string[]) =>
-    request<void>('/system/api/v1/dict-types', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  deleteDictType: (id: string) => request<void>(`/system/api/v1/dict-types/${id}`, { method: 'DELETE' }),
   listDictItems: (dictType: string) =>
     request<DictItem[]>('/system/api/v1/dict-data', { query: { dict_type: dictType } }),
   createDictItem: (i: DictItemWrite) =>
     request<void>('/system/api/v1/dict-data', { method: 'POST', body: JSON.stringify(i) }),
   updateDictItem: (id: string, i: Partial<DictItemWrite>) =>
     request<void>(`/system/api/v1/dict-data/${id}`, { method: 'PUT', body: JSON.stringify(i) }),
-  deleteDictItems: (ids: string[]) =>
-    request<void>('/system/api/v1/dict-data', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  deleteDictItem: (id: string) => request<void>(`/system/api/v1/dict-data/${id}`, { method: 'DELETE' }),
 
   // ── 参数配置 ──
   listConfigs: (q: ListQuery) => request<PageResult<SystemConfig>>('/system/api/v1/configs', { query: q }),
@@ -206,17 +202,16 @@ export const adminSystem = {
     request<void>('/system/api/v1/configs', { method: 'POST', body: JSON.stringify(c) }),
   updateConfig: (id: string, c: Partial<ConfigWrite>) =>
     request<void>(`/system/api/v1/configs/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
-  deleteConfigs: (ids: string[]) =>
-    request<void>('/system/api/v1/configs', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  deleteConfig: (id: string) => request<void>(`/system/api/v1/configs/${id}`, { method: 'DELETE' }),
 
   // ── 日志 ──
   listLoginLogs: (q: ListQuery) => request<PageResult<LoginLog>>('/system/api/v1/login-logs', { query: q }),
   cleanLoginLogs: () => request<void>('/system/api/v1/login-logs', { method: 'DELETE' }),
   removeLoginLogs: (ids: string[]) =>
-    request<void>('/system/api/v1/login-logs/batch', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+    request<void>('/system/api/v1/login-logs', { query: { ids: ids.join(',') }, method: 'DELETE' }),
   listOperationLogs: (q: ListQuery) =>
     request<PageResult<OperationLog>>('/system/api/v1/operation-logs', { query: q }),
   cleanOperationLogs: () => request<void>('/system/api/v1/operation-logs', { method: 'DELETE' }),
   removeOperationLogs: (ids: string[]) =>
-    request<void>('/system/api/v1/operation-logs/batch', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+    request<void>('/system/api/v1/operation-logs', { query: { ids: ids.join(',') }, method: 'DELETE' }),
 }

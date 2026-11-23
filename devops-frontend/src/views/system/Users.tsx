@@ -69,6 +69,7 @@ export default function Users() {
   const [busy, setBusy] = useState(false)
   const [pwdUser, setPwdUser] = useState<SystemUser | null>(null)
   const [newPassword, setNewPassword] = useState('')
+  const [pwdError, setPwdError] = useState<string | null>(null)
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([])
   const [posts, setPosts] = useState<SystemPost[]>([])
   const [roles, setRoles] = useState<SystemRole[]>([])
@@ -97,23 +98,32 @@ export default function Users() {
     setFormOpen(true)
   }
 
-  const openEdit = (u: SystemUser) => {
-    setEditing(u)
-    setForm({
-      username: u.username,
-      nickname: u.nickname,
-      password: '',
-      deptId: u.deptId,
-      email: u.email ?? '',
-      mobile: u.mobile ?? '',
-      gender: typeof u.gender === 'number' ? u.gender : 0,
-      remark: u.remark ?? '',
-      postIds: u.postIds ?? [],
-      roleIds: u.roleIds ?? [],
-      status: u.status,
-    })
-    setFormError(null)
-    setFormOpen(true)
+  const openEdit = async (u: SystemUser) => {
+    setBusy(true)
+    try {
+      // List rows omit roleIds/postIds; the detail endpoint returns the assigned IDs.
+      const detail = await adminSystem.getUser(u.id)
+      setEditing(detail)
+      setForm({
+        username: detail.username,
+        nickname: detail.nickname,
+        password: '',
+        deptId: detail.deptId,
+        email: detail.email ?? '',
+        mobile: detail.mobile ?? '',
+        gender: typeof detail.gender === 'number' ? detail.gender : 0,
+        remark: detail.remark ?? '',
+        postIds: detail.postIds ?? [],
+        roleIds: detail.roleIds ?? [],
+        status: detail.status,
+      })
+      setFormError(null)
+      setFormOpen(true)
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '加载用户详情失败')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -162,11 +172,17 @@ export default function Users() {
 
   const doResetPassword = async () => {
     if (!pwdUser) return
+    if (newPassword.length < 6) {
+      setPwdError('密码至少 6 位')
+      return
+    }
+    setPwdError(null)
     try {
       await adminSystem.updateUserPassword(pwdUser.id, { password: newPassword })
       toastSuccess('密码已重置')
       setPwdUser(null)
       setNewPassword('')
+      setPwdError(null)
     } catch (err) {
       if (isForbidden(err)) setForbidden(true)
       else toastError(err instanceof Error ? err.message : '重置密码失败')
@@ -198,7 +214,7 @@ export default function Users() {
       render: (r) => (
         <div className="flex gap-1">
           <PermissionButton permission="system:user:update" variant="ghost" size="sm" onClick={() => openEdit(r)}>编辑</PermissionButton>
-          <PermissionButton permission="system:user:update-password" variant="ghost" size="sm" onClick={() => setPwdUser(r)}>重置密码</PermissionButton>
+          <PermissionButton permission="system:user:update-password" variant="ghost" size="sm" onClick={() => { setPwdError(null); setPwdUser(r) }}>重置密码</PermissionButton>
           <PermissionButton permission="system:user:delete" variant="ghost" size="sm" onClick={() => void doDelete(r)}>删除</PermissionButton>
         </div>
       ),
@@ -309,6 +325,7 @@ export default function Users() {
       <Dialog open={pwdUser != null} onOpenChange={(o) => { if (!o) setPwdUser(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>重置密码（{pwdUser?.username}）</DialogTitle></DialogHeader>
+          {pwdError && <p className="text-destructive text-sm">{pwdError}</p>}
           <Field>
             <FieldLabel htmlFor="new-password">新密码</FieldLabel>
             <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />

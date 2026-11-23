@@ -13,6 +13,7 @@ vi.mock('@/api/admin/system', () => ({
     listUsers: vi.fn(),
     createUser: vi.fn().mockResolvedValue(undefined),
     updateUser: vi.fn().mockResolvedValue(undefined),
+    getUser: vi.fn().mockResolvedValue(undefined),
     updateUserPassword: vi.fn().mockResolvedValue(undefined),
     deleteUser: vi.fn().mockResolvedValue(undefined),
     listAllPosts: vi.fn().mockResolvedValue([]),
@@ -50,6 +51,9 @@ beforeEach(() => {
   vi.mocked(adminSystem.listAllRoles).mockResolvedValue([])
   vi.mocked(adminSystem.createUser).mockResolvedValue(undefined)
   vi.mocked(adminSystem.updateUser).mockResolvedValue(undefined)
+  vi.mocked(adminSystem.getUser).mockImplementation(async (id) =>
+    user({ id, roleIds: ['r1'], postIds: ['p1'] }),
+  )
   vi.mocked(adminSystem.updateUserPassword).mockResolvedValue(undefined)
   vi.mocked(adminSystem.deleteUser).mockResolvedValue(undefined)
 })
@@ -130,16 +134,46 @@ describe('Users page', () => {
     expect(body).not.toHaveProperty('dept_id')
   })
 
+  it('edit loads user detail and preserves roleIds/postIds on update', async () => {
+    vi.mocked(adminSystem.listAllRoles).mockResolvedValue([{ id: 'r1', name: '管理员' } as never])
+    vi.mocked(adminSystem.listAllPosts).mockResolvedValue([{ id: 'p1', code: 'P1', name: '岗位1' } as never])
+    renderUsers()
+    await screen.findByText('admin')
+    fireEvent.click(screen.getByText('编辑'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(adminSystem.getUser).toHaveBeenCalledWith('1'))
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('管理员')).toBeChecked(),
+    )
+    expect(within(dialog).getByLabelText('岗位1')).toBeChecked()
+    fireEvent.click(within(dialog).getByText('保存'))
+    await waitFor(() => expect(adminSystem.updateUser).toHaveBeenCalledWith('1', expect.objectContaining({
+      roleIds: ['r1'],
+      postIds: ['p1'],
+    })))
+  })
+
   it('reset password calls the dedicated endpoint with a string id', async () => {
+    renderUsers()
+    await screen.findByText('admin')
+    fireEvent.click(screen.getByText('重置密码'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('新密码'), { target: { value: 'np123456' } })
+    fireEvent.click(within(dialog).getByText('确定重置'))
+    await waitFor(() =>
+      expect(adminSystem.updateUserPassword).toHaveBeenCalledWith('1', { password: 'np123456' }),
+    )
+  })
+
+  it('reset password rejects passwords shorter than 6 characters', async () => {
     renderUsers()
     await screen.findByText('admin')
     fireEvent.click(screen.getByText('重置密码'))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('新密码'), { target: { value: 'np123' } })
     fireEvent.click(within(dialog).getByText('确定重置'))
-    await waitFor(() =>
-      expect(adminSystem.updateUserPassword).toHaveBeenCalledWith('1', { password: 'np123' }),
-    )
+    expect(await within(dialog).findByText('密码至少 6 位')).toBeInTheDocument()
+    expect(adminSystem.updateUserPassword).not.toHaveBeenCalled()
   })
 
   it('delete confirms then calls deleteUser with the string id', async () => {

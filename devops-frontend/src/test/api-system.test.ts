@@ -60,6 +60,42 @@ describe('admin system API write mapping', () => {
     expect(spy.mock.calls[0]![1]!.method).toBe('DELETE')
   })
 
+  it('assignRoleMenus sends the backend menuIds payload', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
+    await adminSystem.assignRoleMenus('r1', ['m1', 'm2'])
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/roles\/r1\/menus$/)
+    const body = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string)
+    expect(body).toEqual({ menuIds: ['m1', 'm2'] })
+    expect(body.menu_ids).toBeUndefined()
+  })
+
+  it('unused delete helpers target the backend single-id routes', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockImplementation(async () => ok())
+    await adminSystem.deleteRole('1234567890123456789')
+    await adminSystem.deleteTenant('2')
+    await adminSystem.deleteDictType('3')
+    await adminSystem.deleteDictItem('4')
+    await adminSystem.deleteConfig('5')
+    await adminSystem.removeLoginLogs(['6'])
+    await adminSystem.removeOperationLogs(['7'])
+    const urls = spy.mock.calls.map(([url]) => String(url))
+    expect(urls.slice(0, 5)).toEqual([
+      '/system/api/v1/roles/1234567890123456789',
+      '/system/api/v1/tenants/2',
+      '/system/api/v1/dict-types/3',
+      '/system/api/v1/dict-data/4',
+      '/system/api/v1/configs/5',
+    ])
+    expect(urls[5]).toMatch(/\/api\/v1\/login-logs\?(.*&)?ids=6(&|$)/)
+    expect(urls[5]).not.toContain('/batch')
+    expect(urls[6]).toMatch(/\/api\/v1\/operation-logs\?(.*&)?ids=7(&|$)/)
+    expect(urls[6]).not.toContain('/batch')
+    for (const [, init] of spy.mock.calls) {
+      expect(init!.method).toBe('DELETE')
+      expect((init as RequestInit).body).toBeUndefined()
+    }
+  })
+
   it('listAllPosts and listAllRoles use paginated list endpoints', async () => {
     const pageResponse = () =>
       new Response(JSON.stringify({ code: 200, data: { list: [], total: 0, page_num: 1, page_size: 10, pages: 0 } }), { status: 200 })
