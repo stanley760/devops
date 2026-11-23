@@ -78,6 +78,52 @@ describe('Menus page', () => {
     expect(body).toMatchObject({ name: 'child', type: 2, visible: true })
   })
 
+  it('uses the backend default always_show=true for new menus', async () => {
+    renderMenus()
+    await screen.findByText('系统')
+    fireEvent.click(screen.getByText('新增菜单'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'new' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(adminSystem.createMenu).toHaveBeenCalled())
+    expect(vi.mocked(adminSystem.createMenu).mock.calls[0]![0].always_show).toBe(true)
+  })
+
+  it('preserves an explicit always_show=false when editing', async () => {
+    vi.mocked(adminSystem.listMenus).mockResolvedValueOnce([
+      menu({ alwaysShow: false }),
+    ])
+    renderMenus()
+    await screen.findByText('系统')
+    fireEvent.click(screen.getAllByText('编辑')[0]!)
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(adminSystem.updateMenu).toHaveBeenCalled())
+    expect(vi.mocked(adminSystem.updateMenu).mock.calls[0]![1].always_show).toBe(false)
+  })
+
+  it('sends both boolean flags when editing so toggling them off reaches the backend', async () => {
+    vi.mocked(adminSystem.listMenus).mockResolvedValueOnce([
+      menu({ keepAlive: true, alwaysShow: true }),
+    ])
+    renderMenus()
+    await screen.findByText('系统')
+    fireEvent.click(screen.getAllByText('编辑')[0]!)
+    fireEvent.click(screen.getAllByLabelText('缓存')[1]!)
+    fireEvent.click(screen.getAllByLabelText('常显')[1]!)
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(adminSystem.updateMenu).toHaveBeenCalled())
+    expect(vi.mocked(adminSystem.updateMenu).mock.calls[0]![1]).toMatchObject({
+      keep_alive: false,
+      always_show: false,
+    })
+  })
+
+  it('warns that menus with children cannot be deleted', async () => {
+    renderMenus()
+    await screen.findByText('系统')
+    fireEvent.click(screen.getAllByText('删除')[0]!)
+    expect(await screen.findByText(/子级.*无法删除/)).toBeInTheDocument()
+  })
+
   it('deletes with confirm by id', async () => {
     renderMenus()
     await screen.findByText('系统')

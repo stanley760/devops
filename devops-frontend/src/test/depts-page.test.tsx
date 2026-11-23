@@ -48,6 +48,17 @@ describe('Depts page', () => {
     expect(screen.getByText('研发部')).toBeInTheDocument()
   })
 
+  it('renders orphan depts as roots when the parent is missing or self-referential', async () => {
+    vi.mocked(adminSystem.listDepts).mockResolvedValueOnce([
+      dept({ id: '1', name: '总部' }),
+      dept({ id: '2', name: '孤儿部', parentId: 'missing' }),
+      dept({ id: '3', name: '自引用部', parentId: '3' }),
+    ])
+    renderDepts()
+    expect(await screen.findByText('孤儿部')).toBeInTheDocument()
+    expect(screen.getByText('自引用部')).toBeInTheDocument()
+  })
+
   it('create child dept cascades parent_id (snake_case)', async () => {
     renderDepts()
     await screen.findByText('总部')

@@ -30,7 +30,7 @@ interface MenuForm {
 
 const emptyForm: MenuForm = {
   name: '', permission: '', type: 1, sort: 1, parent_id: '0', path: '', icon: '',
-  component: '', component_name: '', status: 1, visible: true, keep_alive: false, always_show: false,
+  component: '', component_name: '', status: 1, visible: true, keep_alive: false, always_show: true,
 }
 
 function flatten(n: SystemMenu, depth = 0): Array<{ node: SystemMenu; depth: number }> {
@@ -88,14 +88,14 @@ export default function Menus() {
         parent_id: form.parent_id,
         status: form.status,
         visible: form.visible,
+        keep_alive: form.keep_alive,
+        always_show: form.always_show,
       }
       if (form.permission.trim()) payload.permission = form.permission.trim()
       if (form.path.trim()) payload.path = form.path.trim()
       if (form.icon.trim()) payload.icon = form.icon.trim()
       if (form.component.trim()) payload.component = form.component.trim()
       if (form.component_name.trim()) payload.component_name = form.component_name.trim()
-      if (form.keep_alive) payload.keep_alive = true
-      if (form.always_show) payload.always_show = true
       if (editing) await adminSystem.updateMenu(editing.id, payload)
       else await adminSystem.createMenu(payload)
       toastSuccess(editing ? '更新成功' : '创建成功')
@@ -109,7 +109,7 @@ export default function Menus() {
   }
 
   const doDelete = async (n: SystemMenu) => {
-    const ok = await confirm({ title: `确认删除菜单「${n.name}」？（子级将级联处理）`, danger: true, confirmText: '确定' })
+    const ok = await confirm({ title: `确认删除菜单「${n.name}」？存在子级，无法删除`, danger: true, confirmText: '确定' })
     if (!ok) return
     try {
       await adminSystem.deleteMenu(n.id)
@@ -149,7 +149,7 @@ export default function Menus() {
                 parent_id: n.parentId, path: n.path ?? '', icon: n.icon ?? '',
                 component: n.component ?? '', component_name: n.componentName ?? '',
                 status: n.status, visible: n.visible, keep_alive: n.keepAlive ?? false,
-                always_show: n.alwaysShow ?? false,
+                always_show: n.alwaysShow ?? true,
               })
               setFormError(null)
               setFormOpen(true)

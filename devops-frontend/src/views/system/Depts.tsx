@@ -17,9 +17,19 @@ const emptyForm: DeptForm = { name: '', parent_id: '0', sort: 1, phone: '', emai
 
 function flatten(depts: SystemDept[], parentId = '0', depth = 0): Array<{ node: SystemDept; depth: number }> {
   const out: Array<{ node: SystemDept; depth: number }> = []
-  for (const d of depts.filter((x) => x.parentId === parentId)) {
+  const children = depts.filter((x) => x.parentId === parentId && x.id !== parentId)
+  for (const d of children) {
     out.push({ node: d, depth })
     out.push(...flatten(depts, d.id, depth + 1))
+  }
+  if (parentId === '0') {
+    const knownIds = new Set(depts.map((d) => d.id))
+    for (const d of depts) {
+      if (children.includes(d)) continue
+      if (!d.parentId || d.parentId === d.id || !knownIds.has(d.parentId)) {
+        out.push({ node: d, depth })
+      }
+    }
   }
   return out
 }
