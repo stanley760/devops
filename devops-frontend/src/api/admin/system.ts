@@ -147,7 +147,8 @@ export const adminSystem = {
 
   // ── 菜单 ──
   listMenus: () => request<SystemMenu[]>('/system/api/v1/menus'),
-  listMenuTree: () => request<SystemMenu[]>('/system/api/v1/menus/tree'),
+  /** Backend GET /menus already returns a nested tree; no /menus/tree route exists. */
+  listMenuTree: () => request<SystemMenu[]>('/system/api/v1/menus'),
   createMenu: (m: MenuWrite) =>
     request<void>('/system/api/v1/menus', { method: 'POST', body: JSON.stringify(m) }),
   updateMenu: (id: string, m: Partial<MenuWrite>) =>

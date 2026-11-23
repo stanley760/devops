@@ -60,10 +60,10 @@ describe('admin system API write mapping', () => {
     expect(spy.mock.calls[0]![1]!.method).toBe('DELETE')
   })
 
-  it('listMenuTree targets the nested menu tree endpoint', async () => {
+  it('listMenuTree targets the menus endpoint that returns a nested tree', async () => {
     const spy = vi.spyOn(global, 'fetch').mockResolvedValue(ok())
     await adminSystem.listMenuTree()
-    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/menus\/tree$/)
+    expect(spy.mock.calls[0]![0]).toMatch(/\/api\/v1\/menus$/)
   })
 
   it('getRole targets the role detail endpoint', async () => {
