@@ -22,7 +22,7 @@ const GENDER_TEXT: Record<string, string> = { '0': '未知', '1': '男', '2': '�
 
 export function ProfilePage({ navigate }: Props) {
   const [profile, setProfile] = useState<PublicProfile | null>(null)
-  const [editForm, setEditForm] = useState({ nickname: '', email: '', mobile: '', gender: '1' })
+  const [editForm, setEditForm] = useState({ nickname: '', email: '', mobile: '', gender: 0 })
   const [editError, setEditError] = useState<string | null>(null)
   const [editSaved, setEditSaved] = useState(false)
   const [pwdForm, setPwdForm] = useState({ old_password: '', new_password: '', confirm: '' })
@@ -35,7 +35,7 @@ export function ProfilePage({ navigate }: Props) {
       .getProfile()
       .then((p) => {
         setProfile(p)
-        setEditForm({ nickname: p.nickname, email: p.email, mobile: p.mobile, gender: p.gender || '1' })
+        setEditForm({ nickname: p.nickname, email: p.email, mobile: p.mobile, gender: p.gender ?? 0 })
       })
       .catch((e) => {
         if (e instanceof PortalApiError && e.status === 401) {
@@ -100,7 +100,7 @@ export function ProfilePage({ navigate }: Props) {
 
   if (!profile) return <Skeleton className="glass-panel mx-auto my-10 h-64 w-full max-w-md" />
 
-  const genderText = GENDER_TEXT[profile.gender] ?? '未知'
+  const genderText = GENDER_TEXT[String(profile.gender)] ?? '未知'
 
   return (
     <div className="mx-auto my-10 max-w-md space-y-4">
@@ -126,7 +126,7 @@ export function ProfilePage({ navigate }: Props) {
             <Field><FieldLabel htmlFor="portal-profile-mobile">手机号</FieldLabel><Input id="portal-profile-mobile" value={editForm.mobile} onChange={(e) => { setEditForm({ ...editForm, mobile: e.target.value }); setEditSaved(false) }} /></Field>
             <Field>
               <FieldLabel htmlFor="portal-profile-gender">性别</FieldLabel>
-              <Select value={editForm.gender} onValueChange={(v) => { setEditForm({ ...editForm, gender: v ?? '1' }); setEditSaved(false) }}>
+              <Select value={String(editForm.gender)} onValueChange={(v) => { setEditForm({ ...editForm, gender: Number(v) }); setEditSaved(false) }}>
                 <SelectTrigger id="portal-profile-gender" className="glass-control"><SelectValue /></SelectTrigger>
                 <SelectContent className="glass-panel">
                   <SelectItem value="1">男</SelectItem>

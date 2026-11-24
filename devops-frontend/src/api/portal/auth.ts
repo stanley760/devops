@@ -36,7 +36,7 @@ export const portalAuth = {
   getProfile(): Promise<PublicProfile> {
     return portalRequest<PublicProfile>(`${BASE}/profile`)
   },
-  updateProfile(body: { nickname?: string; email?: string; mobile?: string; gender?: string }): Promise<void> {
+  updateProfile(body: { nickname?: string; email?: string; mobile?: string; gender?: number }): Promise<void> {
     return portalRequest<void>(`${BASE}/profile`, { method: 'PUT', body: JSON.stringify(body) })
   },
   updatePassword(body: { old_password: string; new_password: string }): Promise<void> {

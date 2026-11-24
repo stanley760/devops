@@ -45,7 +45,7 @@ const tokens = () => ({ access_token: 'a', refresh_token: 'r', expires_in: 1, is
 
 const profileFixture = {
   id: 42, username: 'legacy-user', nickname: '昵称', email: 'a@b.co', mobile: '13800138000',
-  gender: '1', avatar: '', created_at: 1730000000000,
+  gender: 1, avatar: '', created_at: 1730000000000,
 }
 
 type CaptchaInteraction = {
@@ -230,6 +230,25 @@ describe('Portal Profile', () => {
     expect(screen.getByText(/邮箱：a@b.co/)).toBeInTheDocument()
     expect(screen.getByText(/注册时间：2024-10-27/)).toBeInTheDocument()
     expect((await vi.mocked(portalAuth.getProfile).mock.results[0]!.value as { id: number }).id).toBe(42)
+  })
+
+  it('displays gender 0 as 未知 and submits a numeric gender when the select changes', async () => {
+    vi.mocked(portalAuth.getProfile).mockResolvedValue({ ...profileFixture, gender: 0 })
+    render(<ProfilePage navigate={navigate} />)
+    await screen.findByText('个人资料')
+    expect(screen.getByText(/性别：未知/)).toBeInTheDocument()
+
+    // 编辑表单中的性别下拉框发出字符串值，提交前必须转成后端要求的数字。
+    fireEvent.click(screen.getByLabelText('性别'))
+    const female = await screen.findByRole('option', { name: '女' })
+    fireEvent.pointerDown(female, { pointerType: 'mouse', button: 0 })
+    fireEvent.click(female)
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }))
+    await waitFor(() =>
+      expect(portalAuth.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ gender: 2 })),
+    )
+    const sent = vi.mocked(portalAuth.updateProfile).mock.calls[0]![0] as { gender: unknown }
+    expect(typeof sent.gender).toBe('number')
   })
 
   it('redirects to login with a user-facing expiry message on 401', async () => {

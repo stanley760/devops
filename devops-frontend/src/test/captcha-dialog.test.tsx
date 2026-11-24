@@ -57,6 +57,46 @@ describe('CaptchaDialog interactions', () => {
     expect(buildCaptchaAnswer(challenge({ type: 'rotate' }), a)).toEqual({ captcha_id: 'c1', captcha_angle: 0 })
   })
 
+  it('rotate drag accumulates across moves and submits a non-zero captcha_angle', () => {
+    const onAnswer = vi.fn()
+    const c = challenge({ type: 'rotate', width: 220, height: 220, thumb_size: 140 })
+    render(<Harness challenge={c} onAnswer={onAnswer} />)
+    const target = screen.getByAltText('rotate target')
+    fireEvent.mouseDown(target, { clientX: 100, clientY: 100 })
+    fireEvent.mouseMove(window, { clientX: 130, clientY: 100 })
+    fireEvent.mouseMove(window, { clientX: 155, clientY: 100 })
+    fireEvent.mouseUp(window)
+    fireEvent.click(screen.getByText('提交'))
+    const a = onAnswer.mock.calls[0]![0] as { angle: number }
+    // 累计拖过 55px；图宽 220px 对应一整圈 → 55 * 360 / 220 = 90°。
+    // 只取最后一帧增量会得到 25px → 40°，说明必须累计。
+    expect(a.angle).toBe(90)
+    expect(a.angle).not.toBe(0)
+    expect(buildCaptchaAnswer(c, a)).toEqual({ captcha_id: 'c1', captcha_angle: 90 })
+  })
+
+  it('scales dragdrop coordinates from CSS display size back to image pixels', () => {
+    const onAnswer = vi.fn()
+    const c = challenge({ type: 'dragdrop', thumb_x: 10, thumb_y: 20, thumb_width: 60, thumb_height: 60 })
+    render(<Harness challenge={c} onAnswer={onAnswer} />)
+    // 图片自然宽 300px，容器被 CSS 缩放到 150px（缩放系数 2）。
+    const container = screen.getByAltText('puzzle piece').parentElement!
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      width: 150, height: 75, x: 0, y: 0, top: 0, left: 0, right: 150, bottom: 75, toJSON: () => ({}),
+    } as DOMRect)
+    const piece = screen.getByAltText('puzzle piece')
+    fireEvent.mouseDown(piece, { clientX: 20, clientY: 20 })
+    // 屏幕上移动 20px / 15px → 图片像素空间 40px / 30px。
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 35 })
+    fireEvent.mouseUp(window)
+    fireEvent.click(screen.getByText('提交'))
+    const a = onAnswer.mock.calls[0]![0] as { x: number; y: number }
+    expect(a.x).toBe(50) // thumb_x 10 + 20 * 2
+    expect(a.y).toBe(50) // thumb_y 20 + 15 * 2
+    expect(buildCaptchaAnswer(c, a)).toEqual({ captcha_id: 'c1', captcha_x: 50, captcha_y: 50 })
+    vi.restoreAllMocks()
+  })
+
   it('dragdrop type submits captcha_x/captcha_y', () => {
     const onAnswer = vi.fn()
     render(<Harness challenge={challenge({ type: 'dragdrop' })} onAnswer={onAnswer} />)

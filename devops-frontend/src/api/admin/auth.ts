@@ -32,7 +32,7 @@ export const adminAuth = {
     nickname?: string
     email?: string
     mobile?: string
-    gender?: string
+    gender?: number
     avatar?: string
   }): Promise<void> {
     return request<void>(`${BASE}/profile`, { method: 'PUT', body: JSON.stringify(body) })

@@ -12,7 +12,7 @@ vi.mock('@/api/portal/auth', () => ({
     getCaptcha: vi.fn().mockResolvedValue({ id: 'c', type: 'slide', image: 'i', width: 100, height: 50, enabled: false }),
     getProfile: vi.fn().mockResolvedValue({
       id: 1, username: 'u', nickname: 'n', email: 'a@b.co', mobile: '13800138000',
-      gender: '1', avatar: '', created_at: 1730000000000,
+      gender: 1, avatar: '', created_at: 1730000000000,
     }),
     logout: vi.fn().mockResolvedValue(undefined),
   },
@@ -66,7 +66,7 @@ describe('PortalApp shell', () => {
     vi.mocked(portalAuth.getCaptcha).mockResolvedValue({ id: 'c', type: 'slide', image: 'i', width: 100, height: 50, enabled: false })
     vi.mocked(portalAuth.getProfile).mockResolvedValue({
       id: 1, username: 'u', nickname: 'n', email: 'a@b.co', mobile: '13800138000',
-      gender: '1', avatar: '', created_at: 1730000000000,
+      gender: 1, avatar: '', created_at: 1730000000000,
     })
   })
 

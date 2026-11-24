@@ -32,7 +32,8 @@ export interface AuthUser {
   nickname?: string
   email?: string
   mobile?: string
-  gender?: string
+  /** Backend int8: 0 unknown, 1 male, 2 female. */
+  gender?: number
   avatar?: string
   deptId?: string
   postIds?: string[]
@@ -102,7 +103,8 @@ export interface PublicProfile {
   nickname: string
   email: string
   mobile: string
-  gender: string
+  /** Backend int8: 0 unknown, 1 male, 2 female. */
+  gender: number
   avatar: string
   created_at: number
 }
