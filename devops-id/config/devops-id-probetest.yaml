@@ -1,8 +1,8 @@
 grpc:
   listen: ":19990"
 
-nacos:
-  enabled: false        # the test instance does not register
+service:
+  name: devops-id-probe   # 探活实例身份；不参与业务流量
 
 log:
   level: info

@@ -4,7 +4,8 @@ metadata:
   name: devops-system
   namespace: higress-system
   annotations:
-    higress.io/destination: devops-system.DEVOPS-GROUP.public.nacos:9999
+    # K8s-style service destination (DNS service source in McpBridge; the port must be explicit)
+    higress.io/destination: devops-system.dns:9999
     # Traffic-ingress containment is now JWT-based:
     #   - Gateway side: wasmplugins/jwt-auth-2.0.0.yaml verifies the Authorization header
     #     and, via claims_to_headers, overrides and injects internal headers such as

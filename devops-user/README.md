@@ -59,12 +59,8 @@ go run . server
 # The API docs can be viewed through the gateway as well: http://127.0.0.1:8080/user/apidoc
 ```
 
-`config/.env` needs `NACOS_REGISTER_IP` set (the gateway uses it to call back to this process):
-
-```bash
-# Windows + Docker Desktop
-NACOS_REGISTER_IP=host.docker.internal
-```
+The Higress container reaches this host-run process through the host's LAN IPv4
+(set `HOST_IP` in `deploy/.env`; the gateway maps the K8s-style service FQDN via `extra_hosts`).
 
 > ⚠️ **Do not use the bridge gateway (e.g. 172.19.0.1)**: tested — container access to `172.19.0.1:10000` returns 000
 > (unreachable), while `host.docker.internal:10000` returns 200.
@@ -279,9 +275,9 @@ devops-user/
 ├── main.go                # humaerr.Install + banner + cmd.Execute
 ├── banner.txt             # go:embed
 ├── config/
-│   ├── bootstrap.yaml         # common baseline (server/nacos)
+│   ├── bootstrap.yaml         # common baseline (server/service)
 │   ├── devops-user-dev.yaml   # environment overlay (incl. dev JWT private key)
-│   └── .env               # NACOS_REGISTER_IP (not committed)
+│   └── .env               # local env vars (not committed)
 └── internal/
     ├── cmd/root.go        # assembly: db → create tables → ID generation → Redis → JWT → Kit → service
     ├── config/            # root Config and proprietary config sections

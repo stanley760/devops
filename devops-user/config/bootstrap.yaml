@@ -18,7 +18,7 @@ gateway:
   expose:
     prefix: /user
     host: user-api.devops.local
-    destination: devops-user.DEVOPS-GROUP.public.nacos:10000
+    destination: devops-user.dns:10000
     endpoints:
       - path: /api/v1/auth/login
         reason: 登录：签发 access + refresh 令牌
@@ -53,24 +53,7 @@ server:
     - 127.0.0.1
     - "::1"
 
-nacos:
-  enabled: true
-  endpoints:
-    - "127.0.0.1:8848"
-  namespace: ""
-  group: "DEVOPS_GROUP"
-  username: "nacos"
-  password: "nacos"
-  timeout: 5s
-  config:
-    data_ids:
-      - "devops-user.yaml"
-    group: "DEVOPS_GROUP"
-    timeout: 5s
-    required: false
-  registry:
-    service_name: "devops-user"
-    cluster: "DEFAULT"
-    weight: 1
-    meta:
-      service: "devops-user"
+# 服务标识。服务发现由部署平台承担（K8s Service DNS / compose 网络别名 / extra_hosts），
+# 不再有注册中心；这里只声明观测用的服务名。
+service:
+  name: devops-user

@@ -60,39 +60,6 @@ services:
           cpus: "0.5"
           memory: 256m
 
-  nacos:
-    image: nacos/nacos-server:v2.4.3
-    environment:
-      MODE: standalone
-      NACOS_AUTH_ENABLE: "false"
-      JVM_XMS: 256m
-      JVM_XMX: 256m
-      JVM_XMN: 128m
-    ports:
-      - "8848:8848"
-      - "9848:9848"
-    expose:
-      - "9848"
-      - "9849"
-    volumes:
-      - nacos-data:/home/nacos/data
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8848/nacos/v1/console/health/readiness"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 15s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          # 512m is NOT enough and gets the container OOM-killed a few minutes after
-          # startup (exit 137, OOMKilled=true): heap 256m + image-default metaspace
-          # 320m (JVM_MMS) + Nacos 2.x gRPC direct memory ≈ 700-800MB peak once
-          # clients connect. 1g covers the worst case with headroom.
-          memory: 1g
-
   # One-shot config seeding: copies the git-managed resource directories under deploy/higress
   # into the named volume (/data), avoiding the high CPU caused by a Windows bind mount on /data.
   # up does not re-run completed containers; after changing configs use dev.sh sync to force a
@@ -122,9 +89,15 @@ services:
       - "8443:8443"           # HTTPS gateway
     volumes:
       - higress-data:/data
+    # K8s-style service FQDNs -> host LAN IPv4: business services run on the host in
+    # dev, the gateway container reaches them through these /etc/hosts entries.
+    # host.docker.internal is blocked by the Windows firewall (same as prometheus's
+    # devops-host), so an explicit LAN IP (HOST_IP, deploy/.env) is required.
+    extra_hosts:
+      - "devops-system.devops.svc.cluster.local:${HOST_IP:-172.16.60.150}"
+      - "devops-user.devops.svc.cluster.local:${HOST_IP:-172.16.60.150}"
+      - "devops-system-gray.devops.svc.cluster.local:${HOST_IP:-172.16.60.150}"
     depends_on:
-      nacos:
-        condition: service_healthy
       higress-init:
         condition: service_completed_successfully
     deploy:
@@ -360,7 +333,6 @@ services:
 volumes:
   mysql-data:
   redis-data:
-  nacos-data:
   etcd-data:
   grafana-data:
   higress-data:

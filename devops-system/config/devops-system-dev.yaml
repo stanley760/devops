@@ -72,7 +72,7 @@ tenant:
   default_code: "default"          # 登录未指定租户时的默认租户 code
 
 idclient:                          # devops-id 发号服务接入
-  endpoint: "nacos:///devops-id"     # 三斜杠标准形式：scheme:///[服务名]（两斜杠会把服务名解析成 authority）
+  endpoint: "127.0.0.1:9990"        # dev 环境 devops-id 与本服务同跑在宿主机；容器环境改为服务名（devops-id:9990）
   batch: 100                       # 预取批量（1 = 关闭预取，逐次 RPC）
   low_water: 0.2                   # 剩余比例低于 20% 时异步补充
   dial_timeout: 3s

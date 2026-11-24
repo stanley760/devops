@@ -2,7 +2,7 @@
 // C-side user service).
 //
 // The loading mechanism reuses devops-infra/config (bootstrap base + APP_ENV
-// environment override merge + optional Nacos remote config); this package
+// environment override merge); this package
 // only declares its own root Config and dedicated sections.
 //
 // Differences from devops-system (deliberate, not an oversight):
@@ -31,18 +31,18 @@ const DefaultJWTKeyID = "devops-user-rs256-1"
 // Config is the devops-user service root config, corresponding to the
 // top-level structure of config/bootstrap.yaml.
 type Config struct {
-	Server        config.ServerConfig `mapstructure:"server"`
-	Log           config.LogConfig    `mapstructure:"log"`
-	Mysql         config.MysqlConfig  `mapstructure:"mysql"`
-	Redis         config.RedisConfig  `mapstructure:"redis"`
-	JWT           JWTConfig           `mapstructure:"jwt"`
-	IDClient      IDClientConfig      `mapstructure:"idclient"`
-	Nacos         config.NacosConfig  `mapstructure:"nacos"`
-	Observability ObservabilityConfig `mapstructure:"observability"`
-	APIDoc        APIDocConfig        `mapstructure:"apidoc"`
-	Gateway       gateway.Config      `mapstructure:"gateway"`
-	LoginLock     LoginLockConfig     `mapstructure:"login_lock"`
-	OAuth         OAuthConfig         `mapstructure:"oauth"`
+	Server        config.ServerConfig  `mapstructure:"server"`
+	Log           config.LogConfig     `mapstructure:"log"`
+	Mysql         config.MysqlConfig   `mapstructure:"mysql"`
+	Redis         config.RedisConfig   `mapstructure:"redis"`
+	JWT           JWTConfig            `mapstructure:"jwt"`
+	IDClient      IDClientConfig       `mapstructure:"idclient"`
+	Service       config.ServiceConfig `mapstructure:"service"`
+	Observability ObservabilityConfig  `mapstructure:"observability"`
+	APIDoc        APIDocConfig         `mapstructure:"apidoc"`
+	Gateway       gateway.Config       `mapstructure:"gateway"`
+	LoginLock     LoginLockConfig      `mapstructure:"login_lock"`
+	OAuth         OAuthConfig          `mapstructure:"oauth"`
 }
 
 // OAuthConfig is the third-party login configuration.
@@ -167,12 +167,12 @@ type IDClientConfig struct {
 }
 
 // ObservabilityConfig is the service-level observability configuration;
-// ServiceName is derived from nacos.registry.service_name.
+// ServiceName is derived from service.name.
 type ObservabilityConfig struct {
-	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP endpoint; empty means local spans are not reported
-	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // root sampling ratio; <=0 is treated as 1.0
-	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // whether Prometheus metrics are enabled
-	OTLPLogEndpoint string `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
+	OTLPEndpoint    string  `mapstructure:"otlp_endpoint"`     // OTLP HTTP endpoint; empty means local spans are not reported
+	SamplerRatio    float64 `mapstructure:"sampler_ratio"`     // root sampling ratio; <=0 is treated as 1.0
+	MetricsEnabled  bool    `mapstructure:"metrics_enabled"`   // whether Prometheus metrics are enabled
+	OTLPLogEndpoint string  `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
 }
 
 // APIDocConfig is the OpenAPI documentation gating. BasePath is the doc mount

@@ -41,7 +41,7 @@ import (
 
 // Config configures observability assembly.
 type Config struct {
-	ServiceName    string  // service name; should match the nacos registration name (cross-service trace and Grafana filtering depend on it)
+	ServiceName    string  // service identity; cross-service trace and Grafana filtering depend on it
 	Env            string  // deployment.environment resource attribute (dev/test/prod)
 	OTLPEndpoint   string  // OTLP HTTP endpoint, e.g. "http://tempo:4318"; empty = no trace exporter
 	SamplerRatio   float64 // root span sampling ratio; 1.0 recommended in dev, 0.1 in prod; <=0 means 1.0

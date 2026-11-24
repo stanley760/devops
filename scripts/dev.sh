@@ -54,7 +54,7 @@ start_services() {
   start_service devops-user devops-user
   echo ""
   echo "On first run, or after schema changes, first create tables and seed data: sh scripts/dev.sh migrate"
-  echo "Before first use, copy .env.example to .env and fill in the LAN IP (NACOS_REGISTER_IP)."
+  echo "Before first use, copy .env.example to .env and fill in the LAN IP (HOST_IP)."
 }
 
 # —— watch: monitor local business services (liveness+readiness). Liveness failures auto-restart (backoff+circuit breaker); readiness failures only alert ——
@@ -236,7 +236,7 @@ case "$COMMAND" in
   up)
     # Start middleware + gateway + observability stack, then automatically bring up local business services
     # higress-init automatically seeds deploy/higress config before higress (on first run / after down)
-    compose up -d mysql redis nacos etcd higress
+    compose up -d mysql redis etcd higress
     compose up -d tempo loki prometheus alertmanager grafana node-exporter mysqld-exporter redis-exporter
     echo ""
     echo "Middleware and observability stack started."
@@ -261,7 +261,7 @@ case "$COMMAND" in
     (cd "$ROOT/devops-system" && go run . migrate)
     ;;
   down) compose down ;;
-  restart) compose restart mysql redis nacos etcd higress ;;
+  restart) compose restart mysql redis etcd higress ;;
   sync)
     # Explicit sync after editing yaml under deploy/higress; also cures the envoy OOM toxic config:
     #   1. Stop the gateway (with the apiserver down, editing config files will not be overwritten by the in-memory copy)

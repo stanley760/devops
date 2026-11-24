@@ -1,0 +1,68 @@
+# devops-user prod 环境覆盖：只保留差异项。
+#
+# ⚠️ 本文件只放结构与**占位符**：MySQL/Redis/JWT/OAuth 的真实值由部署时的密钥管理
+#    （K8s Secret / Vault 等）注入，禁止把可用凭据提交入库。
+# ⚠️ JWT 私钥必须与 devops-system 的不同（issuer/kid 也独立），防止 B/C 端 token 互通。
+#    对应网关插件：deploy/higress/wasmplugins/jwt-auth-user-2.0.0.yaml
+# K8s 部署时本文件以 Secret 形式挂载到 /app/config/devops-user-prod.yaml
+#    （见 deploy/k8s/devops.yaml），APP_ENV=prod 时生效。
+
+log:
+  level: info
+  console: false
+  format: json
+  buffer: 4096
+  max_size: 100
+  max_backups: 30
+  max_age: 30
+  compress: gzip
+  rotation_interval: 24h
+
+mysql:
+  host: YOUR_MYSQL_HOST
+  port: 3306
+  username: YOUR_MYSQL_USERNAME
+  password: "YOUR_MYSQL_PASSWORD"
+  database: devops
+  charset: utf8mb4
+  max_idle_conns: 20
+  max_open_conns: 100
+  conn_max_lifetime: 1h
+  conn_max_idletime: 10m
+  log_level: warn
+
+redis:
+  host: YOUR_REDIS_HOST
+  port: 6379
+  password: "YOUR_REDIS_PASSWORD"
+  db: 1                      # 与 devops-system 的 db 0 分隔
+
+jwt:
+  # RS256 私钥（PKCS#8 PEM）。部署时替换为密钥管理下发的真实私钥。
+  signing_key: "YOUR_JWT_PRIVATE_KEY_PEM"
+  key_id: devops-user-rs256-1
+  issuer: devops-user        # 须与网关 jwt-auth consumers[].issuer 逐字一致
+  access_expire: 2h
+  refresh_expire: 168h
+
+idclient:
+  endpoint: "devops-id.devops.svc.cluster.local:9990"  # K8s Service DNS
+  batch: 100
+  low_water: 0.2
+  dial_timeout: 5s
+  call_timeout: 3s
+
+observability:
+  # 集群内 Tempo/Loki 的 OTLP HTTP 地址；为空表示不上报
+  otlp_endpoint: ""
+  otlp_log_endpoint: ""
+  sampler_ratio: 0.1
+  metrics_enabled: true
+
+apidoc:
+  enabled: false             # 生产必须关闭交互式文档
+  base_path: /apidoc
+
+server:
+  # K8s 入口经 Higress 转发；按实际 ingress/LB 网段收紧
+  trusted_proxies: ["10.0.0.0/8"]

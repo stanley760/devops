@@ -3,15 +3,31 @@ kind: McpBridge
 metadata:
   name: default
   namespace: higress-system
+# 服务发现不再依赖注册中心（Nacos 已移除）。每个后端服务声明为一个 DNS 服务源：
+#   - name 即服务在网关路由中的标识（<name>.dns）；
+#   - domain 是 K8s 风格的 Service FQDN：
+#       * dev compose：业务服务跑在宿主机，FQDN 通过 higress 服务的 extra_hosts
+#         解析到宿主 LAN IP（HOST_IP，见 docker-compose-dev.yml）；
+#       * prod compose：业务服务跑在容器里，FQDN 通过 compose 网络别名解析
+#         （见 docker-compose.yml 各服务的 networks.aliases）；
+#       * K8s：FQDN 即集群内 Service DNS，原生解析。
 spec:
   registries:
-    - name: devops-nacos
-      type: nacos2
-      domain: nacos
-      port: 8848
-      nacosNamespaceId: public
-      nacosGroups:
-        - DEVOPS_GROUP
+    # B 端管理后台（devops-system，:9999）
+    - name: devops-system
+      type: dns
+      domain: devops-system.devops.svc.cluster.local
+      port: 9999
+    # C 端用户服务（devops-user，:10000）
+    - name: devops-user
+      type: dns
+      domain: devops-user.devops.svc.cluster.local
+      port: 10000
+    # B 端灰度实例（devops-system-gray，:9998），供 canary / gray.devops.local 路由
+    - name: devops-system-gray
+      type: dns
+      domain: devops-system-gray.devops.svc.cluster.local
+      port: 9998
     # Redis for the rate-limit plugin (cluster-key-rate-limit): dns service source.
     # protocol uses tcp — McpBridge 2.2.3 does not recognize the redis protocol (reports invalid protocol:redis).
     # domain must be a full dotted domain name, corresponding to the redis network alias in compose.

@@ -94,7 +94,7 @@ func (c ExposeConfig) Validate() error {
 
 // LoadExposeConfig 从一份业务配置 YAML 中取出 gateway.expose 段。
 //
-// 业务配置里还有很多别的段（server / nacos / database…），所以这里只声明
+// 业务配置里还有很多别的段（server / service / database…），所以这里只声明
 // 需要的结构、用宽松解码——不认识的键照常忽略。
 //
 // 只做解析，不做校验：没有 gateway.expose 段的服务（devops-id 等）应当被跳过，

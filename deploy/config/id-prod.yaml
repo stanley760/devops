@@ -7,14 +7,8 @@ log:
   console: true       # container standard: logs go to stdout, collected by docker/k8s log drivers
   format: json
 
-nacos:
-  enabled: true
-  endpoints:
-    - "nacos:8848"
-  namespace: public
-  group: "DEVOPS_GROUP"
-  registry:
-    service_name: "devops-id"
+service:
+  name: devops-id
 
 idgen:
   leaf_name: devops-id

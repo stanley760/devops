@@ -13,7 +13,7 @@ gateway:
   expose:
     prefix: /system
     host: api.devops.local
-    destination: devops-system.DEVOPS-GROUP.public.nacos:9999
+    destination: devops-system.dns:9999
     endpoints:
       - path: /api/v1/auth/login
         reason: 登录：签发 access + refresh 令牌
@@ -101,8 +101,8 @@ func TestCheckExpose(t *testing.T) {
 		{Path: "/system/api/v1/auth/logout", Method: "POST"},
 		{Path: "/system/api/v1/users", Method: "GET"},
 	}
-	values := map[string][]string {
-		"provider":{"github", "google"},
+	values := map[string][]string{
+		"provider": {"github", "google"},
 	}
 	if err := CheckExpose(cfg, ops, values); err != nil {
 		t.Fatalf("白名单与实际接口一致时不该报错: %v", err)
@@ -136,7 +136,7 @@ func TestRenderPublicIngress(t *testing.T) {
 		"name: devops-system-public",
 		"host: api.devops.local",
 		"path: /system/api/v1/auth/login",
-		"higress.io/destination: devops-system.DEVOPS-GROUP.public.nacos:9999",
+		"higress.io/destination: devops-system.dns:9999",
 		"# 登录：签发 access + refresh 令牌",
 	} {
 		if !strings.Contains(out, want) {

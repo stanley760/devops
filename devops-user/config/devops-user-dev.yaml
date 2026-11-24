@@ -75,7 +75,7 @@ jwt:
   refresh_expire: 168h  # 会话 TTL；C 端首版无 refresh 端点，过期需重新登录
 
 idclient:
-  endpoint: "nacos:///devops-id"     # 三斜杠标准形式
+  endpoint: "127.0.0.1:9990"        # dev 环境 devops-id 与本服务同跑在宿主机
   batch: 100
   low_water: 0.2
   dial_timeout: 5s

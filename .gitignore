@@ -39,7 +39,7 @@ Thumbs.db
 # Local dev tools (Redis, etc.)
 .tools/
 
-# Local environment variables (incl. APP_ENV / NACOS_REGISTER_IP, etc.; not committed)
+# Local environment variables (incl. APP_ENV, HOST_IP, etc.; not committed)
 **/config/.env
 deploy/.env
 

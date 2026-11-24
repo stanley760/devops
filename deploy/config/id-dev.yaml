@@ -6,14 +6,8 @@ log:
   console: true
   format: text
 
-nacos:
-  enabled: true
-  endpoints:
-    - "nacos:8848"
-  namespace: public
-  group: "DEVOPS_GROUP"
-  registry:
-    service_name: "devops-id"
+service:
+  name: devops-id
 
 idgen:
   leaf_name: devops-id

@@ -4,27 +4,9 @@ grpc:
   listen: ":9990"
   reflection: false       # automatically force-enabled in dev, for grpcurl debugging
 
-nacos:
-  enabled: true
-  endpoints:
-    - "127.0.0.1:8848"
-  namespace: ""
-  group: "DEVOPS_GROUP"
-  username: "nacos"
-  password: "nacos"
-  timeout: 5s
-  config:
-    data_ids:
-      - "devops-id.yaml"
-    group: "DEVOPS_GROUP"
-    timeout: 5s
-    required: false
-  registry:
-    service_name: "devops-id"
-    cluster: "DEFAULT"
-    weight: 1
-    meta:
-      service: "devops-id"
+# 服务标识。服务发现由部署平台承担（K8s Service DNS / compose 服务名），不再有注册中心。
+service:
+  name: devops-id
 
 log:
   level: debug           # debug | info | warn | error

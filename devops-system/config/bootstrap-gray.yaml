@@ -1,5 +1,5 @@
-# devops-system 灰度实例 bootstrap：以 devops-system-gray 服务名注册到同一 Nacos 分组，
-# 供 Higress canary 路由（权重分流）与 gray.devops.local 专用路由（100% 直达）使用。
+# devops-system 灰度实例 bootstrap：以 devops-system-gray 服务身份运行，
+# 供 Higress canary 路由（Header/Cookie 分流）与 gray.devops.local 专用路由（100% 直达）使用。
 # 本地启动：go run . server -f config/bootstrap-gray.yaml
 
 server:
@@ -10,29 +10,10 @@ server:
     - 127.0.0.1
     - "::1"
 
-nacos:
-  enabled: true
-  endpoints:
-    - "127.0.0.1:8848"
-  namespace: ""
-  group: "DEVOPS_GROUP"
-  username: "nacos"
-  password: "nacos"
-  timeout: 5s
-  config:
-    # The gray instance registers as "devops-system-gray" but reads the main instance's
-    # business config; without this override the config file name would be derived from the
-    # gray name (devops-system-gray-dev.yaml), which does not exist, and the instance
-    # would fail to start with "mysql.host must not be empty".
-    service_name: "devops-system"
-    data_ids:
-      - "devops-system.yaml"   # 与主实例共用同一份业务配置
-    group: "DEVOPS_GROUP"
-    timeout: 5s
-    required: false
-  registry:
-    service_name: "devops-system-gray"
-    cluster: "DEFAULT"
-    weight: 1
-    meta:
-      service: "devops-system-gray"
+# 服务标识：灰度实例身份是 devops-system-gray（观测用名），但业务配置与主实例
+# 共用——config_name 覆盖为 devops-system 后，环境文件名从主实例名推导
+# （devops-system-dev.yaml）；不覆盖则会从灰度名推导出不存在的
+# devops-system-gray-dev.yaml，实例以 mysql.host must not be empty 启动失败。
+service:
+  name: devops-system-gray
+  config_name: devops-system

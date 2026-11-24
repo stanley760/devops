@@ -16,7 +16,7 @@ metadata:
   name: devops-user
   namespace: higress-system
   annotations:
-    higress.io/destination: devops-user.DEVOPS-GROUP.public.nacos:10000
+    higress.io/destination: devops-user.dns:10000
   labels:
     higress.io/resource-definer: higress
 spec:

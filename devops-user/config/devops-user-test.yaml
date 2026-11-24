@@ -1,0 +1,96 @@
+# devops-user test 环境覆盖：只保留差异项。
+#
+# 测试环境与 dev 的区别：
+#   - MySQL/Redis 指向 deploy/docker-compose.yml 里的 test 实例（容器网络别名）；
+#   - JWT 私钥与 issuer 独立于 devops-system（防止 B/C 端 token 互通，见 dev 覆盖文件头）；
+#   - 日志收敛到 info，apidoc 保持开启供联调排障。
+
+log:
+  level: info
+  console: true
+  format: json
+  buffer: 4096
+  max_size: 50
+  max_backups: 10
+  max_age: 3
+  compress: gzip
+  rotation_interval: 24h
+
+mysql:
+  host: mysql
+  port: 3306
+  username: devops
+  password: devopspwd        # 与 deploy/docker-compose.yml 的 MYSQL_PASSWORD 一致（测试库专用口令）
+  database: devops
+  charset: utf8mb4
+  max_idle_conns: 20
+  max_open_conns: 100
+  conn_max_lifetime: 1h
+  conn_max_idletime: 10m
+  log_level: warn
+
+redis:
+  host: redis
+  port: 6379
+  password: "123456"
+  db: 1                      # 与 devops-system 的 db 0 分隔
+
+jwt:
+  # 测试环境专用密钥（独立于 B 端 devops-system）。真实生产密钥由密钥管理注入，禁止提交入库。
+  signing_key: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDN/HLJPspwyxsC
+    JzGy/UY1Cb4aQJVXWiCW25gM8PUnE3xXxWy/Au+YeiV+2pdNBoaH7zmNoY88P39j
+    dBz4vDDPtsLZ6Pt9+c90vTtEe65uUJoQYW8OOVnxl1fcf9TIJ9q1WYN+Q1PRgiGb
+    SeW8tdcTMC4WeIwY7tagA5nx5CCWgF1TGOHNvFg44PQBOrD8kVRVb7kOvkpiXn+P
+    ehQWlMGAWKUk22csDIYSbTya93NkC68V1svp+j3tqKeTsc/+agS8Y8fdeeTnutn4
+    UgRjdAjzqNTZRwWyRL01nDLNoSc7qjZtQo7yXJt5xc6uSco07fivaKSY5Ku2Z2zI
+    egzpkpd1AgMBAAECggEATZVD9qB7xzf4mDsC8ROMGfXtcB3bIeeEVs2m21j2PR2N
+    u9FUQC1u6NM4xCq4yf4nNZPY7YtoU5zm8iKNtvHKwLFpeoHSF4S7qpCLfiPHcy1Q
+    mdLY7VaUlfYW1aogDrNUIPHyIOBi9Yo59i9DJGyo8UU4VqZYvhtXIzW8Ce+OhqBs
+    xkVq+9W1ILjztgdrewvR+lLH45OtE/tj4MvwfUCjTdnWMoy8uuoQVxjdccgw5Ds/
+    TKmsoEUVrCOq0hN93CULgmbPtQHXrEnydPncadaNm/fZHrOZ2Ng4Y46WUfR3gxs5
+    4FYaKrdVU9+T8nidXbsTUFOdik7/S0mItOkK36DfkQKBgQD8SQxOZTNiaaIr2hgt
+    KJJ8h4FRzgTcKIP81Gmy6wSkkbGGT00guzeBuXcvYVkJJI1Eu1mv+nrSEhkaM3QU
+    FVlJIx8MCArccN2IwAW0h9wI105b5wwD4MH7nDgYV9Gu7gv+C01F9MjSns7uV1bR
+    c3SJ32G2z1r2jgMEO+1b1G1qywKBgQDRBOHgGZVFZJE/jjDk9XsJWyLbrMutSSgL
+    4EcASrTPfzQgEyEtwtvz3b12HJATQD009sqr6Fg9bIjiUV2i242Fd6Rf8p9lkxk7
+    0z0n3rc+b4OyVYldiSP4+GrtxqJxtiv2TXcQUH0s10NK2akW+TmJPo1xeuti/ru7
+    qIiLqCB+vwKBgQCUOLaqOHsADt/gs7oQjg3CbDpmPYxNbOBe4s1W+Q05Qv/x0RWX
+    bWcnKDgF9kPBQ2BcSVZgNeGDGm71HdXNFt3mQmQzRWZcLVN6zJaNgmScLSM0i4Jb
+    pOlTUm0CoFXpWKJjF3DG8RIr7HHXRikT1alad4uJRDpFMRpEmpDRqvS+EQKBgAdn
+    Bdza6xdvDVnT3lVtgDL/oEdpYjk72wg4pCsVejvTBHSSWN13BjUnyDrzngKghspm
+    Zx0ZeG6MdniVaxyGbAerCg4/2HdPc1hUDdlooNK8PkzFjLzcS4MIowDSxRQD4KCz
+    c6EHSLea1A5FkSB4KRp8NaQsN0PlQ57MxDE1/hifAoGAZ3dlb7fwGUF8RmoSPABc
+    9fKJsw5RkQi6nWCN9fe7kAYeptJd7bMUXTBlx7Pfg+7eyrXQyOCNW5d8uuj3AMKN
+    CN8iJ8ai75RnhgZDvBOJbycStr8OaLhhjDUVOiSIq0XL8/NlU1WMmBwsbRVxoB14
+    LkDuib6kJRvF6ubvmXmTO+o=
+    -----END PRIVATE KEY-----
+  key_id: devops-user-rs256-1
+  issuer: devops-user
+  access_expire: 2h
+  refresh_expire: 168h
+
+idclient:
+  endpoint: "devops-id:9990"   # test 环境 devops-id 以容器别名运行
+  batch: 100
+  low_water: 0.2
+  dial_timeout: 5s
+  call_timeout: 3s
+
+observability:
+  otlp_endpoint: "http://tempo:4318"
+  otlp_log_endpoint: "http://loki:3100/otlp"
+  sampler_ratio: 1.0
+  metrics_enabled: true
+
+apidoc:
+  enabled: true                # 联调排障用；生产环境必须关闭
+  base_path: /apidoc
+
+server:
+  trusted_proxies:
+    - "127.0.0.1"
+    - "::1"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"

@@ -1,16 +1,15 @@
 // Package config defines application config structures and wraps viper's initialization and reading.
 //
 // Responsibilities:
-//   - Init(path) first loads .env, then bootstrap.yaml, merges the service environment override file, and enables hot reload
+//   - Init(path) first loads .env, then bootstrap.yaml, and enables hot reload
+//   - MergeEnvConfig() merges the APP_ENV environment override file <service>-<env>.yaml
 //   - LoadInto() deserializes the config into a struct
 //
-// Configuration layout (.env + bootstrap + remote first + local fallback):
+// Configuration layout (.env + bootstrap + environment overlay):
 //
-//	config/.env                    Local environment variables (APP_ENV, NACOS_REGISTER_IP, etc.), not committed
-//	config/bootstrap.yaml          Bootstrap config: nacos connection info + common baseline, always loaded
-//	remote dataID                  Loaded first; once hit, the remote value wins
-//	config/<service>-<env>.yaml    Local fallback: merged by the caller via MergeEnvConfig only when
-//	                              the remote side does not hit the same-named dataID
+//	config/.env                    Local environment variables (APP_ENV, HOST_IP, etc.), not committed
+//	config/bootstrap.yaml          Bootstrap config: service identity + common baseline, always loaded
+//	config/<service>-<env>.yaml    Environment overlay, merged by the caller via MergeEnvConfig
 //	Example: devops-id-dev.yaml, devops-system-prod.yaml
 //
 // The .env file ranks below OS environment variables: variables already set are not overwritten by .env,
@@ -50,21 +49,19 @@ func loadDotEnv(basePath string) {
 }
 
 var (
-	baseFile       string
-	envFile        string
-	dotEnvFile     string
-	remoteFiles    []string
-	bootstrapNacos map[string]any
+	baseFile   string
+	envFile    string
+	dotEnvFile string
 )
 
 // Init loads .env (if present), then reads the bootstrap config.
-// Local environment override files are not merged at this point — remote Nacos config wins; only when the remote misses
-// does the caller load the fallback via MergeEnvConfig.
+// Local environment override files are not merged at this point — the caller
+// merges them via MergeEnvConfig after Init.
 func Init(path string) error {
 	if path == "" {
 		path = filepath.Join("config", "bootstrap.yaml")
 	}
-	// Load .env first: inject local variables such as APP_ENV and NACOS_REGISTER_IP into the process environment.
+	// Load .env first: inject local variables such as APP_ENV and HOST_IP into the process environment.
 	// OS environment variables already set take precedence; .env never overwrites them (safe for CI/container injection).
 	loadDotEnv(path)
 	viper.Reset()
@@ -74,19 +71,17 @@ func Init(path string) error {
 	}
 	baseFile = path
 	envFile = ""
-	remoteFiles = nil
-	bootstrapNacos = viper.GetStringMap("nacos")
 	viper.WatchConfig()
 	return nil
 }
 
 // MergeEnvConfig merges the local environment override file <service>-<env>.yaml (when present).
-// It serves as the local fallback when the remote config center misses; a missing file is skipped silently.
+// A missing file is skipped silently — the bootstrap config is then the whole config.
 func MergeEnvConfig() error {
 	return mergeEnvConfig(baseFile)
 }
 
-// mergeEnvConfig loads the service environment config per APP_ENV; file name format: <service>-<env>.yaml.
+// mergeEnvConfig loads the service environment config per APP_ENV; file name format: <config_name>-<env>.yaml.
 func mergeEnvConfig(basePath string) error {
 	env := Env()
 	serviceName := ConfigServiceName()
@@ -110,19 +105,21 @@ func mergeEnvConfig(basePath string) error {
 	return nil
 }
 
-// ServiceName returns the service name used to derive Spring Boot style
-// configuration names from nacos.registry.service_name.
+// ServiceName returns the service identity from service.name. It feeds the
+// observability service.name (cross-service trace and Grafana filtering depend
+// on it).
 func ServiceName() string {
-	return strings.TrimSpace(viper.GetString("nacos.registry.service_name"))
+	return strings.TrimSpace(viper.GetString("service.name"))
 }
 
-// ConfigServiceName returns the service name used on the config-center side to
-// derive dataIDs and the local environment file name. It defaults to the
-// registry service name, and is overridden by nacos.config.service_name when set.
-// The gray instance registers as "devops-system-gray" but shares the main
-// instance's business config, so it sets this to "devops-system" explicitly.
+// ConfigServiceName returns the name used to derive the environment override
+// file name (<name>-<env>.yaml). It defaults to service.name and is overridden
+// by service.config_name when set. The gray instance runs under the identity
+// "devops-system-gray" but shares the main instance's business config
+// ("devops-system" / "devops-system-dev.yaml"), so it sets this to
+// "devops-system" explicitly.
 func ConfigServiceName() string {
-	if name := strings.TrimSpace(viper.GetString("nacos.config.service_name")); name != "" {
+	if name := strings.TrimSpace(viper.GetString("service.config_name")); name != "" {
 		return name
 	}
 	return ServiceName()
@@ -148,9 +145,6 @@ func Files() string {
 	}
 	if envFile != "" {
 		sources = append(sources, filepath.Base(envFile))
-	}
-	for _, dataID := range remoteFiles {
-		sources = append(sources, "nacos:"+dataID)
 	}
 	return strings.Join(sources, " + ")
 }
@@ -179,63 +173,4 @@ func MergeWithYAML(content string) error {
 		return fmt.Errorf("failed to merge external YAML config: %w", err)
 	}
 	return nil
-}
-
-// MergeRemoteYAML merges one remote configuration document and records its
-// data ID as a configuration source.
-func MergeRemoteYAML(dataID, content string) error {
-	localNacos := bootstrapNacos
-	if localNacos == nil {
-		localNacos = map[string]any{}
-	}
-	if err := MergeWithYAML(content); err != nil {
-		return err
-	}
-	viper.Set("nacos", localNacos)
-	remoteFiles = append(remoteFiles, dataID)
-	return nil
-}
-
-// RemoteDataIDs returns configured shared data IDs followed by the Spring
-// Boot style service and profile data IDs.
-func RemoteDataIDs(configured []string) []string {
-	dataIDs := make([]string, 0, len(configured)+2)
-	for _, dataID := range configured {
-		if trimmed := strings.TrimSpace(dataID); trimmed != "" && !containsString(dataIDs, trimmed) {
-			dataIDs = append(dataIDs, trimmed)
-		}
-	}
-	serviceName := ConfigServiceName()
-	if serviceName == "" {
-		return dataIDs
-	}
-	mainDataID := serviceName + ".yaml"
-	if !containsString(dataIDs, mainDataID) {
-		dataIDs = append(dataIDs, mainDataID)
-	}
-	profileDataID := ProfileDataID()
-	if profileDataID != "" && !containsString(dataIDs, profileDataID) {
-		dataIDs = append(dataIDs, profileDataID)
-	}
-	return dataIDs
-}
-
-// ProfileDataID returns the profile dataID (<service>-<env>.yaml), sharing its name with the local fallback
-// file. Callers use it to decide whether the remote side hit: merge the local environment override file only on a miss.
-// Returns an empty string when service_name is not configured.
-func ProfileDataID() string {
-	serviceName := ConfigServiceName()
-	if serviceName == "" {
-		return ""
-	}
-	return serviceName + "-" + Env() + ".yaml"
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }

@@ -7,7 +7,7 @@ deployment forms: dev / docker production / K8s.
 
 ```
 deploy/higress/
-├── mcpbridges/default.yaml          # Service source: Nacos registry integration (devops-nacos)
+├── mcpbridges/default.yaml          # Service source: DNS service sources (devops-system / devops-user / devops-system-gray)
 ├── ingresses/devops-system.yaml     # Route: api.devops.local -> devops-system
 ├── ingresses/devops-system-canary.yaml  # Canary route (gray release, triggered by the x-canary tag)
 ├── ingresses/devops-system-gray-route.yaml  # Dedicated gray domain: gray.devops.local goes 100% direct
@@ -27,7 +27,7 @@ deploy/higress/
 | Form | Image/method | Use case | Doc section |
 |---|---|---|---|
 | dev | all-in-one single container + named volume | local development | Section 2 below |
-| docker production | controller + gateway + console split + Nacos config backend | single-host/small-scale production | Section 8 below |
+| docker production | controller + gateway + console split + file config backend | single-host/small-scale production | Section 8 below |
 | K8s | Helm deployment (see `deploy/k8s/devops.yaml`) | recommended for formal production | Section 9 below |
 
 Regardless of the form, the business traffic path is the same:
@@ -36,7 +36,7 @@ Regardless of the form, the business traffic path is the same:
 Client ──▶ Higress Gateway(:8080/:8443)
               │  jwt-auth / cors / cluster-key-rate-limit / geo-ip
               ▼
-           Nacos service discovery ──▶ devops-system / devops-system-gray (registered under DEVOPS_GROUP)
+           DNS service source (K8s-style FQDN) ──▶ devops-system / devops-user / devops-system-gray
 ```
 
 **Security boundary**: `devops-system:9999` is not published to host ports or public load balancers; ops endpoints
@@ -44,7 +44,7 @@ Client ──▶ Higress Gateway(:8080/:8443)
 `/system` and `/.well-known/jwks.json`.
 
 > ⚠️ "Not published to the host" is only the **first** line of defense and is not enough to guarantee unified traffic ingress.
-> Any container on the same network (such as the MySQL, Redis, Nacos containers) can reach `devops-system:9999`
+> Any container on the same network (such as the MySQL, Redis containers) can reach `devops-system:9999`
 > directly, bypassing the gateway, at which point all gateway-layer capabilities fail: rate limiting is void, GeoIP
 > header injection disappears (all four `X-Higress-Geo-*` fields empty in the login audit), gray release is void, CORS is void.
 > Hence this project adopts a **three-layer containment**, detailed in section 7.1.
@@ -82,47 +82,48 @@ sh scripts/dev.sh sync
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Console "service sources" shows `higress-console` instead of `devops-nacos` | The volume holds the default McpBridge generated on the all-in-one's first start; the git config was never seeded | Run `sync`; confirm `/data/mcpbridges/default.yaml` contains `devops-nacos` |
+| Console "service sources" shows the default source instead of the git config | The volume holds the default McpBridge generated on the all-in-one's first start; the git config was never seeded | Run `sync`; confirm `/data/mcpbridges/default.yaml` lists the three dns sources |
 | Route 404 / Ingress not effective | Same as above; `/data/ingresses/` is empty | Same as above |
 | Docker engine 500 / abnormally high CPU | ① Windows bind mount (already switched to a named volume); ② the all-in-one's built-in prometheus/loki/promtail/grafana run in parallel with the external stack; ③ `proxyStatsMatcher.inclusionRegexps: [.*]` in `higress-config` causes Envoy full high-cardinality metrics | Use the named volume; disable the built-in observability components (see "8. Observability"); `sync` already includes this fix (see the row below) |
 | envoy disappears ~1 minute after startup; 8080 TCP connects but returns empty (8001 is fine) | `inclusionRegexps: [.*]` in `higress-config` (**auto-regenerated on every first start of a new volume**, and the file has CRLF line endings) → envoy's stats tables blow up memory and it gets OOM-killed by cgroup; supervisord treats its exit 0 as expected and does not auto-restart it | `sh scripts/dev.sh sync` (stop, delete the config, then start); the dev compose memory limit has been raised to 2g as a backstop |
 | Processes inside all-in-one batch exited | The supervisor shutdown sequence of container stop/restart; logs look like `exited: prometheus (exit status 0; expected)` | First check `docker compose ps` to see whether the container is in a restart loop |
-| Pages intermittently return **503 Service Unavailable** (roughly a fixed percentage of requests) | The canary Ingress uses `higress.io/canary-weight`, and the gray instance has zero instances in Nacos → that cluster does not exist in CDS → Envoy picks no upstream → `response_flags: NC`. `weighted_clusters` has **no** fallback to the baseline cluster, so the hit requests fail directly | Change the canary Ingress to tag-based gray release (`canary-by-header` / `canary-by-cookie`, Higress's `cluster_fallback` plugin degrades gracefully) → see section 5; or start the gray instance to make the cluster exist. Confirm via `curl -s localhost:15000/clusters?format=json` (the gray cluster should appear with the correct port) and `curl -s localhost:15000/stats \| grep no_cluster` |
-| The gray instance reports `mysql.host must not be empty` at startup | The config file name is derived from the service name; the gray instance registers as `devops-system-gray` but should reuse the main instance's config | Declare `nacos.config.service_name: devops-system` in the gray bootstrap (see `devops-system/config/bootstrap-gray.yaml`) |
-| `higress.io/destination` without a port | Envoy parses the target as port 8080, which is not the port the backend actually listens on → the request cannot reach the backend | Write the port explicitly: `...nacos:9999` / `...nacos:9998` |
+| Pages intermittently return **503 Service Unavailable** (roughly a fixed percentage of requests) | The canary Ingress uses `higress.io/canary-weight`, and the gray instance is not running → that cluster has no healthy endpoints in CDS → Envoy picks no upstream → `response_flags: NC`. `weighted_clusters` has **no** fallback to the baseline cluster, so the hit requests fail directly | Change the canary Ingress to tag-based gray release (`canary-by-header` / `canary-by-cookie`, Higress's `cluster_fallback` plugin degrades gracefully) → see section 5; or start the gray instance to make the cluster exist. Confirm via `curl -s localhost:15000/clusters?format=json` (the gray cluster should appear with the correct port) and `curl -s localhost:15000/stats \| grep no_cluster` |
+| The gray instance reports `mysql.host must not be empty` at startup | The config file name is derived from the service name; the gray instance runs under the identity `devops-system-gray` but should reuse the main instance's config | Declare `service.config_name: devops-system` in the gray bootstrap (see `devops-system/config/bootstrap-gray.yaml` / `deploy/config/system-gray-bootstrap.yaml`) |
+| `higress.io/destination` without a port | Envoy parses the target as port 8080, which is not the port the backend actually listens on → the request cannot reach the backend | Write the port explicitly: `devops-system.dns:9999` / `devops-system-gray.dns:9998` |
 
 ---
 
-## 3. Service Source: McpBridge (Nacos Integration)
+## 3. Service Source: McpBridge (DNS Service Sources)
 
-`mcpbridges/default.yaml` defines how Higress discovers backend services from the registry:
+`mcpbridges/default.yaml` declares each backend as a DNS service source (Nacos removed; discovery is platform-native — compose network alias / extra_hosts, or the K8s Service DNS):
 
 ```yaml
-apiVersion: networking.higress.io/v1
-kind: McpBridge
-metadata:
-  name: default
-  namespace: higress-system
 spec:
   registries:
-    - name: devops-nacos        # Service source name, shown on the console's "Service sources" page
-      type: nacos2              # nacos2 = Nacos 2.x gRPC protocol, service change perception in seconds
-      domain: nacos             # service name within the compose network; change to the actual Service address on K8s
-      port: 8848
-      nacosNamespaceId: public   # the namespace business services register to
-      nacosGroups:
-        - DEVOPS_GROUP          # the group business services register to
+    - name: devops-system                 # B 端管理后台；服务标识 devops-system.dns
+      type: dns
+      domain: devops-system.devops.svc.cluster.local   # K8s-style FQDN
+      port: 9999
+    - name: devops-user                   # C 端用户服务；服务标识 devops-user.dns
+      type: dns
+      domain: devops-user.devops.svc.cluster.local
+      port: 10000
+    - name: devops-system-gray            # 灰度实例；服务标识 devops-system-gray.dns
+      type: dns
+      domain: devops-system-gray.devops.svc.cluster.local
+      port: 9998
 ```
 
 Key points:
 
-- **Underscore escaping rule**: the Nacos group `DEVOPS_GROUP` is written as
-  `DEVOPS-GROUP` in Higress target addresses (Higress's escaping rule for underscores); the Ingress's
-  `higress.io/destination` must use the escaped form.
-- `type: nacos2` requires Nacos to also expose the gRPC port (8848 plus offset 1000, i.e. 9848);
-  the nacos service in compose needs `expose` 9848/9849.
-- The gray instance `devops-system-gray` registers to the **same** group, distinguished by service name — no extra source needed.
-- With multiple registries, list several entries under `registries` (e.g. another DNS-type static source).
+- The FQDN resolves per deployment platform: dev compose maps it to the host LAN
+  IP via the `higress` service's `extra_hosts` (`HOST_IP`, see `deploy/.env`);
+  prod compose attaches it as a network alias (`networks.edge.aliases`); on K8s
+  it is the Service DNS and resolves natively.
+- Destination reference format: `<registry-name>.dns:<port>` — e.g.
+  `devops-system.dns:9999`. The port must be written explicitly (see the pitfall table).
+- On real K8s the same FQDNs are the Service DNS; only the McpBridge type changes
+  from `dns` to the in-cluster K8s source (or is left to Higress's native discovery).
 
 ---
 
@@ -137,8 +138,8 @@ metadata:
   name: devops-system
   namespace: higress-system
   annotations:
-    # Target address format: <service-name>.<NACOS-group-escaped>.<namespace>.nacos
-    higress.io/destination: devops-system.DEVOPS-GROUP.public.nacos
+    # Target address format: <registry-name>.dns (the port must be explicit)
+    higress.io/destination: devops-system.dns:9999
 spec:
   ingressClassName: higress
   rules:
@@ -156,8 +157,8 @@ spec:
 
 Key points:
 
-- `higress.io/destination` points to the service discovered via McpBridge; service instance up/down events are perceived
-  automatically by Nacos, with no route changes needed.
+- `higress.io/destination` points to the service declared in McpBridge; the FQDN resolves per platform
+  (extra_hosts / compose alias / K8s Service DNS), with no route changes needed.
 - `host` is the external domain; verify locally with `curl -H 'Host: api.devops.local'
   http://localhost:8080/healthz` or add a hosts mapping.
 - Route only the business API and JWKS — **do not** hang ops endpoints such as `/metrics` on the public gateway.
@@ -180,7 +181,7 @@ metadata:
     higress.io/canary-by-header-value: "true"          # Gray release only on exact value match
     higress.io/canary-by-cookie: "canary"              # Cookie-based gray release
     # The port must be written explicitly (the gray instance listens on 9998)
-    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos:9998
+    higress.io/destination: devops-system-gray.dns:9998
 ```
 
 Three splitting methods, with priority **Header > Cookie > Weight**:
@@ -194,7 +195,7 @@ higress.io/canary-weight: "10"                     # Fallback weight-based gray 
 
 > ⚠️ **Do not use `higress.io/canary-weight` when the gray instance may not be running.**
 > The weight split is unconditional: a request hitting the gray cluster is sent there even if the
-> gray instance has zero instances in Nacos — that cluster does not exist in CDS, and Envoy has no
+> gray instance is not running — that cluster has no healthy endpoints, and Envoy has no
 > upstream to pick → `503` + `response_flags: NC` (no cluster). Because the split is random, roughly
 > `weight%` of all page requests fail intermittently, and the failure looks unrelated to the gray
 > release. Measured on this project: 300 requests → 269×200 + **31×503 (10.3%)**, exactly matching
@@ -204,9 +205,9 @@ higress.io/canary-weight: "10"                     # Fallback weight-based gray 
 > available gray instance transparently falls back to the baseline instead of failing.
 >
 > So the rule is: **use Header/Cookie tags for gray release** (explicit, and degrades gracefully),
-> and only use the weight split when the gray instance is confirmed registered in Nacos.
+> and only use the weight split when the gray instance is confirmed running.
 
-Procedure: the `gray` instance registers to the same Nacos group under the service name `devops-system-gray` →
+Procedure: start the `gray` instance (identity `devops-system-gray`, see `deploy/config/system-gray-*.yaml`) →
 edit the canary yaml (add the tag annotation) → `sync` (dev) or apply the manifest (production) →
 request with the tag header to confirm the gray instance is hit → when fully rolled out, publish the
 new version under the name `devops-system` and delete the canary route.
@@ -221,7 +222,7 @@ curl -i -H 'Host: gray.devops.local' http://localhost:8080/api/v1/auth/info   # 
 
 > The gray instance registers as `devops-system-gray` but reads the main instance's business config.
 > Because the config file name is derived from the config-side service name, the gray bootstrap must
-> declare `nacos.config.service_name: devops-system` (see `devops-system/config/bootstrap-gray.yaml`);
+> declare `service.config_name: devops-system` (see `deploy/config/system-gray-bootstrap.yaml`);
 > otherwise the name is derived from `devops-system-gray`, no config file is found, and the instance
 > fails at startup with `mysql.host must not be empty`.
 
@@ -374,7 +375,7 @@ In that case **JWT authentication is still effective** (it lives inside the appl
 | Layer 3 Application | `devops-infra/security/gateway` middleware independently verifies the JWT, failing with 401 | **enforced** | Docker / K8s |
 
 **Docker form**: in compose, `devops-system` only does `expose: "9999"` with no `ports`, so host-level
-bypass is already impossible; on top of that the `edge`/`infra` network isolation keeps MySQL/Redis/Nacos/etcd containers off the business network.
+bypass is already impossible; on top of that the `edge`/`infra` network isolation keeps MySQL/Redis/etcd containers off the business network.
 The truly enforced measure is the Layer-3 guard — because compose cannot do a "gateway-only" ACL on a single port.
 
 **K8s form**: Layer 1 NetworkPolicy truly closes the loop (the application-layer guard degrades to defense-in-depth).
@@ -490,7 +491,7 @@ gateway:
   expose:
     prefix: /system
     host: api.devops.local
-    destination: devops-system.DEVOPS-GROUP.public.nacos:9999
+    destination: devops-system.dns:9999
     endpoints:
       - path: /api/v1/auth/login
         reason: 登录：签发 access + refresh 令牌
@@ -600,7 +601,7 @@ Grafana (dashboards)**, configured in `deploy/prometheus/`, `deploy/tempo/`, `de
 all-in-one stuffs pilot/controller, gateway, console and built-in observability components into one container,
 with supervisord starting all processes: no independent scaling (the gateway is a stateless hot component, the controller is not),
 an OOM in any component restarts the whole container, no per-component resource limits or rolling upgrades, and the built-in o11y conflicts with the production monitoring
-system. Production (docker form) should use **component separation + Nacos as the config backend**:
+system. Production (docker form) should use **component separation + the file config backend** (this repo's yaml is the declarative source of truth; Nacos has been removed from the stack):
 
 ```
 ┌────────────────────────────────────────────────┐
@@ -608,11 +609,11 @@ system. Production (docker form) should use **component separation + Nacos as th
 │                                                  │
 │  higress-gateway ×N  ── stateless, scalable,     │
 │        ▲ xDS                minimal config       │
-│  higress-controller ×1 ── connects to Nacos to read/write routes/plugins  │
+│  higress-controller ×1 ── reads/writes routes/plugins from the config files  │
 │        ▲ REST                config (config backend)       │
 │  higress-console ×1    ── admin UI, intranet-only     │
 │                                                  │
-│  nacos(cluster/standalone)  redis  mysql  business services           │
+│  redis  mysql  business services           │
 └────────────────────────────────────────────────┘
 ```
 
@@ -632,10 +633,9 @@ services:
     image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/controller:2.2.3   # ⚠ tag: compare with higress-standalone
     restart: unless-stopped
     environment:
-      # ⚠ the connection params below follow the official higress-standalone compose
-      NACOS_ADDRESS: nacos:8848          # config backend: routes/plugins/McpBridge stored in Nacos
-      NACOS_NAMESPACE: public
-      NACOS_GROUP: higress-config         # Higress's own config group (not the business group)
+      # ⚠ the params below follow the official higress-standalone compose; the controller
+      # loads the declarative config in deploy/higress (file backend) and pushes xDS to the gateway
+      HIGRESS_CONSOLE_DB_URL: ""          # leave empty for the file backend; see the official repo for DB mode
     volumes:
       - gateway-controller-data:/data
     deploy:
@@ -687,17 +687,13 @@ volumes:
 ### 9.3 Production Hardening Checklist
 
 **Config management**
-- Production uses **Nacos as the Higress config backend** (the controller connects to Nacos directly), no longer the file
-  backend; the yaml in this directory is the declarative source of truth, imported or CI-synced to Nacos
-  via the console/API, and the controller pushes changes to the gateway in seconds.
-- Change McpBridge's `domain` to the production Nacos address; change the rate-limit plugin's `redis.service_name`
-  to the production Redis address.
+- The yaml in this directory is the declarative source of truth (file config backend); changes are applied by
+  re-seeding the controller's config directory and rolling the gateway, and every change is recorded in git.
+- Change the rate-limit plugin's `redis.service_name` to the production Redis address.
 
 **Security**
 - The console port binds only to `127.0.0.1` or the intranet, accessed via a bastion/reverse proxy; change the
   default admin password immediately after first initialization.
-- Enable Nacos authentication in production (`NACOS_AUTH_ENABLE=true` + secrets); the current dev disabled state
-  is local-only.
 - Configure `jwt-auth` at the gateway layer (see 6.4); mount the TLS certificate to 8443, and have HTTP 80 do a 301 redirect only.
 - Passwords for Redis/MySQL etc. are always injected via `.env` (not committed) or secrets management, referenced as `${VAR}` in compose.
 
@@ -708,16 +704,15 @@ volumes:
   rolling restart per component with `up -d <svc>`, gateway first, then controller.
 
 **Backup and recovery**
-- Back up the Nacos data volume daily (the config backend = all route/plugin config lives there).
+- Back up the controller config directory (all route/plugin config lives there).
 - Every config change in this directory is recorded in git commits, serving as the rollback basis.
-- The gateway data volume holds no business state and can be rebuilt; after rebuilding, just re-pull config from Nacos.
+- The gateway data volume holds no business state and can be rebuilt; after rebuilding, the controller re-pushes config.
 
 **Monitoring**
 - Reuse the existing Prometheus/Grafana stack: scrape `higress-gateway:15020/stats/prometheus`
   (metrics) and controller metrics; import Envoy/Istio dashboards in Grafana to observe 4xx/5xx, P99
   latency and connection counts, plus Tempo traces to locate slow requests.
-- Alert items: gateway health check failure, 5xx ratio, rate-limit 429 spikes, controller-to-Nacos
-  disconnection.
+- Alert items: gateway health check failure, 5xx ratio, rate-limit 429 spikes, controller health.
 
 ---
 
@@ -748,8 +743,8 @@ any bypass attempt times out (see "7.2 The Three-Layer Model"). Three places mus
   allowing `0.0.0.0/0` is as good as not allowing it; a wrong CIDR causes kubelet probe failures and repeated Pod restarts.
 
 Address-type configs to adjust when migrating:
-- Change McpBridge's `domain` in `mcpbridges/default.yaml` to the actual Nacos Service
-  (e.g. `nacos.middleware.svc.cluster.local`), confirming 8848/9848 are reachable;
+- On K8s the McpBridge dns-source FQDNs are the Service DNS themselves — create the Services with
+  matching names (`devops-system.devops.svc.cluster.local` etc., see `deploy/k8s/devops.yaml`);
 - Change the rate-limit plugin's `redis.service_name` to the actual Redis Service, updating the password and thresholds;
 - Replace the Ingress host with the real domain, with TLS certificates via cert-manager or a manual Secret.
 

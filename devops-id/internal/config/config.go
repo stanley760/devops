@@ -12,12 +12,12 @@ import (
 
 // Config is the devops-id service root config, mapping to the top-level structure of config/config.yaml
 type Config struct {
-	Grpc          GrpcConfig          `mapstructure:"grpc"`
-	Log           config.LogConfig    `mapstructure:"log"`
-	IDGen         IDGenConfig         `mapstructure:"idgen"`
-	Etcd          config.EtcdConfig   `mapstructure:"etcd"`
-	Nacos         config.NacosConfig  `mapstructure:"nacos"`
-	Observability ObservabilityConfig `mapstructure:"observability"`
+	Grpc          GrpcConfig           `mapstructure:"grpc"`
+	Log           config.LogConfig     `mapstructure:"log"`
+	IDGen         IDGenConfig          `mapstructure:"idgen"`
+	Etcd          config.EtcdConfig    `mapstructure:"etcd"`
+	Service       config.ServiceConfig `mapstructure:"service"`
+	Observability ObservabilityConfig  `mapstructure:"observability"`
 }
 
 // GrpcConfig is the gRPC service config
@@ -50,11 +50,11 @@ type IDGenConfig struct {
 	WatermarkMaxWait time.Duration `mapstructure:"watermark_max_wait"`
 }
 
-// ObservabilityConfig is the service-level observability config; ServiceName is derived from nacos.registry.service_name.
+// ObservabilityConfig is the service-level observability config; ServiceName is derived from service.name.
 type ObservabilityConfig struct {
-	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`
-	SamplerRatio   float64 `mapstructure:"sampler_ratio"`
-	MetricsEnabled bool    `mapstructure:"metrics_enabled"`
-	MetricsListen  string  `mapstructure:"metrics_listen"`
-	OTLPLogEndpoint string `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
+	OTLPEndpoint    string  `mapstructure:"otlp_endpoint"`
+	SamplerRatio    float64 `mapstructure:"sampler_ratio"`
+	MetricsEnabled  bool    `mapstructure:"metrics_enabled"`
+	MetricsListen   string  `mapstructure:"metrics_listen"`
+	OTLPLogEndpoint string  `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
 }

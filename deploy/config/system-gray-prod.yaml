@@ -32,7 +32,7 @@ jwt:
   refresh_expire: 168h
 
 idclient:
-  endpoint: nacos://devops-id
+  endpoint: "devops-id:9990"
   batch: 100
   low_water: 0.2
   dial_timeout: 3s

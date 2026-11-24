@@ -8,7 +8,8 @@ metadata:
     # ⚠️ Do not use higress.io/canary-weight for the gray release.
     # The gray instance is not started by default in the dev stack, so once the weight takes effect
     # Envoy picks an "outbound|8080||devops-system-gray..." cluster that does not exist in CDS
-    # (the service has zero instances in Nacos) → the hit request gets 503 no_cluster (response_flags=NC),
+    # (the DNS service source has no live endpoint: the gray Deployment is scaled to 0
+    # or the host process is not running) → the hit request gets 503 no_cluster (response_flags=NC),
     # i.e. roughly 10% of page requests fail randomly.
     # Instead, only switch to gray when explicitly requested (Header > Cookie), and the default
     # 100% stays on the baseline instance; a 503 can only appear on requests that carry the gray tag.
@@ -17,7 +18,7 @@ metadata:
     higress.io/canary-by-cookie: "canary"
     # The port must be written explicitly: when omitted, Envoy parses the target as port 8080,
     # which is not the port the gray instance listens on, so the request cannot reach the backend.
-    higress.io/destination: devops-system-gray.DEVOPS-GROUP.public.nacos:9998
+    higress.io/destination: devops-system-gray.dns:9998
     # Traffic-ingress identity is expressed by the JWT claims injected by the jwt-auth plugin; no static identity header annotation needed.
     #
     # Note: jwt-auth's matchRules mount per Ingress resource; the canary route is merged into

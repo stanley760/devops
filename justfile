@@ -68,7 +68,7 @@ ps:
 
 # Start dev environment dependencies
 dev-up:
-    {{dev_compose}} up -d mysql redis nacos etcd higress
+    {{dev_compose}} up -d mysql redis etcd higress
     {{dev_compose}} up -d tempo loki prometheus alertmanager grafana
 
 # Stop dev environment dependencies

@@ -19,17 +19,17 @@ const DefaultJWTKeyID = "devops-system-rs256-1"
 
 // Config is the devops-system service root config, corresponding to the top-level structure of config/config.yaml
 type Config struct {
-	Server        config.ServerConfig `mapstructure:"server"`
-	Log           config.LogConfig    `mapstructure:"log"`
-	Mysql         config.MysqlConfig  `mapstructure:"mysql"`
-	Redis         config.RedisConfig  `mapstructure:"redis"`
-	JWT           JWTConfig           `mapstructure:"jwt"`
-	Tenant        TenantConfig        `mapstructure:"tenant"`
-	IDClient      IDClientConfig      `mapstructure:"idclient"`
-	Nacos         config.NacosConfig  `mapstructure:"nacos"`
-	Observability ObservabilityConfig `mapstructure:"observability"`
-	APIDoc        APIDocConfig        `mapstructure:"apidoc"`
-	Gateway       gateway.Config      `mapstructure:"gateway"`
+	Server        config.ServerConfig  `mapstructure:"server"`
+	Log           config.LogConfig     `mapstructure:"log"`
+	Mysql         config.MysqlConfig   `mapstructure:"mysql"`
+	Redis         config.RedisConfig   `mapstructure:"redis"`
+	JWT           JWTConfig            `mapstructure:"jwt"`
+	Tenant        TenantConfig         `mapstructure:"tenant"`
+	IDClient      IDClientConfig       `mapstructure:"idclient"`
+	Service       config.ServiceConfig `mapstructure:"service"`
+	Observability ObservabilityConfig  `mapstructure:"observability"`
+	APIDoc        APIDocConfig         `mapstructure:"apidoc"`
+	Gateway       gateway.Config       `mapstructure:"gateway"`
 }
 
 // JWTConfig is the JWT dual-token config.
@@ -86,12 +86,12 @@ type IDClientConfig struct {
 	CallTimeout time.Duration `mapstructure:"call_timeout"` // per-call timeout
 }
 
-// ObservabilityConfig is the service-level observability config; ServiceName is derived from nacos.registry.service_name.
+// ObservabilityConfig is the service-level observability config; ServiceName is derived from service.name.
 type ObservabilityConfig struct {
-	OTLPEndpoint   string  `mapstructure:"otlp_endpoint"`   // OTLP HTTP exporter; empty means local spans are not reported
-	SamplerRatio   float64 `mapstructure:"sampler_ratio"`   // root sampling ratio; <=0 is treated as 1.0
-	MetricsEnabled bool    `mapstructure:"metrics_enabled"` // whether to enable Prometheus metrics
-	OTLPLogEndpoint string `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
+	OTLPEndpoint    string  `mapstructure:"otlp_endpoint"`     // OTLP HTTP exporter; empty means local spans are not reported
+	SamplerRatio    float64 `mapstructure:"sampler_ratio"`     // root sampling ratio; <=0 is treated as 1.0
+	MetricsEnabled  bool    `mapstructure:"metrics_enabled"`   // whether to enable Prometheus metrics
+	OTLPLogEndpoint string  `mapstructure:"otlp_log_endpoint"` // OTLP HTTP log export base (Loki); empty means logs stay file/console only
 }
 
 // APIDocConfig is the OpenAPI documentation gate. BasePath is the documentation mount path, not an OpenAPI servers URL.

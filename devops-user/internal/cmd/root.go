@@ -21,7 +21,6 @@ import (
 	grpcinfra "github.com/stanley760/devops/devops-infra/grpc"
 	httpinfra "github.com/stanley760/devops/devops-infra/http"
 	"github.com/stanley760/devops/devops-infra/logging"
-	"github.com/stanley760/devops/devops-infra/nacos"
 	"github.com/stanley760/devops/devops-infra/observability"
 	"github.com/stanley760/devops/devops-infra/security/gateway"
 	securityjwt "github.com/stanley760/devops/devops-infra/security/jwt"
@@ -64,14 +63,14 @@ var rootCmd = &cobra.Command{
 		if err := infracfg.LoadInto(&cfg); err != nil {
 			return err
 		}
-		if err := loadNacosConfig(&cfg); err != nil {
+		if err := loadEnvConfig(&cfg); err != nil {
 			return err
 		}
 		if err := logging.Init(cfg.Log); err != nil {
 			return err
 		}
 		obs, err := observability.Init(cmd.Context(), observability.Config{
-			ServiceName:     cfg.Nacos.Registry.ServiceName,
+			ServiceName:     cfg.Service.Name,
 			Env:             infracfg.Env(),
 			OTLPEndpoint:    cfg.Observability.OTLPEndpoint,
 			SamplerRatio:    cfg.Observability.SamplerRatio,
@@ -94,7 +93,6 @@ var rootCmd = &cobra.Command{
 
 	// Unified teardown after every subcommand, ensuring logs are not lost.
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-		_ = nacos.Close()
 		if obsRuntime != nil {
 			_ = obsRuntime.ShutdownWithTimeout(context.Background(), 5*time.Second)
 			obsRuntime = nil
@@ -107,50 +105,13 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// loadNacosConfig fetches remote Nacos config and merges it, remote first:
-// when a remote dataID hits, the remote value wins; only when the remote
-// profile dataID (<service>-<env>.yaml) misses is the local same-named
-// environment file merged as a fallback. bootstrap.yaml always serves as the
-// common baseline.
-func loadNacosConfig(cfg *config.Config) error {
-	if !cfg.Nacos.Enabled {
-		return nil
-	}
-	if err := nacos.Init(cfg.Nacos); err != nil {
+// loadEnvConfig merges the local environment override file <service>-<env>.yaml
+// (selected by APP_ENV) and reloads the config struct. bootstrap.yaml always
+// serves as the common baseline; the overlay carries environment-specific
+// differences (dev / test / prod).
+func loadEnvConfig(cfg *config.Config) error {
+	if err := infracfg.MergeEnvConfig(); err != nil {
 		return err
-	}
-	dataIDs := infracfg.RemoteDataIDs(cfg.Nacos.ConfigCenter.DataIDs)
-	profileDataID := infracfg.ProfileDataID()
-	loaded := false
-	profileLoaded := false
-	for _, dataID := range dataIDs {
-		content, err := nacos.Fetch(dataID)
-		if err != nil {
-			if cfg.Nacos.ConfigCenter.Required {
-				return err
-			}
-			continue
-		}
-		if content == "" {
-			continue
-		}
-		if err := infracfg.MergeRemoteYAML(dataID, content); err != nil {
-			return err
-		}
-		loaded = true
-		if dataID == profileDataID {
-			profileLoaded = true
-		}
-	}
-	if cfg.Nacos.ConfigCenter.Required && !loaded {
-		return fmt.Errorf("nacos config center returned no configuration")
-	}
-	if !profileLoaded {
-		// Remote profile config missed: merge the local <service>-<env>.yaml
-		// as a fallback
-		if err := infracfg.MergeEnvConfig(); err != nil {
-			return err
-		}
 	}
 	return infracfg.LoadInto(cfg)
 }
@@ -218,7 +179,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		// Create tables (no seed data): skipped based on table existence; existing
-		// tables are not executed again. Done before Nacos registration — traffic
+		// tables are not executed again. Done before the service registers readiness — traffic
 		// should not be served before the tables exist.
 		if err := dbinit.Run(client.Get()); err != nil {
 			return fmt.Errorf("table creation at startup failed: %w", err)
@@ -350,17 +311,6 @@ var serverCmd = &cobra.Command{
 			AutoRegister:      autoReg,
 			NicknamePrefix:    prefixes,
 			RedirectWhitelist: cfg.OAuth.RedirectWhitelist,
-		})
-
-		serviceName := cfg.Nacos.Registry.ServiceName
-		if serviceName == "" {
-			return fmt.Errorf("nacos.registry.service_name is not configured")
-		}
-		if err := nacos.Register(serviceName, cfg.Server.Port, cfg.Nacos.Registry.Meta); err != nil {
-			return err
-		}
-		addCleanup("nacos service registration", func() error {
-			return nacos.Deregister(serviceName, cfg.Server.Port)
 		})
 
 		readiness := []httpinfra.ReadinessCheck{

@@ -3,20 +3,24 @@
 # Assumptions (adjust to the actual environment):
 #   1. Images are pushed to a registry: registry.example.com/devops/*; replace the image values below with real addresses
 #   2. MySQL / Redis / etcd are managed services outside the cluster or deployed independently (connecting to RDS from inside K8s is a common pattern);
-#      the addresses in the configs are placeholders â€?replace them before applying
+#      the addresses in the configs are placeholders ï¿½?replace them before applying
 #   3. The configs contain database passwords and the JWT signing key, hence carried in a Secret rather than a ConfigMap
 #      (the current config system has no env-var binding and cannot reference independent Secret keys)
 #
 # Usage:
 #   kubectl apply -f deploy/k8s/devops.yaml
 #   kubectl -n devops wait --for=condition=complete job/devops-migrate --timeout=120s
-#   kubectl -n devops rollout status deploy/devops-id deploy/devops-system
+#   kubectl -n devops rollout status deploy/devops-id deploy/devops-system deploy/devops-user
 #
 # Design notes:
 #   - devops-id replicas 2: each claims an independent worker slot per leaf_name + biz_tag via etcd
 #   - devops-system is stateless (sessions in Redis), so it can scale horizontally freely
+#   - devops-user is the C-end user service (:10000); gateway routes land on it via the
+#     McpBridge DNS source devops-user.devops.svc.cluster.local (deploy/higress/mcpbridges/default.yaml)
+#   - devops-system-gray (:9998) is the canary instance; replicas 0 by default â€” scale up
+#     before enabling gray routes, otherwise canary traffic gets 503 no_cluster
 #   - snowflake depends heavily on the clock: nodes must run NTP/chrony; a backwards step is rejected for ID generation
-#   - K8s â‰?.24 can use native grpc probes to check devops-id health
+#   - K8s â‰¥ 1.24 can use native grpc probes to check devops-id health
 #   - For network isolation see networkpolicy.yaml in the same directory (requires CNI support for NetworkPolicy, e.g. Calico/Cilium)
 apiVersion: v1
 kind: Namespace
@@ -35,8 +39,6 @@ stringData:
       level: info
       console: true
       format: json
-    nacos:
-      enabled: false
     idgen:
       leaf_name: devops-id
       worker_cache: data
@@ -75,8 +77,6 @@ stringData:
     redis:
       host: YOUR_REDIS_HOST
       password: "YOUR_REDIS_PASSWORD"
-    nacos:
-      enabled: false
     jwt:
       signing_key: "YOUR_JWT_SIGNING_KEY_MIN_32_CHARS"
     idclient:
@@ -95,9 +95,9 @@ stringData:
     # enforces that only the gateway can reach 9999.
     # The old static X-Gateway-Token (require_token / token) has been removed.
     # The identity source and the gateway exposure whitelist live in the service's own
-    # config/bootstrap.yaml (gateway section) â€?one place per service, environment
+    # config/bootstrap.yaml (gateway section) ï¿½?one place per service, environment
     # independent. The gateway is the only JWT verifier there; the NetworkPolicy below is
-    # the premise â€?only the gateway may reach the pod, so the identity headers it injects
+    # the premise ï¿½?only the gateway may reach the pod, so the identity headers it injects
     # cannot be forged.
     server:
       trusted_proxies: ["10.0.0.0/8"]   # adjust to the actual ingress/LB CIDRs; use [] for direct connections
@@ -179,7 +179,7 @@ spec:
             limits:
               cpu: "1"
               memory: 256Mi
-          # K8s â‰?.24 native grpc probe, probing grpc.health.v1
+          # K8s ï¿½?.24 native grpc probe, probing grpc.health.v1
           # liveness uses idgen.IdGen.live: a degraded (DEGRADED) state does not kill the Pod, only NotServing triggers a restart
           # readiness uses idgen.IdGen: degraded or unavailable takes the Pod out of service
           livenessProbe:
@@ -300,4 +300,233 @@ spec:
   ports:
     - name: http
       port: 9999
+      targetPort: http
+---
+# devops-user's devops-user-prod.yaml (contains MySQL/Redis passwords and the C-end JWT signing key,
+# hence a Secret). The key must be independent of devops-system's (issuer/kid isolation between B/C ends).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devops-user-config
+  namespace: devops
+stringData:
+  devops-user-prod.yaml: |
+    log:
+      level: info
+      console: false
+      format: json
+    mysql:
+      host: YOUR_MYSQL_HOST
+      username: YOUR_MYSQL_USERNAME
+      password: "YOUR_MYSQL_PASSWORD"
+    redis:
+      host: YOUR_REDIS_HOST
+      password: "YOUR_REDIS_PASSWORD"
+      db: 1                  # separated from devops-system's db 0
+    jwt:
+      signing_key: "YOUR_JWT_PRIVATE_KEY_PEM"
+      key_id: devops-user-rs256-1
+      issuer: devops-user    # must match the gateway jwt-auth consumers[].issuer verbatim
+    idclient:
+      endpoint: "devops-id.devops.svc.cluster.local:9990"
+    observability:
+      otlp_endpoint: ""
+      otlp_log_endpoint: ""
+      sampler_ratio: 0.1
+      metrics_enabled: true
+    apidoc:
+      enabled: false          # interactive API docs must be disabled in prod
+      base_path: /apidoc
+    server:
+      trusted_proxies: ["10.0.0.0/8"]   # adjust to the actual ingress/LB CIDRs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-user
+  namespace: devops
+  labels:
+    app: devops-user
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: devops-user
+  template:
+    metadata:
+      labels:
+        app: devops-user
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "10000"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: devops-user
+          image: registry.example.com/devops/devops-user:0.1.0
+          args: ["server"]
+          ports:
+            - name: http
+              containerPort: 10000
+          env:
+            - name: APP_ENV
+              value: prod
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/devops-user-prod.yaml
+              subPath: devops-user-prod.yaml
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: devops-user-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-user
+  namespace: devops
+spec:
+  selector:
+    app: devops-user
+  ports:
+    - name: http
+      port: 10000
+      targetPort: http
+---
+# Canary (gray) instance of devops-system, on a dedicated :9998.
+#
+# replicas 0 by default: the gray route (deploy/higress/ingresses/devops-system-canary.yaml
+# and devops-system-gray-route.yaml) only switches traffic when the request carries the
+# canary Header/Cookie. A zero-replica Deployment keeps the Service DNS registered but with
+# no endpoints â€” canary-tagged requests then get an explicit 503, while baseline traffic is
+# unaffected (this is exactly what the "do not use canary-weight" comment there warns about).
+# Scale up with:  kubectl -n devops scale deploy/devops-system-gray --replicas=1
+---
+# Gray bootstrap: the gray instance runs under the identity devops-system-gray (observation
+# name), but shares the main instance's business config â€” config_name overrides to devops-system,
+# so the environment overlay is derived from the main instance name (devops-system-prod.yaml).
+# Without the override the overlay name devops-system-gray-prod.yaml does not exist and the
+# instance fails to start with "mysql.host must not be empty".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-system-gray-bootstrap
+  namespace: devops
+data:
+  bootstrap.yaml: |
+    service:
+      name: devops-system-gray
+      config_name: devops-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-system-gray
+  namespace: devops
+  labels:
+    app: devops-system-gray
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: devops-system-gray
+  template:
+    metadata:
+      labels:
+        app: devops-system-gray
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9999"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: devops-system-gray
+          image: registry.example.com/devops/devops-system:0.1.0
+          args: ["server"]
+          ports:
+            - name: http
+              containerPort: 9999
+          env:
+            - name: APP_ENV
+              value: prod
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            # Gray identity: override the baked bootstrap with the gray bootstrap
+            # (identity devops-system-gray; config_name -> devops-system, mirroring
+            # deploy/config/system-gray-bootstrap.yaml in the compose form)
+            - name: gray-bootstrap
+              mountPath: /app/config/bootstrap.yaml
+              subPath: bootstrap.yaml
+              readOnly: true
+            # Shared business config: same Secret as the main instance (APP_ENV=prod
+            # + config_name=devops-system derives devops-system-prod.yaml)
+            - name: config
+              mountPath: /app/config/devops-system-prod.yaml
+              subPath: devops-system-prod.yaml
+              readOnly: true
+      volumes:
+        - name: gray-bootstrap
+          configMap:
+            name: devops-system-gray-bootstrap
+        - name: config
+          secret:
+            secretName: devops-system-config
+---
+# Gray service on :9998 â€” matches the McpBridge DNS source
+# devops-system-gray.devops.svc.cluster.local:9998 (deploy/higress/mcpbridges/default.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-system-gray
+  namespace: devops
+spec:
+  selector:
+    app: devops-system-gray
+  ports:
+    - name: http
+      port: 9998
       targetPort: http

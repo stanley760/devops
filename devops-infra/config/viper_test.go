@@ -13,7 +13,7 @@ func TestInitSkipsEnvFileUntilMergeEnvConfig(t *testing.T) {
 
 	dir := t.TempDir()
 	bootstrap := filepath.Join(dir, "bootstrap.yaml")
-	writeTestFile(t, bootstrap, "nacos:\n  config:\n    data_ids:\n      - other-service.yaml\n  registry:\n    service_name: devops-id\nlog:\n  level: info\n")
+	writeTestFile(t, bootstrap, "service:\n  name: devops-id\nlog:\n  level: info\n")
 	writeTestFile(t, filepath.Join(dir, "devops-id-test.yaml"), "log:\n  level: debug\n")
 
 	if err := Init(bootstrap); err != nil {
@@ -21,15 +21,12 @@ func TestInitSkipsEnvFileUntilMergeEnvConfig(t *testing.T) {
 	}
 	t.Cleanup(viper.Reset)
 
-	// Init loads bootstrap only; the local environment file is not merged automatically (remote first)
+	// Init loads bootstrap only; the environment overlay is merged by the caller
 	if got := viper.GetString("log.level"); got != "info" {
 		t.Fatalf("log.level = %q, want %q", got, "info")
 	}
-	if got := ProfileDataID(); got != "devops-id-test.yaml" {
-		t.Fatalf("ProfileDataID() = %q, want %q", got, "devops-id-test.yaml")
-	}
 
-	// Local fallback when the remote side misses
+	// MergeEnvConfig merges the APP_ENV overlay
 	if err := MergeEnvConfig(); err != nil {
 		t.Fatalf("MergeEnvConfig() error = %v", err)
 	}
@@ -59,27 +56,20 @@ func TestMergeWithYAMLOverridesWithoutReset(t *testing.T) {
 	}
 }
 
-func TestRemoteDataIDsAddsServiceAndProfileConfigs(t *testing.T) {
+func TestConfigServiceNameFallsBackToServiceName(t *testing.T) {
 	t.Setenv(EnvAppEnv, "prod")
 
 	dir := t.TempDir()
 	bootstrap := filepath.Join(dir, "bootstrap.yaml")
-	writeTestFile(t, bootstrap, "nacos:\n  registry:\n    service_name: devops-system\n")
+	writeTestFile(t, bootstrap, "service:\n  name: devops-system\n")
 
 	if err := Init(bootstrap); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 	t.Cleanup(viper.Reset)
 
-	got := RemoteDataIDs([]string{"devops-common.yaml"})
-	want := []string{"devops-common.yaml", "devops-system.yaml", "devops-system-prod.yaml"}
-	if len(got) != len(want) {
-		t.Fatalf("RemoteDataIDs() = %v, want %v", got, want)
-	}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("RemoteDataIDs()[%d] = %q, want %q", index, got[index], want[index])
-		}
+	if got := ConfigServiceName(); got != "devops-system" {
+		t.Fatalf("ConfigServiceName() = %q, want %q", got, "devops-system")
 	}
 }
 
@@ -90,15 +80,16 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-// The gray instance registers as "devops-system-gray" but shares the main instance's business
-// config, so nacos.config.service_name overrides the config-side name; without it the config
-// file name is derived from the gray name and the instance cannot find any configuration.
-func TestConfigServiceNameOverridesRegistryName(t *testing.T) {
+// The gray instance runs under the identity "devops-system-gray" but shares the main
+// instance's business config, so service.config_name overrides the config-side name;
+// without it the config file name is derived from the gray name and the instance
+// cannot find any configuration.
+func TestConfigServiceNameOverridesServiceName(t *testing.T) {
 	t.Setenv(EnvAppEnv, "dev")
 
 	dir := t.TempDir()
 	bootstrap := filepath.Join(dir, "bootstrap.yaml")
-	writeTestFile(t, bootstrap, "nacos:\n  config:\n    service_name: devops-system\n  registry:\n    service_name: devops-system-gray\n")
+	writeTestFile(t, bootstrap, "service:\n  name: devops-system-gray\n  config_name: devops-system\n")
 
 	if err := Init(bootstrap); err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -108,37 +99,6 @@ func TestConfigServiceNameOverridesRegistryName(t *testing.T) {
 	if got := ServiceName(); got != "devops-system-gray" {
 		t.Fatalf("ServiceName() = %q, want %q", got, "devops-system-gray")
 	}
-	if got := ConfigServiceName(); got != "devops-system" {
-		t.Fatalf("ConfigServiceName() = %q, want %q", got, "devops-system")
-	}
-	if got := ProfileDataID(); got != "devops-system-dev.yaml" {
-		t.Fatalf("ProfileDataID() = %q, want %q", got, "devops-system-dev.yaml")
-	}
-	want := []string{"devops-system.yaml", "devops-system-dev.yaml"}
-	got := RemoteDataIDs(nil)
-	if len(got) != len(want) {
-		t.Fatalf("RemoteDataIDs() = %v, want %v", got, want)
-	}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("RemoteDataIDs()[%d] = %q, want %q", index, got[index], want[index])
-		}
-	}
-}
-
-// Without the override the config-side name falls back to the registry service name.
-func TestConfigServiceNameFallsBackToRegistryName(t *testing.T) {
-	t.Setenv(EnvAppEnv, "dev")
-
-	dir := t.TempDir()
-	bootstrap := filepath.Join(dir, "bootstrap.yaml")
-	writeTestFile(t, bootstrap, "nacos:\n  registry:\n    service_name: devops-system\n")
-
-	if err := Init(bootstrap); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
-	t.Cleanup(viper.Reset)
-
 	if got := ConfigServiceName(); got != "devops-system" {
 		t.Fatalf("ConfigServiceName() = %q, want %q", got, "devops-system")
 	}

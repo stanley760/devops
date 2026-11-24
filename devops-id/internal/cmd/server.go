@@ -7,18 +7,19 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+
 	// Mounts /debug/pprof/* onto DefaultServeMux (see startMetricsServer)
+	_ "net/http/pprof"
+	"strconv"
+	"time"
+
 	"github.com/spf13/cobra"
 	"github.com/stanley760/devops/devops-id/internal/app"
 	"github.com/stanley760/devops/devops-id/internal/config"
 	infracfg "github.com/stanley760/devops/devops-infra/config"
 	grpcinfra "github.com/stanley760/devops/devops-infra/grpc"
-	"github.com/stanley760/devops/devops-infra/nacos"
 	"github.com/stanley760/devops/devops-infra/observability"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	_ "net/http/pprof"
-	"strconv"
-	"time"
 )
 
 var serverCmd = &cobra.Command{
@@ -43,21 +44,9 @@ var serverCmd = &cobra.Command{
 		if infracfg.Env() == "dev" {
 			reflection = true // force-enabled in dev, for grpcurl debugging
 		}
-
-		serviceName := cfg.Nacos.Registry.ServiceName
-		if serviceName == "" {
-			return fmt.Errorf("nacos.registry.service_name is not configured")
-		}
-		port, err := listenPort(cfg.Grpc.Listen)
-		if err != nil {
+		if _, err := listenPort(cfg.Grpc.Listen); err != nil {
 			return err
 		}
-		if err := nacos.Register(serviceName, port, cfg.Nacos.Registry.Meta); err != nil {
-			return err
-		}
-		defer func() {
-			_ = nacos.Deregister(serviceName, port)
-		}()
 
 		grpcErr := make(chan error, 1)
 		go func() {

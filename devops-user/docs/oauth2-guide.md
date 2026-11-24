@@ -19,7 +19,7 @@
 | 单元测试 | 12 项，覆盖 URL 生成 / errcode / 空标识 | `go test ./internal/oauth2/` |
 
 配置位置：`devops-user/config/devops-user-dev.yaml` 的 `oauth:` 段（dev 环境）。
-生产值**禁止提交入库**，由 Nacos 或密钥管理注入。
+生产值**禁止提交入库**，由密钥管理注入。
 
 ---
 
@@ -215,7 +215,7 @@ https://open.weixin.qq.com/connect/qrconnect
 ### 4.1 启动前置依赖
 
 ```bash
-# MySQL / Redis / Nacos（用项目自带的 compose）
+# MySQL / Redis / etcd（用项目自带的 compose）
 docker compose -f docker-compose-dev.yml up -d
 ```
 

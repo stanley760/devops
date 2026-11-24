@@ -15,14 +15,8 @@ redis:
   host: redis
   password: "123456"
 
-nacos:
-  enabled: true
-  endpoints:
-    - "nacos:8848"
-  namespace: public
-  group: "DEVOPS_GROUP"
-  registry:
-    service_name: "devops-system"
+service:
+  name: devops-system
 
 jwt:
   # RS256 private key (PKCS#8 PEM); injected from secrets management at deploy time — never commit the real private key.
@@ -34,7 +28,7 @@ jwt:
   refresh_expire: 168h     # refresh token (session) validity period
 
 idclient:
-  endpoint: "nacos:///devops-id"
+  endpoint: "devops-id:9990"
 
 # Production observability settings: sampling starts at 0.1 (raise temporarily for troubleshooting); /metrics is scraped only on the intranet, never via Higress.
 # An empty otlp_endpoint means local spans are not reported; fill in its OTLP HTTP address after wiring up Tempo/otel-collector.

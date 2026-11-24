@@ -118,3 +118,70 @@ spec:
       ports:
         - protocol: TCP
           port: 9991
+---
+# C-end: devops-user's business port only accepts traffic from Higress (same containment as
+# the B-end above). The gateway routes land on it via the McpBridge DNS source
+# devops-user.devops.svc.cluster.local:10000 (deploy/higress/mcpbridges/default.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-user
+  namespace: devops
+spec:
+  podSelector:
+    matchLabels:
+      app: devops-user
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: higress-system
+          podSelector:
+            matchLabels:
+              app: higress
+      ports:
+        - protocol: TCP
+          port: 10000
+    # kubelet probes (livenessProbe/readinessProbe on :10000) come from the node IP
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 10000
+---
+# Canary instance: the gray route only takes effect for requests carrying the canary
+# Header/Cookie, so the gateway must also reach the gray Pod (Service 9998 → container 9999;
+# NetworkPolicy matches the **Pod** port, hence 9999 below).
+# (deploy/higress/ingresses/devops-system-canary.yaml, *-gray-route.yaml).
+# The Deployment defaults to replicas 0 — the policy is written for when it is scaled up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-gray
+  namespace: devops
+spec:
+  podSelector:
+    matchLabels:
+      app: devops-system-gray
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: higress-system
+          podSelector:
+            matchLabels:
+              app: higress
+      ports:
+        - protocol: TCP
+          port: 9999
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 9999

@@ -238,7 +238,7 @@ Base64 形式的 32 字节随机值通常是 44 个字符，长度满足当前 H
 - **软删除改名**：删除用户/角色等唯一字段实体时改名（`admin` → `admin_del_1694...`），允许同名重建
 - **ID 空间隔离**：Snowflake worker 按 `leaf_name + biz_tag` 独立分配；同 `biz_tag` 唯一且趋势递增，不同 `biz_tag` 允许重号。DTO 层 ID 字符串化，避免 JavaScript 精度丢失
 - **事务边界**：DB 事务只管业务表（user_role/role_menu），casbin 策略在事务外同步更新（gorm-adapter 自持事务）；失败补偿 + 重试由调用方语义保证
-- **优雅退出**：HTTP 停止并排空在途请求后，按初始化逆序注销 Nacos、关闭 idclient/Redis/authz/MySQL；启动中途失败也执行已完成资源的清理，并汇总清理错误。snowflake 退出 revoke 所有已分配 tag 的 lease 并释放槽位
+- **优雅退出**：HTTP 停止并排空在途请求后，按初始化逆序关闭 idclient/Redis/authz/MySQL；启动中途失败也执行已完成资源的清理，并汇总清理错误。snowflake 退出 revoke 所有已分配 tag 的 lease 并释放槽位
 
 ## 测试 / Testing
 
@@ -286,7 +286,7 @@ docker compose -f deploy/docker-compose-dev.yml build
 
 - Docker Desktop 未启动，或当前终端找不到 `docker.exe`；
 - 首次构建拉取 `golang:1.26-alpine` 或 Go 依赖时网络不可用；
-- `9999`、`8848` 等端口已被其他程序占用；
+- `9999` 等端口已被其他程序占用；
 - Docker Desktop 的磁盘空间不足。
 
 查看具体服务状态和日志：

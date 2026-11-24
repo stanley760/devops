@@ -23,7 +23,7 @@ metadata:
   namespace: higress-system
   annotations:
     # 匿名端点：凭据校验由登录接口自身处理，静态身份头机制已移除，无需任何身份注解。
-    higress.io/destination: devops-user.DEVOPS-GROUP.public.nacos:10000
+    higress.io/destination: devops-user.dns:10000
   labels:
     higress.io/resource-definer: higress
 spec:

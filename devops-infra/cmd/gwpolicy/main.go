@@ -73,7 +73,7 @@ func main() {
 // discoverServices 扫描 <root>/<服务>/config/bootstrap.yaml，返回服务名 → 配置路径。
 //
 // 服务名的约定：就是配置目录的上一级目录名（devops-system、devops-user…），
-// 它同时是 ingress 资源名的前缀（<服务>-public）和 Nacos 服务名的前缀。
+// 它同时是 ingress 资源名的前缀（<服务>-public）和服务标识的前缀。
 func discoverServices(root string) (map[string]string, error) {
 	out := map[string]string{}
 	entries, err := os.ReadDir(root)

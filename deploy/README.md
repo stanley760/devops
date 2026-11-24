@@ -12,7 +12,7 @@ The dev environment starts **only middleware and the observability stack**; busi
 sh scripts/dev.sh
 ```
 
-Run this from the repository root in a shell with `sh` available. The script starts MySQL, Redis, Nacos, etcd,
+Run this from the repository root in a shell with `sh` available. The script starts MySQL, Redis, etcd,
 the Higress gateway and the observability stack (Tempo/Loki/Prometheus/Grafana and exporters), then automatically
 brings up the local business services as background processes. Logs and PIDs are recorded under `deploy/.dev-logs/`
 (`tail -f deploy/.dev-logs/devops-system.log` to view output).
@@ -23,10 +23,10 @@ On first run, or after schema changes, first create tables and seed data:
 sh scripts/dev.sh migrate
 ```
 
-> **NACOS_REGISTER_IP**: the IP under which the local process registers to Nacos must be the host's
-> LAN IPv4 (not `127.0.0.1`), otherwise the Higress container cannot call back to the business service.
-> ```powershell
-> $env:NACOS_REGISTER_IP = "192.168.1.20"
+> **HOST_IP**: the Higress container reaches the host-run business services through the host's
+> LAN IPv4 (`deploy/.env`, mapped by the `higress` service's `extra_hosts`), not `127.0.0.1`.
+> ```dotenv
+> HOST_IP=192.168.1.20
 > ```
 
 ### Common Commands
@@ -58,7 +58,6 @@ init overwrites these three directories every time — move any route/plugin cha
 | devops-user | `http://localhost:10000/healthz` (local process) |
 | Higress gateway | `http://localhost:8080/healthz` (Host: `api.devops.local`) |
 | Higress console | `http://localhost:8001` |
-| Nacos console | `http://localhost:8848/nacos` |
 | Tempo UI (Grafana Traces Drilldown) | `http://localhost:3000/a/grafana-exploretraces-app` |
 | Tempo API | `http://localhost:3200` |
 | Loki API | `http://localhost:3100` |
@@ -80,7 +79,7 @@ Compose pins the hostname `devops-host` to the LAN address using
 expand environment variables in `scrape_configs`. Copy
 [`deploy/.env.example`](./.env.example) to `deploy/.env` and set `HOST_IP` to
 the host's reachable LAN IPv4. Update it when the machine changes networks;
-it should match the address used for `NACOS_REGISTER_IP`.
+it is the same address the Higress gateway uses to reach the host-run services (`extra_hosts`).
 
 ### Signal Exploration (Drilldown)
 
@@ -141,8 +140,8 @@ Prometheus exemplars → Tempo trace, Tempo → its logs (by `trace_id`), Tempo 
 > 127.0.0.1 devops.local
 > ```
 > The gateway can only reach the locally running business services via the **LAN IPv4** of this
-> machine, not `127.0.0.1`; set `NACOS_REGISTER_IP` to that address when starting the services
-> locally, otherwise the gateway resolves to the loopback and every request returns 503.
+> machine, not `127.0.0.1`; set `HOST_IP` (deploy/.env) to that address, otherwise the gateway
+> resolves the K8s-style service FQDN to the wrong host and every request returns 503.
 
 Alerts: rules live in [prometheus/alerts.yml](./prometheus/alerts.yml) (target down / HTTP 5xx /
 P99 / gRPC error rate / SQL·Redis pool waits, plus host resources, MySQL, cache and security groups);
@@ -159,7 +158,7 @@ Higress-specific routes, rate limiting, CORS and Kubernetes notes are in
 | --- | --- | --- |
 | Local `go run` | `devops-system/config/devops-system-dev.yaml` | address `127.0.0.1`, connects to host ports |
 | Local `go run` | `devops-id/config/devops-id-dev.yaml` | etcd `127.0.0.1:2379` |
-| `migrate` container | `deploy/config/system-dev.yaml` | addresses use container service names (mysql/redis/nacos) |
+| `migrate` container | `deploy/config/system-dev.yaml` | addresses use container service names (mysql/redis) |
 
 ## Production / General Container Orchestration
 
