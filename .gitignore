@@ -43,6 +43,3 @@ Thumbs.db
 **/config/.env
 deploy/.env
 
-# SDD scratch workspaces
-.superpowers/sdd/
-.worktrees/
