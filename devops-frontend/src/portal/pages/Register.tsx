@@ -25,23 +25,30 @@ export function PortalRegisterPage({ navigate, onRegistered }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [payload, setPayload] = useState<Record<string, unknown> | null>(null)
 
-  const finish = async (withAnswer?: CaptchaAnswer) => {
+  const requestChallenge = async (): Promise<CaptchaChallenge> => {
+    const next = await portalAuth.getCaptcha()
+    setChallenge(next)
+    return next
+  }
+
+  const finish = async (answer?: CaptchaAnswer) => {
     if (!payload) return
+    const currentChallenge = challenge
+    const body: Record<string, unknown> = { ...payload }
+    if (currentChallenge && answer) Object.assign(body, buildCaptchaAnswer(currentChallenge, answer))
     setBusy(true)
     try {
-      if (withAnswer) Object.assign(payload, withAnswer)
-      const tokens = await portalAuth.register(payload as { username: string; nickname: string; email: string; password: string })
+      const tokens = await portalAuth.register(body as { username: string; nickname: string; email: string; password: string })
       portalSession.saveTokens(tokens)
       onRegistered()
       navigate('/profile')
     } catch (err) {
       const status = (err as { status?: number }).status
-      if (withAnswer && status === 400) {
-        // 验证码校验失败：弹框内提示并自动换题（挑战一次性消费）
+      if (currentChallenge && answer && status === 400) {
+        // 验证码校验失败：弹框内提示并自动换题，旧挑战的作答字段不能复用。
         toastError('验证码校验失败，已为你更换新题')
-        const next = await portalAuth.getCaptcha()
-        setChallenge(next)
-        setPayload({ ...payload })
+        setChallenge(null)
+        await requestChallenge()
         setDialogOpen(true)
       } else {
         setDialogOpen(false)
@@ -70,10 +77,9 @@ export function PortalRegisterPage({ navigate, onRegistered }: Props) {
     }
     setBusy(true)
     try {
-      const c = await portalAuth.getCaptcha()
+      const c = await requestChallenge()
       if (captchaEnabled(c)) {
         setPayload(base)
-        setChallenge(c)
         setDialogOpen(true)
         return
       }
@@ -104,9 +110,13 @@ export function PortalRegisterPage({ navigate, onRegistered }: Props) {
       </CardContent>
       <PortalCaptchaDialog
         open={dialogOpen} challenge={challenge}
-        onAnswer={(a) => void finish(buildCaptchaAnswer(challenge!, a) as unknown as CaptchaAnswer)}
-        onRefresh={() => void portalAuth.getCaptcha().then(setChallenge)}
-        onCancel={() => { setDialogOpen(false); setChallenge(null); setPayload(null) }}
+        onAnswer={(a) => void finish(a)}
+        onRefresh={() => void requestChallenge()}
+        onCancel={() => {
+          setDialogOpen(false)
+          setChallenge(null)
+          setPayload(null)
+        }}
       />
     </Card>
   )

@@ -39,17 +39,17 @@ export default function PortalApp() {
   switch (path) {
     case '/login':
       page = loggedIn
-        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        ? <ProfilePage navigate={navigate} />
         : <PortalLoginPage navigate={navigate} onLoggedIn={refreshLoggedIn} />
       break
     case '/register':
       page = loggedIn
-        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        ? <ProfilePage navigate={navigate} />
         : <PortalRegisterPage navigate={navigate} onRegistered={refreshLoggedIn} />
       break
     case '/profile':
       page = loggedIn
-        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        ? <ProfilePage navigate={navigate} />
         : <PortalLoginPage navigate={navigate} onLoggedIn={refreshLoggedIn} />
       break
     case '/docs':

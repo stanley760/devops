@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { portalAuth } from '@/api/portal/auth'
-import { portalSession, PortalApiError } from '@/lib/portal-session'
+import { PortalApiError } from '@/lib/portal-session'
 import { toastError, toastSuccess } from '@/lib/toast'
 import { formatDateTime } from '@/lib/datetime'
 import { Button } from '@/components/ui/button'
@@ -14,13 +14,13 @@ import type { PublicProfile } from '@/lib/types'
 
 interface Props {
   navigate: (to: string) => void
-  onLoggedOut: () => void
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MOBILE_RE = /^1\d{10}$/
+const GENDER_TEXT: Record<string, string> = { '0': '未知', '1': '男', '2': '女' }
 
-export function ProfilePage({ navigate, onLoggedOut }: Props) {
+export function ProfilePage({ navigate }: Props) {
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [editForm, setEditForm] = useState({ nickname: '', email: '', mobile: '', gender: '1' })
   const [editError, setEditError] = useState<string | null>(null)
@@ -39,6 +39,7 @@ export function ProfilePage({ navigate, onLoggedOut }: Props) {
       })
       .catch((e) => {
         if (e instanceof PortalApiError && e.status === 401) {
+          toastError('登录已过期，请重新登录')
           navigate('/login')
           return
         }
@@ -49,7 +50,6 @@ export function ProfilePage({ navigate, onLoggedOut }: Props) {
   const submitProfile = async (e: FormEvent) => {
     e.preventDefault()
     setEditError(null)
-    setEditSaved(false)
     if (!editForm.nickname) {
       setEditError('昵称必填')
       return
@@ -65,10 +65,11 @@ export function ProfilePage({ navigate, onLoggedOut }: Props) {
     setBusy(true)
     try {
       await portalAuth.updateProfile(editForm)
-      toastSuccess('资料已更新')
+      toastSuccess('已保存')
       setProfile(await portalAuth.getProfile())
       setEditSaved(true)
     } catch (err) {
+      setEditSaved(false)
       setEditError((err as Error).message)
     } finally {
       setBusy(false)
@@ -78,47 +79,39 @@ export function ProfilePage({ navigate, onLoggedOut }: Props) {
   const submitPassword = async (e: FormEvent) => {
     e.preventDefault()
     setPwdError(null)
-    setPwdSaved(false)
     if (pwdForm.new_password !== pwdForm.confirm) {
-      setPwdError('两次输入的密码不一致')
+      setPwdSaved(false)
+      setPwdError('两次输入的新密码不一致')
       return
     }
     setBusy(true)
     try {
       await portalAuth.updatePassword({ old_password: pwdForm.old_password, new_password: pwdForm.new_password })
-      toastSuccess('密码修改成功')
+      toastSuccess('密码已更新')
       setPwdForm({ old_password: '', new_password: '', confirm: '' })
       setPwdSaved(true)
     } catch (err) {
+      setPwdSaved(false)
       setPwdError((err as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
-  const logout = async () => {
-    const refreshToken = portalSession.getTokens()?.refresh_token
-    try {
-      await portalAuth.logout(refreshToken)
-    } catch {
-      // 本地清理优先
-    }
-    portalSession.clearTokens()
-    onLoggedOut()
-    navigate('/')
-  }
-
   if (!profile) return <Skeleton className="glass-panel mx-auto my-10 h-64 w-full max-w-md" />
+
+  const genderText = GENDER_TEXT[profile.gender] ?? '未知'
 
   return (
     <div className="mx-auto my-10 max-w-md space-y-4">
       <Card className="glass-panel">
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle>个人资料</CardTitle>
-          <Button variant="outline" size="sm" className="glass-control" onClick={() => void logout()}>退出</Button>
-        </CardHeader>
+        <CardHeader><CardTitle>个人资料</CardTitle></CardHeader>
         <CardContent className="space-y-1 text-sm">
           <div>用户名：{profile.username}</div>
+          <div>昵称：{profile.nickname}</div>
+          <div>邮箱：{profile.email || '未绑定'}</div>
+          <div>手机号：{profile.mobile || '未绑定'}</div>
+          <div>性别：{genderText}</div>
           <div>注册时间：{formatDateTime(profile.created_at)}</div>
         </CardContent>
       </Card>

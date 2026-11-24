@@ -23,12 +23,19 @@ export function PortalLoginPage({ navigate, onLoggedIn }: Props) {
   const [challenge, setChallenge] = useState<CaptchaChallenge | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
 
+  const requestChallenge = async (): Promise<CaptchaChallenge> => {
+    const next = await portalAuth.getCaptcha()
+    setChallenge(next)
+    return next
+  }
+
   const doLogin = async (answer?: CaptchaAnswer) => {
     setError(null)
     setBusy(true)
     try {
+      const currentChallenge = challenge
       const body: Record<string, unknown> = { username, password }
-      if (challenge && answer) Object.assign(body, buildCaptchaAnswer(challenge, answer))
+      if (currentChallenge && answer) Object.assign(body, buildCaptchaAnswer(currentChallenge, answer))
       const tokens = await portalAuth.login(body as { username: string; password: string })
       portalSession.saveTokens(tokens)
       onLoggedIn()
@@ -36,9 +43,10 @@ export function PortalLoginPage({ navigate, onLoggedIn }: Props) {
     } catch (err) {
       const code = (err as { status?: number }).status
       if (challenge && answer && code === 400) {
-        // 验证码校验失败：弹框内提示并自动换题
+        // 验证码校验失败：弹框内提示并自动换题；旧挑战作答不再复用。
         toastError('验证码校验失败，已为你更换新题')
-        setChallenge(await portalAuth.getCaptcha())
+        setChallenge(null)
+        await requestChallenge()
         setDialogOpen(true)
       } else {
         setDialogOpen(false)
@@ -54,9 +62,8 @@ export function PortalLoginPage({ navigate, onLoggedIn }: Props) {
     e.preventDefault()
     setError(null)
     try {
-      const c = await portalAuth.getCaptcha()
+      const c = await requestChallenge()
       if (captchaEnabled(c)) {
-        setChallenge(c)
         setDialogOpen(true)
         return
       }
@@ -80,7 +87,7 @@ export function PortalLoginPage({ navigate, onLoggedIn }: Props) {
       <PortalCaptchaDialog
         open={dialogOpen} challenge={challenge}
         onAnswer={(a) => void doLogin(a)}
-        onRefresh={() => void portalAuth.getCaptcha().then(setChallenge)}
+        onRefresh={() => void requestChallenge()}
         onCancel={() => { setDialogOpen(false); setChallenge(null) }}
       />
     </Card>
