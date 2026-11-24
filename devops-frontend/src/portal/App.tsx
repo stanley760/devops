@@ -4,6 +4,9 @@ import { portalSession } from '@/lib/portal-session'
 import { portalAuth } from '@/api/portal/auth'
 import { Home } from '@/portal/pages/Home'
 import { Docs } from '@/portal/pages/Docs'
+import { PortalLoginPage } from '@/portal/pages/Login'
+import { PortalRegisterPage } from '@/portal/pages/Register'
+import { ProfilePage } from '@/portal/pages/Profile'
 import { Button } from '@/components/ui/button'
 
 export default function PortalApp() {
@@ -32,28 +35,22 @@ export default function PortalApp() {
     navigate('/')
   }, [navigate])
 
-  // Task 14 将用真实页面组件替换以下内联占位
-  const loginPage = (
-    <div className="glass-panel mx-auto max-w-sm rounded-xl p-6">
-      <h2 className="mb-4 text-2xl font-semibold">Sign In</h2>
-      <p className="text-muted-foreground text-sm">Task 14 完整化</p>
-    </div>
-  )
-
-  function ProfileStub() {
-    return <div className="glass-panel mx-auto max-w-sm rounded-xl p-6">个人资料（Task 14 完整化）</div>
-  }
-
   let page: ReactNode
   switch (path) {
     case '/login':
-      page = loggedIn ? <ProfileStub /> : loginPage
+      page = loggedIn
+        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        : <PortalLoginPage navigate={navigate} onLoggedIn={refreshLoggedIn} />
       break
     case '/register':
-      page = loggedIn ? <ProfileStub /> : loginPage
+      page = loggedIn
+        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        : <PortalRegisterPage navigate={navigate} onRegistered={refreshLoggedIn} />
       break
     case '/profile':
-      page = <ProfileStub />
+      page = loggedIn
+        ? <ProfilePage navigate={navigate} onLoggedOut={refreshLoggedIn} />
+        : <PortalLoginPage navigate={navigate} onLoggedIn={refreshLoggedIn} />
       break
     case '/docs':
       page = <Docs />

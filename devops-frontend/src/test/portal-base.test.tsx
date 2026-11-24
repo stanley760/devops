@@ -1,13 +1,21 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useHashRoute } from '@/portal/useHashRoute'
 import PortalApp from '@/portal/App'
 import { PortalCaptchaDialog } from '@/portal/components/PortalCaptchaDialog'
 import { portalSession } from '@/lib/portal-session'
+import { portalAuth } from '@/api/portal/auth'
 import type { CaptchaChallenge } from '@/lib/types'
 
 vi.mock('@/api/portal/auth', () => ({
-  portalAuth: { logout: vi.fn().mockResolvedValue(undefined) },
+  portalAuth: {
+    getCaptcha: vi.fn().mockResolvedValue({ id: 'c', type: 'slide', image: 'i', width: 100, height: 50, enabled: false }),
+    getProfile: vi.fn().mockResolvedValue({
+      id: 1, username: 'u', nickname: 'n', email: 'a@b.co', mobile: '13800138000',
+      gender: '1', avatar: '', created_at: 1730000000000,
+    }),
+    logout: vi.fn().mockResolvedValue(undefined),
+  },
 }))
 
 beforeEach(() => {
@@ -54,6 +62,14 @@ describe('useHashRoute', () => {
 })
 
 describe('PortalApp shell', () => {
+  beforeEach(() => {
+    vi.mocked(portalAuth.getCaptcha).mockResolvedValue({ id: 'c', type: 'slide', image: 'i', width: 100, height: 50, enabled: false })
+    vi.mocked(portalAuth.getProfile).mockResolvedValue({
+      id: 1, username: 'u', nickname: 'n', email: 'a@b.co', mobile: '13800138000',
+      gender: '1', avatar: '', created_at: 1730000000000,
+    })
+  })
+
   it('shows brand copy and Sign In/Sign Up nav when logged out', () => {
     render(<PortalApp />)
     expect(screen.getAllByText('Design World').length).toBeGreaterThan(0)
@@ -79,17 +95,18 @@ describe('PortalApp shell', () => {
     portalSession.saveTokens({ access_token: 'a', refresh_token: 'r', expires_in: 1, issued_at: Date.now() })
     window.location.hash = '#/profile'
     render(<PortalApp />)
-    fireEvent.click(screen.getByText('退出'))
-    await vi.waitFor(() => expect(portalSession.isLoggedIn()).toBe(false))
+    await waitFor(() => expect(screen.getByText('个人资料')).toBeInTheDocument())
+    fireEvent.click(screen.getAllByText('退出').at(-1)!)
+    await waitFor(() => expect(portalSession.isLoggedIn()).toBe(false))
   })
 
   it('logout sends the refresh_token so the backend can revoke it', async () => {
-    const { portalAuth } = await import('@/api/portal/auth')
     portalSession.saveTokens({ access_token: 'a', refresh_token: 'r', expires_in: 1, issued_at: Date.now() })
     window.location.hash = '#/profile'
     render(<PortalApp />)
-    fireEvent.click(screen.getByText('退出'))
-    await vi.waitFor(() => expect(portalAuth.logout).toHaveBeenCalledWith('r'))
+    await waitFor(() => expect(screen.getByText('个人资料')).toBeInTheDocument())
+    fireEvent.click(screen.getAllByText('退出').at(-1)!)
+    await waitFor(() => expect(portalAuth.logout).toHaveBeenCalledWith('r'))
   })
 
   it('renders the shell with solid-glass surfaces', () => {
